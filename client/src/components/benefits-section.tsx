@@ -1,12 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
+import { type Benefit } from "@shared/schema";
+
 export default function BenefitsSection() {
-  const benefits = [
-    "Real-time GPS tracking and cargo monitoring",
-    "Refrigeration monitoring and remote control",
-    "Fuel savings and CARB compliance with approved Aero devices",
-    "Online customer dashboard for complete access to account information",
-    "24/7 access to our RoadCARE roadside assistance team",
-    "Our premier customer experience"
-  ];
+  const { data: benefits = [], isLoading } = useQuery<Benefit[]>({
+    queryKey: ['/api/benefits'],
+  });
 
   return (
     <section id="benefits" className="py-20 bg-muted">
@@ -33,12 +31,19 @@ export default function BenefitsSection() {
             <h3 className="text-2xl font-semibold text-foreground mb-6" data-testid="text-benefits-subtitle">Take advantage of:</h3>
             
             <div className="space-y-4">
-              {benefits.map((benefit, index) => (
-                <div key={index} className="flex items-start space-x-4">
-                  <div className="w-6 h-6 bg-primary rounded-full flex-shrink-0 mt-1" data-testid={`icon-benefit-${index}`}></div>
-                  <p className="text-foreground" data-testid={`text-benefit-${index}`}>{benefit}</p>
+              {isLoading ? (
+                <div className="flex items-start space-x-4">
+                  <div className="w-6 h-6 bg-primary rounded-full flex-shrink-0 mt-1" data-testid="icon-benefit-loading"></div>
+                  <p className="text-foreground" data-testid="text-benefit-loading">Loading benefits...</p>
                 </div>
-              ))}
+              ) : (
+                benefits.map((benefit, index) => (
+                  <div key={benefit.id} className="flex items-start space-x-4">
+                    <div className="w-6 h-6 bg-primary rounded-full flex-shrink-0 mt-1" data-testid={`icon-benefit-${index}`}></div>
+                    <p className="text-foreground" data-testid={`text-benefit-${index}`}>{benefit.description}</p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

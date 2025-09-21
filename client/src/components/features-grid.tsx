@@ -1,26 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
+import { type Feature } from "@shared/schema";
+
 export default function FeaturesGrid() {
-  const features = [
-    {
-      number: "65,000+",
-      title: "Fleet Size",
-      description: "Largest inventory of trailers nationwide"
-    },
-    {
-      number: "40+",
-      title: "Locations",
-      description: "Strategic facilities across the nation"
-    },
-    {
-      number: "24/7",
-      title: "Support",
-      description: "Round-the-clock roadside assistance"
-    },
-    {
-      number: "GPS",
-      title: "Tracking",
-      description: "Real-time monitoring technology"
-    }
-  ];
+  const { data: features = [], isLoading } = useQuery<Feature[]>({
+    queryKey: ['/api/features'],
+  });
 
   return (
     <section className="py-20 bg-background">
@@ -35,23 +19,31 @@ export default function FeaturesGrid() {
         </div>
         
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {features.map((feature, index) => (
-            <div 
-              key={index}
-              className="feature-card bg-card border border-primary rounded-lg p-6 text-center"
-              data-testid={`card-feature-${index}`}
-            >
-              <div className="text-4xl font-bold text-primary mb-2" data-testid={`text-feature-number-${index}`}>
-                {feature.number}
-              </div>
-              <h3 className="text-lg font-semibold text-card-foreground mb-2" data-testid={`text-feature-title-${index}`}>
-                {feature.title}
-              </h3>
-              <p className="text-muted-foreground" data-testid={`text-feature-description-${index}`}>
-                {feature.description}
-              </p>
+          {isLoading ? (
+            <div className="feature-card bg-card border border-primary rounded-lg p-6 text-center" data-testid="card-feature-loading">
+              <div className="text-4xl font-bold text-primary mb-2" data-testid="text-feature-loading">...</div>
+              <h3 className="text-lg font-semibold text-card-foreground mb-2">Loading</h3>
+              <p className="text-muted-foreground">Loading features...</p>
             </div>
-          ))}
+          ) : (
+            features.map((feature, index) => (
+              <div 
+                key={feature.id}
+                className="feature-card bg-card border border-primary rounded-lg p-6 text-center"
+                data-testid={`card-feature-${index}`}
+              >
+                <div className="text-4xl font-bold text-primary mb-2" data-testid={`text-feature-number-${index}`}>
+                  {feature.number}
+                </div>
+                <h3 className="text-lg font-semibold text-card-foreground mb-2" data-testid={`text-feature-title-${index}`}>
+                  {feature.title}
+                </h3>
+                <p className="text-muted-foreground" data-testid={`text-feature-description-${index}`}>
+                  {feature.description}
+                </p>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </section>

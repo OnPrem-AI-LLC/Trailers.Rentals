@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,22 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { insertContactRequestSchema, type InsertContactRequest } from "@shared/schema";
+import { insertContactRequestSchema, type InsertContactRequest, type Location } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const locations = [
-  "AL - Birmingham", "AZ - Phoenix", "CA - Fontana", "CA - Los Angeles", "CA - Stockton",
-  "CO - Denver", "FL - Orlando", "FL - Tampa", "GA - Atlanta", "GA - Savannah",
-  "IL - Chicago", "IN - Indianapolis", "KS - Kansas City", "KY - Louisville",
-  "MA - Boston", "MD - Baltimore", "MI - Detroit", "MN - Minneapolis", "MO - St. Louis",
-  "NC - Charlotte", "NJ - New Jersey", "NJ - New Jersey (South)", "NV - Reno",
-  "OH - Cincinnati", "OH - Cleveland", "OH - Columbus", "OR - Portland",
-  "PA - Allentown", "PA - Mechanicsburg", "PA - Pittsburgh", "SC - Greenville",
-  "TN - Memphis", "TN - Nashville", "TX - Dallas", "TX - Fort Worth", "TX - Houston",
-  "TX - Laredo", "TX - San Antonio", "UT - Salt Lake City", "VA - Richmond",
-  "WA - Seattle", "WI - Milwaukee", "National / Corporate"
-];
+// Dynamic locations loaded from API
 
 const interestOptions = [
   { value: "dry-vans", label: "Dry Vans" },
@@ -42,6 +31,10 @@ const interestOptions = [
 export default function ContactForm() {
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const { toast } = useToast();
+
+  const { data: locations = [], isLoading: locationsLoading } = useQuery<Location[]>({
+    queryKey: ['/api/locations'],
+  });
 
   const form = useForm<InsertContactRequest>({
     resolver: zodResolver(insertContactRequestSchema),
@@ -212,11 +205,15 @@ export default function ContactForm() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {locations.map((location) => (
-                          <SelectItem key={location} value={location}>
-                            {location}
-                          </SelectItem>
-                        ))}
+                        {locationsLoading ? (
+                          <SelectItem value="loading">Loading locations...</SelectItem>
+                        ) : (
+                          locations.map((location) => (
+                            <SelectItem key={location.id} value={location.name}>
+                              {location.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     <FormMessage />
