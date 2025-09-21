@@ -30,7 +30,7 @@ export default function HeroSection() {
             </a>
             <a 
               href="#benefits" 
-              className="border-2 border-white text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-white/10 transition-colors"
+              className="border-2 border-primary bg-primary text-primary-foreground px-8 py-4 rounded-lg font-semibold text-lg hover:bg-primary/90 transition-colors"
               data-testid="button-learn-more"
             >
               Learn More

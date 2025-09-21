@@ -2,9 +2,9 @@ import { Play } from "lucide-react";
 
 export default function TestimonialSection() {
   return (
-    <section className="py-20 bg-accent">
+    <section className="py-20 bg-primary">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        <h2 className="text-3xl font-bold text-accent-foreground mb-8" data-testid="text-testimonial-title">
+        <h2 className="text-3xl font-bold text-primary-foreground mb-8" data-testid="text-testimonial-title">
           Don't take our word for it. Watch the ReedTMS Logistics Case Study.
         </h2>
         

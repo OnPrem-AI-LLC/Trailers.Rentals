@@ -38,7 +38,7 @@ export default function FeaturesGrid() {
           {features.map((feature, index) => (
             <div 
               key={index}
-              className="feature-card bg-card border border-border rounded-lg p-6 text-center"
+              className="feature-card bg-card border border-primary rounded-lg p-6 text-center"
               data-testid={`card-feature-${index}`}
             >
               <div className="text-4xl font-bold text-primary mb-2" data-testid={`text-feature-number-${index}`}>
