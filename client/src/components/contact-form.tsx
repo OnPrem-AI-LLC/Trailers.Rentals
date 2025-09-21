@@ -139,33 +139,35 @@ export default function ContactForm() {
                 />
               </div>
               
-              <FormField
-                control={form.control}
-                name="businessEmail"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Business Email *</FormLabel>
-                    <FormControl>
-                      <Input type="email" {...field} data-testid="input-businessEmail" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="companyName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company Name *</FormLabel>
-                    <FormControl>
-                      <Input {...field} data-testid="input-companyName" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid md:grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="businessEmail"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Business Email *</FormLabel>
+                      <FormControl>
+                        <Input type="email" {...field} data-testid="input-businessEmail" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="companyName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Company Name *</FormLabel>
+                      <FormControl>
+                        <Input {...field} data-testid="input-companyName" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
               
               <div className="grid md:grid-cols-2 gap-6">
                 <FormField
