@@ -86,12 +86,12 @@ export default function ContactForm() {
   };
 
   const handleInterestChange = (value: string, checked: boolean) => {
-    if (checked) {
-      setSelectedInterests(prev => [...prev, value]);
-    } else {
-      setSelectedInterests(prev => prev.filter(item => item !== value));
-    }
-    form.setValue("interests", selectedInterests);
+    const newInterests = checked 
+      ? [...selectedInterests, value]
+      : selectedInterests.filter(item => item !== value);
+    
+    setSelectedInterests(newInterests);
+    form.setValue("interests", newInterests);
   };
 
   return (

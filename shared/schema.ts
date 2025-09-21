@@ -43,6 +43,7 @@ export const insertContactRequestSchema = createInsertSchema(contactRequests).om
   primaryLocation: z.string().min(1, "Primary location is required"),
   currentCustomer: z.enum(["yes", "no", "unknown"]),
   interests: z.array(z.string()).min(1, "Please select at least one interest"),
+  newsletter: z.string().optional().default("false"),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
