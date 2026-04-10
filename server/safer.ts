@@ -14,6 +14,8 @@ export interface SaferCarrier {
   safetyRating?: string;         // "Satisfactory" | "Conditional" | "Unsatisfactory" | "None"
   safetyRatingDate?: string;
   mcNumber?: string;
+  dotStatus?: string;            // Human-readable DOT status description
+  mcAuthority?: string;          // Human-readable MC authority status
   operatingStatus?: string;
   totalDrivers?: number;
   totalPowerUnits?: number;
@@ -78,6 +80,9 @@ export async function lookupByDot(dotNumber: string): Promise<SaferLookupResult>
       cargoInsuranceOnFile: carrier.cargoInsuranceOnFile ? Number(carrier.cargoInsuranceOnFile) : undefined,
       safetyRating: carrier.safetyRating ? String(carrier.safetyRating) : undefined,
       safetyRatingDate: carrier.safetyRatingDate ? String(carrier.safetyRatingDate) : undefined,
+      mcNumber: carrier.mcNumber ? String(carrier.mcNumber) : carrier.docketNumber ? String(carrier.docketNumber) : undefined,
+      dotStatus: carrier.allowedToOperate === "Y" ? "Active / Authorized" : carrier.allowedToOperate === "N" ? "Not Authorized" : undefined,
+      mcAuthority: carrier.commonAuthorityStatus ? String(carrier.commonAuthorityStatus) : carrier.contractAuthorityStatus ? String(carrier.contractAuthorityStatus) : undefined,
       operatingStatus: carrier.operatingStatus ? String(carrier.operatingStatus) : undefined,
       totalDrivers: carrier.totalDrivers ? Number(carrier.totalDrivers) : undefined,
       totalPowerUnits: carrier.totalPowerUnits ? Number(carrier.totalPowerUnits) : undefined,

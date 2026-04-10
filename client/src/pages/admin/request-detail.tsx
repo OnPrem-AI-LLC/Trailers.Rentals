@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "wouter";
+import { Link, useLocation, useParams, useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,9 @@ interface SaferCarrier {
   totalDrivers?: number;
   totalPowerUnits?: number;
   entityType?: string;
+  mcNumber?: string;
+  dotStatus?: string;
+  mcAuthority?: string;
 }
 
 interface SaferResult {
@@ -166,8 +169,9 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
         <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg ${allowed ? "bg-green-950 border border-green-800" : "bg-red-950 border border-red-800"}`}>
           {allowed ? <CheckCircle className="w-4 h-4 text-green-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
           <div>
+            <div className="text-xs text-muted-foreground">DOT Authority Status</div>
             <div className={`text-xs font-bold ${allowed ? "text-green-400" : "text-red-400"}`}>
-              {allowed ? "Allowed to Operate" : "NOT Allowed to Operate"}
+              {allowed ? "Authorized to Operate" : "NOT Authorized"}
             </div>
           </div>
         </div>
@@ -188,13 +192,15 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
             ["Legal Name", c.legalName],
             c.dbaName ? ["DBA Name", c.dbaName] : null,
             ["DOT Number", c.dotNumber],
+            c.mcNumber ? ["MC Number", c.mcNumber] : null,
             ["Entity Type", c.entityType],
-            ["Operating Status", c.operatingStatus],
+            ["DOT Operating Status", c.operatingStatus],
+            c.mcAuthority ? ["MC Authority Status", c.mcAuthority] : null,
             c.totalPowerUnits != null ? ["Power Units", String(c.totalPowerUnits)] : null,
             c.totalDrivers != null ? ["Total Drivers", String(c.totalDrivers)] : null,
             c.bipdInsuranceOnFile != null ? ["BIPD Insurance", `$${c.bipdInsuranceOnFile.toLocaleString()}`] : null,
             c.cargoInsuranceOnFile != null ? ["Cargo Insurance", `$${c.cargoInsuranceOnFile.toLocaleString()}`] : null,
-            c.safetyRatingDate ? ["Rating Date", c.safetyRatingDate] : null,
+            c.safetyRatingDate ? ["Safety Rating Date", c.safetyRatingDate] : null,
           ] as ([string, string | undefined] | null)[])
             .filter((row): row is [string, string | undefined] => row !== null && !!row[1])
             .map(([label, value]) => (
@@ -223,6 +229,7 @@ export default function AdminRequestDetail() {
   const { id } = useParams();
   const { user, isLoading: authLoading } = useAuth();
   const [, navigate] = useLocation();
+  const searchStr = useSearch();
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -232,14 +239,19 @@ export default function AdminRequestDetail() {
   const [needsInfoMsg, setNeedsInfoMsg] = useState("");
   const [noteBody, setNoteBody] = useState("");
 
-  // Always call all hooks first — redirect in effect
+  // Parse ?tk= admin magic-link token from URL
+  const adminLinkToken = new URLSearchParams(searchStr).get("tk") ?? null;
+  const isTokenView = !!adminLinkToken && !user;
+
+  // Redirect to login only when no session AND no valid token
   useEffect(() => {
-    if (!authLoading && (!user || user.role !== "admin")) {
+    if (!authLoading && !isTokenView && (!user || user.role !== "admin")) {
       navigate("/login");
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, navigate, isTokenView]);
 
-  const { data: app, isLoading } = useQuery<RentalApplication>({
+  // Session-based query (requires admin login)
+  const { data: sessionApp, isLoading } = useQuery<RentalApplication>({
     queryKey: ["/api/admin/applications", id],
     queryFn: async () => {
       const res = await fetch(`/api/admin/applications/${id}`, { credentials: "include" });
@@ -249,7 +261,22 @@ export default function AdminRequestDetail() {
     enabled: !!id && !!user && user.role === "admin",
   });
 
-  const { data: notes } = useQuery<AdminNote[]>({
+  // Token-based query for magic-link (read-only, no session needed)
+  const { data: tokenData, isLoading: tokenLoading } = useQuery<{
+    application: RentalApplication;
+    notes: AdminNote[];
+    auditLogs: AuditLog[];
+  }>({
+    queryKey: ["/api/applications/admin-token", adminLinkToken],
+    queryFn: async () => {
+      const res = await fetch(`/api/applications/admin-token/${adminLinkToken}`);
+      if (!res.ok) throw new Error("Invalid or expired token");
+      return res.json();
+    },
+    enabled: isTokenView && !!adminLinkToken,
+  });
+
+  const { data: sessionNotes } = useQuery<AdminNote[]>({
     queryKey: ["/api/admin/notes", "rental_application", id],
     queryFn: async () => {
       const res = await fetch(`/api/admin/notes/rental_application/${id}`, { credentials: "include" });
@@ -258,7 +285,7 @@ export default function AdminRequestDetail() {
     enabled: !!id && !!user && user.role === "admin",
   });
 
-  const { data: auditLogs } = useQuery<AuditLog[]>({
+  const { data: sessionAuditLogs } = useQuery<AuditLog[]>({
     queryKey: ["/api/admin/audit", "rental_application", id],
     queryFn: async () => {
       const res = await fetch(`/api/admin/audit/rental_application/${id}`, { credentials: "include" });
@@ -266,6 +293,11 @@ export default function AdminRequestDetail() {
     },
     enabled: !!id && !!user && user.role === "admin",
   });
+
+  // Merge: prefer session data, fall back to token data for read-only magic-link views
+  const app = sessionApp ?? tokenData?.application;
+  const notes = sessionNotes ?? tokenData?.notes;
+  const auditLogs = sessionAuditLogs ?? tokenData?.auditLogs;
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["/api/admin/applications", id] });
@@ -315,7 +347,7 @@ export default function AdminRequestDetail() {
     onError: () => toast({ title: "Failed to save note", variant: "destructive" }),
   });
 
-  if (authLoading || !user) {
+  if (authLoading || (!user && !isTokenView)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Skeleton className="h-8 w-48" />
@@ -323,7 +355,7 @@ export default function AdminRequestDetail() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || tokenLoading) {
     return (
       <div className="min-h-screen bg-background">
         <div className="border-b border-border bg-card px-4 py-4">
@@ -354,6 +386,19 @@ export default function AdminRequestDetail() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Magic-link read-only banner */}
+      {isTokenView && (
+        <div className="bg-blue-950 border-b border-blue-800 px-4 py-2 text-center">
+          <p className="text-xs text-blue-300">
+            You are viewing this application via a secure email link.{" "}
+            <Link href="/login" className="underline font-semibold hover:text-blue-100">
+              Log in
+            </Link>{" "}
+            to approve, reject, or take action.
+          </p>
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="border-b border-border bg-card">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between flex-wrap gap-3">
@@ -370,8 +415,8 @@ export default function AdminRequestDetail() {
               {STATUS_LABELS[app.status] ?? app.status}
             </Badge>
           </div>
-          {/* Action buttons */}
-          {isPending && (
+          {/* Action buttons — hidden in read-only token view */}
+          {isPending && !isTokenView && (
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 size="sm"

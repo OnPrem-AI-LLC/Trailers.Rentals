@@ -381,6 +381,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Admin token magic-link: read-only application view (no session needed) ──
+  app.get("/api/applications/admin-token/:adminToken", async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplicationByToken(req.params.adminToken);
+      if (!application) return res.status(404).json({ message: "Invalid or expired token" });
+
+      // Fetch associated data
+      const [notes, auditLogs] = await Promise.all([
+        storage.getAdminNotes("rental_application", application.id),
+        storage.getAuditLogs("rental_application", application.id),
+      ]);
+
+      // Omit sensitive tokens from response
+      const { adminToken: _a, renterToken: _r, ...safeApp } = application;
+      return res.json({ application: safeApp, notes, auditLogs });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Public: renter response info (keyed by renterToken, not bare ID) ──
   app.get("/api/applications/respond/:renterToken/info", async (req: Request, res: Response) => {
     try {
