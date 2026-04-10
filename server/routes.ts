@@ -1667,7 +1667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Confirm deposit after successful payment (called from frontend after Stripe confirms)
+  // Confirm deposit after successful payment (client-side fallback after Stripe Elements confirms)
   app.post("/api/stripe/payment-succeeded", requireRenter, async (req: Request, res: Response) => {
     try {
       const { rentalId, paymentIntentId } = z.object({
@@ -1693,62 +1693,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Payment intent does not match this rental" });
       }
 
-      // Idempotency: if webhook already activated this rental, just return success
-      if (rental.depositPaid) {
-        return res.json({ success: true, status: "active", note: "already_activated" });
-      }
-
-      // Activate rental + mark trailer as rented
-      await storage.updateRental(rentalId, {
-        depositPaid: true,
-        status: "active",
-        startDate: new Date(),
-      });
-      await storage.updateTrailer(rental.trailerId, { status: "rented" }).catch((e) => {
-        console.error("Failed to update trailer status:", e);
-      });
-
-      await storage.createAuditLog({
+      // Use shared finalize service (idempotent — safe to call even if webhook already ran)
+      const { finalizeDepositPayment } = await import("./deposit-service");
+      const result = await finalizeDepositPayment({
+        rentalId,
+        paymentIntentId,
+        stripeCustomerId: typeof intent.customer === "string" ? intent.customer : undefined,
+        triggeredBy: "client_callback",
         userId: user.id,
-        actionType: "deposit_paid_client",
-        entityType: "rental",
-        entityId: rentalId,
-        description: `Security deposit paid via Stripe Elements (PI: ${paymentIntentId}) — rental activated, trailer marked rented`,
-        isAdminEntry: false,
         ipAddress: req.ip,
       });
 
-      // Send renter activation email + admin notification
-      try {
-        const company = await storage.getCompany(rental.companyId);
-        const trailer = await storage.getTrailer(rental.trailerId);
-        if (company && trailer) {
-          const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import("./email-service");
-          await Promise.allSettled([
-            sendDepositConfirmedEmail({
-              rentalId,
-              companyName: company.name,
-              renterEmail: company.email,
-              renterName: company.ownerName,
-              trailerVin: trailer.vin,
-              trailerType: trailer.type,
-              monthlyRate: rental.monthlyRate,
-            }),
-            sendDepositReceivedAdminEmail({
-              rentalId,
-              companyName: company.name,
-              trailerVin: trailer.vin,
-              trailerType: trailer.type,
-              monthlyRate: rental.monthlyRate,
-              paymentIntentId,
-            }),
-          ]);
-        }
-      } catch (emailErr) {
-        console.error("Failed to send activation email:", emailErr);
-      }
-
-      return res.json({ success: true, status: "active" });
+      return res.json({ success: true, status: "active", ...result });
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error("Payment succeeded handler error:", err);
@@ -1895,61 +1851,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
       const rental = await storage.getRental(rentalId);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
-      if (rental.depositPaid) return res.status(400).json({ message: "Deposit already confirmed" });
 
-      // Activate rental + mark deposit paid
-      const updated = await storage.updateRental(rentalId, {
-        depositPaid: true,
-        status: "active",
-        startDate: new Date(),
-      });
-
-      // Transition trailer to "rented"
-      await storage.updateTrailer(rental.trailerId, { status: "rented" }).catch((e) => {
-        console.error("Failed to update trailer status:", e);
-      });
-
-      await storage.createAuditLog({
+      const { finalizeDepositPayment } = await import("./deposit-service");
+      const result = await finalizeDepositPayment({
+        rentalId,
+        triggeredBy: "admin_manual",
         userId: req.session.userId!,
-        actionType: "deposit_confirmed",
-        entityType: "rental",
-        entityId: rentalId,
-        description: `Deposit manually confirmed by admin — rental activated, trailer marked rented`,
-        isAdminEntry: true,
         ipAddress: req.ip,
       });
 
-      // Send renter activation email + admin notification
-      try {
-        const company = await storage.getCompany(rental.companyId);
-        const trailer = await storage.getTrailer(rental.trailerId);
-        if (company && trailer) {
-          const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import("./email-service");
-          await Promise.allSettled([
-            sendDepositConfirmedEmail({
-              rentalId,
-              companyName: company.name,
-              renterEmail: company.email,
-              renterName: company.ownerName,
-              trailerVin: trailer.vin,
-              trailerType: trailer.type,
-              monthlyRate: rental.monthlyRate,
-            }),
-            sendDepositReceivedAdminEmail({
-              rentalId,
-              companyName: company.name,
-              trailerVin: trailer.vin,
-              trailerType: trailer.type,
-              monthlyRate: rental.monthlyRate,
-            }),
-          ]);
-        }
-      } catch (emailErr) {
-        console.error("Failed to send deposit confirmation email:", emailErr);
-        // Non-fatal
-      }
-
-      return res.json(updated);
+      return res.json({ ...result, rentalId });
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error(err);

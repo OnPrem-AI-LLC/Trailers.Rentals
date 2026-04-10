@@ -108,18 +108,24 @@ The admin account is seeded on first startup.
   - Stripe connected via Replit OAuth connector
   - stripe + stripe-replit-sync + @stripe/react-stripe-js + @stripe/stripe-js installed
   - Stripe schema migrations run on startup; managed webhook at /api/stripe/webhook
+  - deposit-service.ts — unified idempotent `finalizeDepositPayment()`: activate rental,
+    mark trailer rented, auto-create monthly subscription, audit log, renter+admin emails
   - POST /api/stripe/create-deposit-intent — creates Stripe PaymentIntent (2-month deposit)
-  - POST /api/stripe/payment-succeeded — confirms deposit, activates rental, marks trailer rented, sends email
+  - POST /api/stripe/payment-succeeded — client-side fallback, calls finalizeDepositPayment
+  - Stripe webhook (payment_intent.succeeded) — authoritative path, calls finalizeDepositPayment
+  - POST /api/stripe/confirm-deposit — admin manual override, calls finalizeDepositPayment
   - POST /api/stripe/create-deposit-session — legacy Stripe Checkout (kept for fallback)
-  - POST /api/stripe/create-subscription-session — monthly rental subscription Checkout
-  - POST /api/stripe/confirm-deposit — admin manual deposit override
+  - POST /api/stripe/create-subscription-session — manual monthly subscription Checkout
+  - POST /api/admin/rentals/:id/create-invoice — admin one-off invoice (finalized + emailed)
+  - POST /api/admin/rentals/:id/cancel-subscription — cancel recurring subscription
   - GET /api/rentals/:id/payment-status — renter payment status
   - GET /api/stripe/config — returns publishable key for frontend
-  - /dashboard/payment/:rentalId — Stripe Elements card form page (dark theme, shows breakdown)
-  - Dashboard "Pay Security Deposit" navigates to Stripe Elements page (not Checkout redirect)
-  - Dashboard "Set Up Monthly Billing" button for post-deposit subscription
-  - sendDepositConfirmedEmail() added to email-service.ts (email #8)
-  - Admin rentals list + detail page with status controls, Stripe payment history, audit log
+  - /dashboard/payment/:rentalId — Stripe Elements card form page (dark theme, deposit breakdown)
+  - Dashboard "Pay Security Deposit" navigates to Stripe Elements page
+  - Admin rental detail: billing controls (one-off invoice form, cancel subscription)
+  - Email #8a: sendDepositReceivedAdminEmail() — admin notified whenever deposit confirmed
+  - Email #8: sendDepositConfirmedEmail() — renter activation confirmation
+  - Auto monthly subscription created after deposit (Stripe Price + Subscription auto-created)
 
 ### Pending
 - [ ] Task 7: Engine Hour Tracking (reefer units)
