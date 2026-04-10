@@ -490,7 +490,12 @@ export default function Dashboard() {
                             </Button>
                           )}
                           {(rental.status === "active" || rental.status === "active_in_use") && (
-                            <Button size="sm" variant="outline" className="gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-2"
+                              onClick={() => navigate(`/dashboard/engine-hours/${rental.id}`)}
+                            >
                               <Clock className="w-4 h-4" /> Submit Engine Hours
                             </Button>
                           )}
