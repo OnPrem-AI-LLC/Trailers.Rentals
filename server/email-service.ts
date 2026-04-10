@@ -24,6 +24,7 @@ interface ApplicationData {
   mcNumber?: string | null;
   intendedUse: string;
   intendedUseDetails?: string | null;
+  authorizedUser?: string | null;
   trailerVin?: string;
   trailerType?: string;
   priceMonthly?: number;
@@ -55,6 +56,7 @@ function escApp(app: ApplicationData): ApplicationData {
     mcNumber: app.mcNumber ? esc(app.mcNumber) : app.mcNumber,
     intendedUse: esc(app.intendedUse),
     intendedUseDetails: app.intendedUseDetails ? esc(app.intendedUseDetails) : app.intendedUseDetails,
+    authorizedUser: app.authorizedUser ? esc(app.authorizedUser) : app.authorizedUser,
     trailerVin: app.trailerVin ? esc(app.trailerVin) : app.trailerVin,
     trailerType: app.trailerType ? esc(app.trailerType) : app.trailerType,
   };
@@ -87,6 +89,7 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
       <tr><td style="padding: 8px 0; color: #64748b;">Monthly Rate</td><td style="padding: 8px 0;">${price}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Intended Use</td><td style="padding: 8px 0;">${app.intendedUse}</td></tr>
       ${app.intendedUseDetails ? `<tr><td style="padding: 8px 0; color: #64748b;">Details</td><td style="padding: 8px 0;">${app.intendedUseDetails}</td></tr>` : ""}
+      ${app.authorizedUser ? `<tr><td style="padding: 8px 0; color: #64748b;">Authorized User</td><td style="padding: 8px 0;">${app.authorizedUser}</td></tr>` : ""}
     </table>
     <a href="${reviewUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
       Review Application &amp; SAFER Data →

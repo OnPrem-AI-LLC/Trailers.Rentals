@@ -518,8 +518,8 @@ export default function AdminRequestDetail() {
             )}
           </div>
 
-          {/* Renter response link (shown when needs_info) */}
-          {app.status === "needs_info" && (
+          {/* Renter response link (shown when needs_info and renterToken available) */}
+          {app.status === "needs_info" && app.renterToken && (
             <div className="bg-blue-950/30 border border-blue-800 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
                 <MessageSquare className="w-4 h-4 text-blue-400" />
@@ -529,7 +529,7 @@ export default function AdminRequestDetail() {
                 Share this link with the renter to let them respond through the site:
               </p>
               <code className="text-xs bg-muted px-2 py-1 rounded break-all block">
-                {window.location.origin}/applications/respond/{app.renterToken ?? app.id}
+                {window.location.origin}/applications/respond/{app.renterToken}
               </code>
             </div>
           )}
