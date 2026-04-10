@@ -115,6 +115,18 @@ export const documents = pgTable("documents", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Admin Notes ────────────────────────────────────────────────────────
+// Structured notes attached to applications, rentals, or companies by admin staff
+export const adminNotes = pgTable("admin_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  authorId: varchar("author_id").notNull(), // admin user who wrote it
+  entityType: text("entity_type").notNull(), // "rental_application" | "rental" | "company" | "trailer"
+  entityId: varchar("entity_id").notNull(),
+  body: text("body").notNull(),
+  isPinned: boolean("is_pinned").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Audit Logs ─────────────────────────────────────────────────────────
 export const auditLogs = pgTable("audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -190,6 +202,16 @@ export const insertRentalApplicationSchema = createInsertSchema(rentalApplicatio
   intendedUse: z.string().min(1, "Intended use is required"),
 });
 
+export const insertAdminNoteSchema = createInsertSchema(adminNotes).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  body: z.string().min(1, "Note body is required"),
+  entityType: z.string().min(1),
+  entityId: z.string().min(1),
+  authorId: z.string().min(1),
+});
+
 export const insertDocumentSchema = createInsertSchema(documents).omit({
   id: true,
   createdAt: true,
@@ -212,6 +234,8 @@ export type Company = typeof companies.$inferSelect;
 export type InsertRentalApplication = z.infer<typeof insertRentalApplicationSchema>;
 export type RentalApplication = typeof rentalApplications.$inferSelect;
 export type Rental = typeof rentals.$inferSelect;
+export type InsertAdminNote = z.infer<typeof insertAdminNoteSchema>;
+export type AdminNote = typeof adminNotes.$inferSelect;
 export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;

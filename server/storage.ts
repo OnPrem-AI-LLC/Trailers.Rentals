@@ -14,6 +14,8 @@ import {
   type InsertDocument,
   type AuditLog,
   type InsertAuditLog,
+  type AdminNote,
+  type InsertAdminNote,
   users,
   trailers,
   trailerPhotos,
@@ -22,6 +24,7 @@ import {
   rentals,
   documents,
   auditLogs,
+  adminNotes,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
@@ -70,6 +73,11 @@ export interface IStorage {
   // Documents
   createDocument(doc: InsertDocument): Promise<Document>;
   getDocuments(companyId?: string, rentalId?: string): Promise<Document[]>;
+
+  // Admin Notes
+  createAdminNote(note: InsertAdminNote): Promise<AdminNote>;
+  getAdminNotes(entityType: string, entityId: string): Promise<AdminNote[]>;
+  deleteAdminNote(id: string): Promise<void>;
 
   // Audit Logs
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
@@ -251,6 +259,26 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(documents.createdAt));
     }
     return db.select().from(documents).orderBy(desc(documents.createdAt));
+  }
+
+  // ── Admin Notes ────────────────────────────────────────────────────
+  async createAdminNote(note: InsertAdminNote): Promise<AdminNote> {
+    const [row] = await db.insert(adminNotes).values(note).returning();
+    return row;
+  }
+
+  async getAdminNotes(entityType: string, entityId: string): Promise<AdminNote[]> {
+    return db
+      .select()
+      .from(adminNotes)
+      .where(
+        and(eq(adminNotes.entityType, entityType), eq(adminNotes.entityId, entityId))
+      )
+      .orderBy(desc(adminNotes.createdAt));
+  }
+
+  async deleteAdminNote(id: string): Promise<void> {
+    await db.delete(adminNotes).where(eq(adminNotes.id, id));
   }
 
   // ── Audit Logs ─────────────────────────────────────────────────────

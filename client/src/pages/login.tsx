@@ -32,10 +32,11 @@ export default function Login() {
       const updated = await fetch("/api/auth/me", { credentials: "include" });
       const me = await updated.json();
       navigate(me.role === "admin" ? "/admin" : "/dashboard");
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
       toast({
         title: "Sign in failed",
-        description: err?.message?.includes("401") ? "Invalid email or password." : "Something went wrong.",
+        description: msg.includes("401") ? "Invalid email or password." : "Something went wrong.",
         variant: "destructive",
       });
     } finally {
