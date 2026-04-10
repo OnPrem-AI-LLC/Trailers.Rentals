@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
-  Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send,
+  Building2, Phone, Mail, Hash, MessageSquare, ChevronDown, ChevronUp, Send,
   Receipt, Download
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
@@ -228,7 +228,6 @@ export default function Dashboard() {
   const qc = useQueryClient();
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [uploadingType, setUploadingType] = useState<string | null>(null);
-  const [payingRentalId, setPayingRentalId] = useState<string | null>(null);
 
   // Check for payment return from Stripe
   useEffect(() => {
@@ -247,19 +246,10 @@ export default function Dashboard() {
     }
   }, []);
 
-  const depositMut = useMutation({
-    mutationFn: async (rentalId: string) => {
-      const res = await apiRequest("POST", "/api/stripe/create-deposit-session", { rentalId });
-      return res.json() as Promise<{ url: string }>;
-    },
-    onSuccess: (data) => {
-      window.location.href = data.url;
-    },
-    onError: (err: Error) => {
-      toast({ title: "Payment failed", description: err.message ?? "Could not start checkout. Please try again.", variant: "destructive" });
-      setPayingRentalId(null);
-    },
-  });
+  // Navigate to the Stripe Elements payment page
+  function startDepositPayment(rentalId: string) {
+    navigate(`/dashboard/payment/${rentalId}`);
+  }
 
   useEffect(() => {
     if (authLoading) return;
@@ -466,17 +456,9 @@ export default function Dashboard() {
                             <Button
                               size="sm"
                               className="bg-primary hover:bg-primary/90 text-white gap-2"
-                              disabled={depositMut.isPending && payingRentalId === rental.id}
-                              onClick={() => {
-                                setPayingRentalId(rental.id);
-                                depositMut.mutate(rental.id);
-                              }}
+                              onClick={() => startDepositPayment(rental.id)}
                             >
-                              {depositMut.isPending && payingRentalId === rental.id ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
-                              ) : (
-                                <><CircleDollarSign className="w-4 h-4" /> Pay Security Deposit</>
-                              )}
+                              <CircleDollarSign className="w-4 h-4" /> Pay Security Deposit
                             </Button>
                           )}
                           {rental.depositPaid && rental.status !== "completed" && rental.status !== "cancelled" && !rental.stripeSubscriptionId && (

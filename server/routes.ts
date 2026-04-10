@@ -1434,11 +1434,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const companyId = typeof req.query.companyId === "string" ? req.query.companyId : undefined;
       const all = await storage.listRentals(companyId);
-      // Enrich each rental with trailer type/vin for display
       const enriched = await Promise.all(
         all.map(async (r) => {
-          const trailer = await storage.getTrailer(r.trailerId).catch(() => null);
-          return { ...r, trailerType: trailer?.type ?? null, trailerVin: trailer?.vin ?? null };
+          const [company, trailer] = await Promise.all([
+            storage.getCompany(r.companyId).catch(() => null),
+            storage.getTrailer(r.trailerId).catch(() => null),
+          ]);
+          return {
+            ...r,
+            companyName: company?.name ?? "Unknown",
+            companyEmail: company?.email ?? "",
+            trailerVin: trailer?.vin ?? "Unknown",
+            trailerType: trailer?.type ?? "Unknown",
+            trailerMake: trailer?.make ?? null,
+            trailerYear: trailer?.year ?? null,
+          };
         })
       );
       return res.json(enriched);
@@ -1452,10 +1462,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rental = await storage.getRental(req.params.id);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
-      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
-      const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
-      const docs = rental.companyId ? await storage.getDocuments(rental.companyId) : [];
-      return res.json({ rental, trailer, company, documents: docs });
+      const [company, trailer, docs, logs] = await Promise.all([
+        storage.getCompany(rental.companyId).catch(() => null),
+        storage.getTrailer(rental.trailerId).catch(() => null),
+        storage.getDocuments(undefined, rental.id).catch(() => []),
+        storage.getAuditLogs("rental", rental.id).catch(() => []),
+      ]);
+      return res.json({ rental, company, trailer, docs, auditLogs: logs });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1466,22 +1479,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const updateSchema = z.object({
         status: z.enum(["pending_agreement", "pending_payment", "active", "active_in_use", "completed", "cancelled"]).optional(),
-        startDate: z.string().datetime().optional().nullable(),
-        endDate: z.string().datetime().optional().nullable(),
-        pickupDate: z.string().datetime().optional().nullable(),
+        startDate: z.string().nullable().optional(),
+        endDate: z.string().nullable().optional(),
+        pickupDate: z.string().nullable().optional(),
         monthlyRate: z.number().positive().optional(),
         depositPaid: z.boolean().optional(),
-        agreementSignedAt: z.string().datetime().optional().nullable(),
+        agreementSignedAt: z.string().nullable().optional(),
+        stripeSubscriptionId: z.string().nullable().optional(),
       });
-      const updates = updateSchema.parse(req.body);
-      const rental = await storage.updateRental(req.params.id, updates as Parameters<typeof storage.updateRental>[1]);
+      const body = updateSchema.parse(req.body);
+      const payload: UpdateRental = { ...body };
+      if (body.startDate !== undefined) payload.startDate = body.startDate ? new Date(body.startDate) : null;
+      if (body.endDate !== undefined) payload.endDate = body.endDate ? new Date(body.endDate) : null;
+      if (body.pickupDate !== undefined) payload.pickupDate = body.pickupDate ? new Date(body.pickupDate) : null;
+      if (body.agreementSignedAt !== undefined) payload.agreementSignedAt = body.agreementSignedAt ? new Date(body.agreementSignedAt) : null;
+      const rental = await storage.updateRental(req.params.id, payload);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       await storage.createAuditLog({
         userId: req.session.userId!,
         actionType: "rental_updated_by_admin",
         entityType: "rental",
-        entityId: req.params.id,
-        description: `Admin updated rental ${req.params.id}: ${JSON.stringify(updates)}`,
+        entityId: rental.id,
+        description: `Admin updated rental fields: ${Object.keys(body).join(", ")}`,
+        metadata: JSON.stringify(body),
         isAdminEntry: true,
         ipAddress: req.ip,
       });
@@ -1502,6 +1522,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ publishableKey });
     } catch (err: any) {
       return res.status(503).json({ message: "Stripe not configured" });
+    }
+  });
+
+  // Create PaymentIntent for deposit (Stripe Elements flow)
+  app.post("/api/stripe/create-deposit-intent", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (rental.status !== "pending_payment") {
+        return res.status(400).json({ message: "Rental is not awaiting payment" });
+      }
+      if (rental.depositPaid) {
+        return res.status(400).json({ message: "Deposit already paid" });
+      }
+
+      const company = await storage.getCompany(rental.companyId);
+      const stripe = await getUncachableStripeClient();
+
+      let customerId = rental.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.username,
+          name: company?.name ?? `${user.firstName} ${user.lastName}`,
+          metadata: { rentalId, companyId: rental.companyId, userId: user.id },
+        });
+        customerId = customer.id;
+        await storage.updateRental(rentalId, { stripeCustomerId: customerId });
+      }
+
+      const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: depositAmount,
+        currency: "usd",
+        customer: customerId,
+        description: `2-month security deposit — ${trailerLabel} (${rental.monthlyRate / 100 * 2 / 100} × 2 mo)`,
+        metadata: { rentalId, type: "deposit", companyId: rental.companyId },
+        automatic_payment_methods: { enabled: true },
+      });
+
+      return res.json({
+        clientSecret: paymentIntent.client_secret,
+        amount: depositAmount,
+        trailerLabel,
+        monthlyRate: rental.monthlyRate,
+      });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
+      console.error("PaymentIntent error:", err);
+      return res.status(500).json({ message: err.message || "Failed to create payment intent" });
+    }
+  });
+
+  // Confirm deposit after successful payment (called from frontend after Stripe confirms)
+  app.post("/api/stripe/payment-succeeded", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { rentalId, paymentIntentId } = z.object({
+        rentalId: z.string(),
+        paymentIntentId: z.string(),
+      }).parse(req.body);
+
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Verify the payment with Stripe
+      const stripe = await getUncachableStripeClient();
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (intent.status !== "succeeded") {
+        return res.status(400).json({ message: `Payment not yet completed (status: ${intent.status})` });
+      }
+      if (intent.metadata?.rentalId !== rentalId) {
+        return res.status(400).json({ message: "Payment intent does not match this rental" });
+      }
+
+      // Activate rental + mark trailer as rented
+      await storage.updateRental(rentalId, {
+        depositPaid: true,
+        status: "active",
+        startDate: new Date(),
+      });
+      await storage.updateTrailer(rental.trailerId, { status: "rented" }).catch((e) => {
+        console.error("Failed to update trailer status:", e);
+      });
+
+      await storage.createAuditLog({
+        userId: user.id,
+        actionType: "deposit_paid",
+        entityType: "rental",
+        entityId: rentalId,
+        description: `Security deposit paid via Stripe (PI: ${paymentIntentId}) — rental activated, trailer marked rented`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      // Send activation email
+      try {
+        const company = await storage.getCompany(rental.companyId);
+        const trailer = await storage.getTrailer(rental.trailerId);
+        if (company && trailer) {
+          const { sendDepositConfirmedEmail } = await import("./email-service");
+          await sendDepositConfirmedEmail({
+            rentalId,
+            companyName: company.name,
+            renterEmail: company.email,
+            renterName: company.ownerName,
+            trailerVin: trailer.vin,
+            trailerType: trailer.type,
+            monthlyRate: rental.monthlyRate,
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send activation email:", emailErr);
+      }
+
+      return res.json({ success: true, status: "active" });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
+      console.error("Payment succeeded handler error:", err);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
@@ -1638,21 +1790,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Mark deposit as paid (called after Stripe webhook or manual admin override)
+  // Side-effects: trailer → "rented", rental → "active", confirmation email sent
   app.post("/api/stripe/confirm-deposit", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
       const rental = await storage.getRental(rentalId);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
-      const updated = await storage.updateRental(rentalId, { depositPaid: true, status: "active" });
+      if (rental.depositPaid) return res.status(400).json({ message: "Deposit already confirmed" });
+
+      // Activate rental + mark deposit paid
+      const updated = await storage.updateRental(rentalId, {
+        depositPaid: true,
+        status: "active",
+        startDate: new Date(),
+      });
+
+      // Transition trailer to "rented"
+      await storage.updateTrailer(rental.trailerId, { status: "rented" }).catch((e) => {
+        console.error("Failed to update trailer status:", e);
+      });
+
       await storage.createAuditLog({
         userId: req.session.userId!,
         actionType: "deposit_confirmed",
         entityType: "rental",
         entityId: rentalId,
-        description: `Deposit manually confirmed by admin for rental ${rentalId}`,
+        description: `Deposit manually confirmed by admin — rental activated, trailer marked rented`,
         isAdminEntry: true,
         ipAddress: req.ip,
       });
+
+      // Send activation email to renter
+      try {
+        const company = await storage.getCompany(rental.companyId);
+        const trailer = await storage.getTrailer(rental.trailerId);
+        if (company && trailer) {
+          const { sendDepositConfirmedEmail } = await import("./email-service");
+          await sendDepositConfirmedEmail({
+            rentalId,
+            companyName: company.name,
+            renterEmail: company.email,
+            renterName: company.ownerName,
+            trailerVin: trailer.vin,
+            trailerType: trailer.type,
+            monthlyRate: rental.monthlyRate,
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send deposit confirmation email:", emailErr);
+        // Non-fatal
+      }
+
       return res.json(updated);
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
@@ -1679,88 +1867,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyRate: rental.monthlyRate,
       });
     } catch (err: any) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // ── Admin Rentals Management ─────────────────────────────────────────
-
-  // List all rentals enriched with company + trailer info
-  app.get("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const rentalList = await storage.listRentals();
-      const enriched = await Promise.all(
-        rentalList.map(async (rental) => {
-          const [company, trailer] = await Promise.all([
-            storage.getCompany(rental.companyId).catch(() => null),
-            storage.getTrailer(rental.trailerId).catch(() => null),
-          ]);
-          return {
-            ...rental,
-            companyName: company?.name ?? "Unknown",
-            companyEmail: company?.email ?? "",
-            trailerVin: trailer?.vin ?? "Unknown",
-            trailerType: trailer?.type ?? "Unknown",
-            trailerMake: trailer?.make ?? null,
-            trailerYear: trailer?.year ?? null,
-          };
-        })
-      );
-      return res.json(enriched);
-    } catch (err: unknown) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Get single rental with full detail for admin
-  app.get("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const rental = await storage.getRental(req.params.id);
-      if (!rental) return res.status(404).json({ message: "Rental not found" });
-      const [company, trailer, docs, logs] = await Promise.all([
-        storage.getCompany(rental.companyId).catch(() => null),
-        storage.getTrailer(rental.trailerId).catch(() => null),
-        storage.getDocuments(undefined, rental.id).catch(() => []),
-        storage.getAuditLogs("rental", rental.id).catch(() => []),
-      ]);
-      return res.json({ rental, company, trailer, docs, auditLogs: logs });
-    } catch (err: unknown) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Admin update rental (status, payment fields, dates)
-  app.patch("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const updateSchema = z.object({
-        status: z.enum(["pending_agreement", "pending_payment", "active", "active_in_use", "completed", "cancelled"]).optional(),
-        depositPaid: z.boolean().optional(),
-        startDate: z.string().nullable().optional(),
-        endDate: z.string().nullable().optional(),
-        stripeSubscriptionId: z.string().nullable().optional(),
-      });
-      const body = updateSchema.parse(req.body);
-      const payload: UpdateRental = { ...body };
-      if (body.startDate !== undefined) payload.startDate = body.startDate ? new Date(body.startDate) : null;
-      if (body.endDate !== undefined) payload.endDate = body.endDate ? new Date(body.endDate) : null;
-      const rental = await storage.updateRental(req.params.id, payload);
-      if (!rental) return res.status(404).json({ message: "Rental not found" });
-      await storage.createAuditLog({
-        userId: req.session.userId!,
-        actionType: "rental_updated",
-        entityType: "rental",
-        entityId: rental.id,
-        description: `Admin updated rental fields: ${Object.keys(body).join(", ")}`,
-        metadata: JSON.stringify(body),
-        isAdminEntry: true,
-        ipAddress: req.ip,
-      });
-      return res.json(rental);
-    } catch (err: unknown) {
-      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }

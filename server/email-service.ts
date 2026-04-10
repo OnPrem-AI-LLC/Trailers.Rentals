@@ -493,3 +493,71 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
     text: `Hi ${data.renterName},\n\nYour rental agreement for ${data.trailerType} VIN: ${data.trailerVin} is ready to sign.\n\nMonthly Rate: ${monthlyStr} — No Mileage Fees\n\nSign here: ${signUrl}\n\nDeluxe Logistics Inc.`,
   });
 }
+
+// ── 8. Deposit confirmed / rental activated email ─────────────────────────────
+export interface DepositConfirmedData {
+  rentalId: string;
+  companyName: string;
+  renterEmail: string;
+  renterName: string;
+  trailerVin: string;
+  trailerType: string;
+  monthlyRate: number; // cents
+}
+
+export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Promise<void> {
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
+  const dashboardUrl = `${domain()}/dashboard`;
+
+  if (!isConfigured()) {
+    console.log("[email] SendGrid not configured — skipping deposit confirmed email");
+    return;
+  }
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #22c55e; margin: 0; font-size: 20px;">🚛 Your Rental is Now Active!</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Great news — your security deposit has been confirmed and your rental is now <strong style="color: #16a34a;">active</strong>.</p>
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold; color: #16a34a;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Status</td><td style="padding: 6px 0; font-weight: bold; color: #16a34a;">Active ✓</td></tr>
+      </table>
+    </div>
+    <p><strong>What's next:</strong></p>
+    <ul style="color: #374151; font-size: 14px; padding-left: 20px; line-height: 2;">
+      <li>Coordinate pickup timing with our team</li>
+      <li>Your monthly billing will begin on your pickup date</li>
+      <li>Track your rental status and documents in your dashboard</li>
+    </ul>
+    <a href="${dashboardUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Your Dashboard →
+    </a>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;">
+      <strong>Deluxe Logistics Inc.</strong><br/>
+      818 Corning Way, Martinsburg, WV 25401<br/>
+      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+    </p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Your Deluxe Logistics rental is now active — ${safeType} (${safeVin})`,
+    html,
+    text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
+  });
+}

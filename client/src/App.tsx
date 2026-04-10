@@ -22,6 +22,7 @@ import Register from "@/pages/register";
 import AgreementPage from "@/pages/agreement";
 import AdminRentals from "@/pages/admin/rentals";
 import AdminRentalDetail from "@/pages/admin/rental-detail";
+import PaymentPage from "@/pages/payment";
 
 function Router() {
   return (
@@ -44,6 +45,7 @@ function Router() {
       <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
       <Route path="/register/:inviteToken" component={Register} />
       <Route path="/dashboard/sign-agreement/:rentalId" component={AgreementPage} />
+      <Route path="/dashboard/payment/:rentalId" component={PaymentPage} />
       <Route path="/agreement/:rentalId" component={AgreementPage} />
       <Route component={NotFound} />
     </Switch>

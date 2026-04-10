@@ -106,16 +106,20 @@ The admin account is seeded on first startup.
 - [x] Task 5: Rental Agreements & E-Signature — /agreement/:rentalId, typed-name e-sig, emails, audit logging
 - [x] Task 6: Payments / Stripe
   - Stripe connected via Replit OAuth connector
-  - stripe + stripe-replit-sync installed; Stripe schema migrations run on startup
-  - Managed webhook auto-registered at /api/stripe/webhook (registered BEFORE express.json())
-  - POST /api/stripe/create-deposit-session — 2-month security deposit as one-time Stripe Checkout
+  - stripe + stripe-replit-sync + @stripe/react-stripe-js + @stripe/stripe-js installed
+  - Stripe schema migrations run on startup; managed webhook at /api/stripe/webhook
+  - POST /api/stripe/create-deposit-intent — creates Stripe PaymentIntent (2-month deposit)
+  - POST /api/stripe/payment-succeeded — confirms deposit, activates rental, marks trailer rented, sends email
+  - POST /api/stripe/create-deposit-session — legacy Stripe Checkout (kept for fallback)
   - POST /api/stripe/create-subscription-session — monthly rental subscription Checkout
   - POST /api/stripe/confirm-deposit — admin manual deposit override
   - GET /api/rentals/:id/payment-status — renter payment status
   - GET /api/stripe/config — returns publishable key for frontend
-  - Dashboard "Pay Security Deposit" button redirects to Stripe Checkout
+  - /dashboard/payment/:rentalId — Stripe Elements card form page (dark theme, shows breakdown)
+  - Dashboard "Pay Security Deposit" navigates to Stripe Elements page (not Checkout redirect)
   - Dashboard "Set Up Monthly Billing" button for post-deposit subscription
-  - Payment return URLs handle success/cancel toast messages
+  - sendDepositConfirmedEmail() added to email-service.ts (email #8)
+  - Admin rentals list + detail page with status controls, Stripe payment history, audit log
 
 ### Pending
 - [ ] Task 7: Engine Hour Tracking (reefer units)
