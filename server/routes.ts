@@ -2418,7 +2418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       let token = rental.pickupToken;
       if (!token) {
-        token = require("crypto").randomBytes(24).toString("hex");
+        token = randomBytes(24).toString("hex");
         await storage.updateRental(rental.id, { pickupToken: token });
       }
       const url = `${req.protocol}://${req.get("host")}/pickup/${token}`;
@@ -2436,7 +2436,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       let token = rental.returnToken;
       if (!token) {
-        token = require("crypto").randomBytes(24).toString("hex");
+        token = randomBytes(24).toString("hex");
         await storage.updateRental(rental.id, { returnToken: token });
       }
       const url = `${req.protocol}://${req.get("host")}/return/${token}`;
