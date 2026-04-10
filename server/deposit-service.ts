@@ -67,21 +67,23 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   const freshRental = await storage.getRental(rentalId);
   const effectiveCustomerId = freshRental?.stripeCustomerId ?? customerId;
 
+  // Always ensure the payment method is set as the customer default — decoupled from
+  // subscription creation so it works regardless of which finalization path ran first.
+  if (opts.paymentMethodId && effectiveCustomerId) {
+    try {
+      const stripe = await getUncachableStripeClient();
+      await stripe.customers.update(effectiveCustomerId, {
+        invoice_settings: { default_payment_method: opts.paymentMethodId },
+      });
+      console.log(`[deposit] Set default payment method ${opts.paymentMethodId} for customer ${effectiveCustomerId}`);
+    } catch (pmErr) {
+      console.warn('[deposit] Could not set default payment method:', pmErr);
+    }
+  }
+
   if (!freshRental?.stripeSubscriptionId && effectiveCustomerId && rental.monthlyRate > 0) {
     try {
       const stripe = await getUncachableStripeClient();
-
-      // Save payment method as customer default so off-session recurring billing works
-      if (opts.paymentMethodId) {
-        try {
-          await stripe.customers.update(effectiveCustomerId, {
-            invoice_settings: { default_payment_method: opts.paymentMethodId },
-          });
-          console.log(`[deposit] Set default payment method ${opts.paymentMethodId} for customer ${effectiveCustomerId}`);
-        } catch (pmErr) {
-          console.warn('[deposit] Could not set default payment method:', pmErr);
-        }
-      }
 
       const price = await stripe.prices.create({
         unit_amount: rental.monthlyRate,

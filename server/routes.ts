@@ -1769,6 +1769,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rentalId,
         paymentIntentId,
         stripeCustomerId: typeof intent.customer === "string" ? intent.customer : undefined,
+        paymentMethodId: typeof intent.payment_method === "string" ? intent.payment_method : undefined,
         triggeredBy: "client_callback",
         userId: user.id,
         ipAddress: req.ip,
