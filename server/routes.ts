@@ -1713,16 +1713,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(rental.trailerId);
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
 
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: depositAmount,
-        currency: "usd",
-        customer: customerId,
-        description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
-        metadata: { rentalId, type: "deposit", companyId: rental.companyId },
-        // Save payment method for off-session recurring billing (monthly subscription)
-        setup_future_usage: "off_session",
-        automatic_payment_methods: { enabled: true },
-      });
+      // Reuse existing open PaymentIntent to prevent duplicate charges on page reload/retry
+      const REUSABLE_STATUSES = ["requires_payment_method", "requires_confirmation", "requires_action"];
+      let paymentIntent: Awaited<ReturnType<typeof stripe.paymentIntents.create>>;
+      if (rental.stripeDepositIntentId) {
+        try {
+          const existing = await stripe.paymentIntents.retrieve(rental.stripeDepositIntentId) as unknown as { status: string; client_secret: string; id: string };
+          if (REUSABLE_STATUSES.includes(existing.status)) {
+            paymentIntent = existing as unknown as typeof paymentIntent;
+          } else {
+            throw new Error(`PI status ${existing.status} not reusable`);
+          }
+        } catch {
+          // Existing PI is cancelled/consumed — fall through to create new one
+          paymentIntent = await stripe.paymentIntents.create({
+            amount: depositAmount,
+            currency: "usd",
+            customer: customerId,
+            description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
+            metadata: { rentalId, type: "deposit", companyId: rental.companyId },
+            setup_future_usage: "off_session",
+            automatic_payment_methods: { enabled: true },
+          });
+          await storage.updateRental(rentalId, { stripeDepositIntentId: paymentIntent.id });
+        }
+      } else {
+        paymentIntent = await stripe.paymentIntents.create({
+          amount: depositAmount,
+          currency: "usd",
+          customer: customerId,
+          description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
+          metadata: { rentalId, type: "deposit", companyId: rental.companyId },
+          // Save payment method for off-session recurring billing (monthly subscription)
+          setup_future_usage: "off_session",
+          automatic_payment_methods: { enabled: true },
+        });
+        await storage.updateRental(rentalId, { stripeDepositIntentId: paymentIntent.id });
+      }
 
       return res.json({
         clientSecret: paymentIntent.client_secret,

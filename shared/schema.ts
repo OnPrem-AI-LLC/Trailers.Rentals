@@ -103,6 +103,7 @@ export const rentals = pgTable("rentals", {
   depositPaid: boolean("deposit_paid").notNull().default(false),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
+  stripeDepositIntentId: text("stripe_deposit_intent_id"), // active deposit PaymentIntent (reused to prevent duplicates)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
