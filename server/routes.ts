@@ -2185,9 +2185,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       if (user.companyId !== rental.companyId) return res.status(403).json({ message: "Access denied" });
 
-      // Get trailer for engine hour rate
+      // Get trailer for engine hour rate — only trailers with a configured rate are eligible
       const trailer = await storage.getTrailer(rental.trailerId);
       const rateAtTime = trailer?.engineHourRate ?? null;
+      if (!rateAtTime || rateAtTime <= 0) {
+        return res.status(400).json({ message: "Engine hour tracking is not enabled for this trailer." });
+      }
 
       // Get previous reading and enforce monotonically increasing readings
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
@@ -2258,6 +2261,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const trailer = await storage.getTrailer(rental.trailerId);
       const rateAtTime = trailer?.engineHourRate ?? null;
+      if (!rateAtTime || rateAtTime <= 0) {
+        return res.status(400).json({ message: "Engine hour tracking is not enabled for this trailer." });
+      }
 
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
       const previousReading = prev?.currentReading ?? null;
