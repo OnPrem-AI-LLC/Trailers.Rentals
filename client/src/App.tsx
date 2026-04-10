@@ -17,6 +17,7 @@ import TrailerDetail from "@/pages/trailer-detail";
 import Jobs from "@/pages/jobs";
 import Signup from "@/pages/signup";
 import Apply from "@/pages/apply";
+import ApplicationRespond from "@/pages/application-respond";
 
 function Router() {
   return (
@@ -34,6 +35,7 @@ function Router() {
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />
       <Route path="/apply/:id" component={Apply} />
+      <Route path="/applications/:id/respond" component={ApplicationRespond} />
       <Route component={NotFound} />
     </Switch>
   );

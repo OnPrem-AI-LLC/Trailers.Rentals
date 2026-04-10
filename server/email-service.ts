@@ -188,6 +188,8 @@ export async function sendCOIRequest(app: ApplicationData): Promise<void> {
 export async function sendMoreInfoRequest(app: ApplicationData, questions: string): Promise<void> {
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping more-info email"); return; }
 
+  const responseUrl = `${domain()}/applications/${app.id}/respond`;
+
   const html = `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
   <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
@@ -200,7 +202,12 @@ export async function sendMoreInfoRequest(app: ApplicationData, questions: strin
     <div style="background: #f8fafc; border-left: 4px solid #e63946; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
       <p style="margin: 0; white-space: pre-line;">${questions}</p>
     </div>
-    <p>Please reply directly to this email with your answers. Once we receive your response, we'll complete the review and get back to you within 24 hours.</p>
+    <p>You can respond directly through our site or by replying to this email:</p>
+    <a href="${responseUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      Submit Your Response →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or copy and paste this link: <a href="${responseUrl}" style="color: #e63946;">${responseUrl}</a></p>
+    <p>Once we receive your response, we'll complete the review and get back to you within 24 hours.</p>
     <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
     <p style="color: #64748b; font-size: 13px;">
       <strong>Deluxe Logistics Inc.</strong><br/>
@@ -215,6 +222,6 @@ export async function sendMoreInfoRequest(app: ApplicationData, questions: strin
     from: FROM,
     subject: "Follow-up questions about your Deluxe Logistics rental application",
     html,
-    text: `Hi ${app.ownerName},\n\nWe have a few follow-up questions about your rental application:\n\n${questions}\n\nPlease reply to this email with your answers.\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${app.ownerName},\n\nWe have a few follow-up questions about your rental application:\n\n${questions}\n\nRespond here: ${responseUrl}\n\nOr reply to this email with your answers.\n\nDeluxe Logistics Inc.`,
   });
 }

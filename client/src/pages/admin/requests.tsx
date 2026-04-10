@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -14,7 +14,6 @@ import {
   XCircle,
   HelpCircle,
   Search,
-  ExternalLink,
   ChevronRight,
 } from "lucide-react";
 import type { RentalApplication } from "@shared/schema";
@@ -52,15 +51,17 @@ function formatDate(ts: string | Date): string {
 }
 
 export default function AdminRequests() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
 
-  if (!user || user.role !== "admin") {
-    navigate("/login");
-    return null;
-  }
+  // Always call hooks first — redirect in effect
+  useEffect(() => {
+    if (!authLoading && (!user || user.role !== "admin")) {
+      navigate("/login");
+    }
+  }, [user, authLoading, navigate]);
 
   const { data: allApps, isLoading } = useQuery<RentalApplication[]>({
     queryKey: ["/api/admin/applications"],
@@ -69,7 +70,16 @@ export default function AdminRequests() {
       if (!res.ok) throw new Error("Failed to load applications");
       return res.json() as Promise<RentalApplication[]>;
     },
+    enabled: !!user && user.role === "admin",
   });
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Skeleton className="h-8 w-48" />
+      </div>
+    );
+  }
 
   const counts = {
     all: allApps?.length ?? 0,

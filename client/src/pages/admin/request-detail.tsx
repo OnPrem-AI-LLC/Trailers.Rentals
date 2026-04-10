@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -34,6 +34,7 @@ import {
   Building,
   StickyNote,
   Activity,
+  MessageSquare,
 } from "lucide-react";
 import type { RentalApplication, AdminNote, AuditLog } from "@shared/schema";
 
@@ -140,7 +141,13 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
 
   const c = result.carrier!;
   const allowed = c.allowedToOperate === "Y";
-  const safetyColor = c.safetyRating === "Satisfactory" ? "text-green-400" : c.safetyRating === "Conditional" ? "text-yellow-400" : c.safetyRating === "Unsatisfactory" ? "text-red-400" : "text-muted-foreground";
+  const safetyColor = c.safetyRating === "Satisfactory"
+    ? "text-green-400"
+    : c.safetyRating === "Conditional"
+    ? "text-yellow-400"
+    : c.safetyRating === "Unsatisfactory"
+    ? "text-red-400"
+    : "text-muted-foreground";
 
   return (
     <div className="bg-card border border-border rounded-xl p-5">
@@ -164,7 +171,6 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
             </div>
           </div>
         </div>
-
         {c.safetyRating && (
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-muted border border-border">
             <Shield className={`w-4 h-4 ${safetyColor}`} />
@@ -178,35 +184,44 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
 
       <table className="w-full text-sm">
         <tbody className="divide-y divide-border">
-          {[
+          {([
             ["Legal Name", c.legalName],
             c.dbaName ? ["DBA Name", c.dbaName] : null,
             ["DOT Number", c.dotNumber],
             ["Entity Type", c.entityType],
             ["Operating Status", c.operatingStatus],
-            c.totalPowerUnits ? ["Power Units", String(c.totalPowerUnits)] : null,
-            c.totalDrivers ? ["Total Drivers", String(c.totalDrivers)] : null,
-            c.bipdInsuranceOnFile ? ["BIPD Insurance", `$${c.bipdInsuranceOnFile.toLocaleString()}`] : null,
-            c.cargoInsuranceOnFile ? ["Cargo Insurance", `$${c.cargoInsuranceOnFile.toLocaleString()}`] : null,
+            c.totalPowerUnits != null ? ["Power Units", String(c.totalPowerUnits)] : null,
+            c.totalDrivers != null ? ["Total Drivers", String(c.totalDrivers)] : null,
+            c.bipdInsuranceOnFile != null ? ["BIPD Insurance", `$${c.bipdInsuranceOnFile.toLocaleString()}`] : null,
+            c.cargoInsuranceOnFile != null ? ["Cargo Insurance", `$${c.cargoInsuranceOnFile.toLocaleString()}`] : null,
             c.safetyRatingDate ? ["Rating Date", c.safetyRatingDate] : null,
-          ].filter(Boolean).map((row) => {
-            const [label, value] = row as [string, string | undefined];
-            return value ? (
+          ] as ([string, string | undefined] | null)[])
+            .filter((row): row is [string, string | undefined] => row !== null && !!row[1])
+            .map(([label, value]) => (
               <tr key={label}>
                 <td className="py-2 text-muted-foreground w-40">{label}</td>
                 <td className="py-2 font-medium text-foreground">{value}</td>
               </tr>
-            ) : null;
-          })}
+            ))}
         </tbody>
       </table>
     </div>
   );
 }
 
+function InfoRow({ label, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) {
+  if (!value) return null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-sm text-foreground ${mono ? "font-mono" : "font-medium"}`}>{value}</span>
+    </div>
+  );
+}
+
 export default function AdminRequestDetail() {
   const { id } = useParams();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -217,7 +232,12 @@ export default function AdminRequestDetail() {
   const [needsInfoMsg, setNeedsInfoMsg] = useState("");
   const [noteBody, setNoteBody] = useState("");
 
-  if (!user || user.role !== "admin") { navigate("/login"); return null; }
+  // Always call all hooks first — redirect in effect
+  useEffect(() => {
+    if (!authLoading && (!user || user.role !== "admin")) {
+      navigate("/login");
+    }
+  }, [user, authLoading, navigate]);
 
   const { data: app, isLoading } = useQuery<RentalApplication>({
     queryKey: ["/api/admin/applications", id],
@@ -226,7 +246,7 @@ export default function AdminRequestDetail() {
       if (!res.ok) throw new Error("Not found");
       return res.json() as Promise<RentalApplication>;
     },
-    enabled: !!id,
+    enabled: !!id && !!user && user.role === "admin",
   });
 
   const { data: notes } = useQuery<AdminNote[]>({
@@ -235,7 +255,7 @@ export default function AdminRequestDetail() {
       const res = await fetch(`/api/admin/notes/rental_application/${id}`, { credentials: "include" });
       return res.json() as Promise<AdminNote[]>;
     },
-    enabled: !!id,
+    enabled: !!id && !!user && user.role === "admin",
   });
 
   const { data: auditLogs } = useQuery<AuditLog[]>({
@@ -244,7 +264,7 @@ export default function AdminRequestDetail() {
       const res = await fetch(`/api/admin/audit/rental_application/${id}`, { credentials: "include" });
       return res.json() as Promise<AuditLog[]>;
     },
-    enabled: !!id,
+    enabled: !!id && !!user && user.role === "admin",
   });
 
   const invalidate = () => {
@@ -295,7 +315,13 @@ export default function AdminRequestDetail() {
     onError: () => toast({ title: "Failed to save note", variant: "destructive" }),
   });
 
-  const isPending = app?.status === "pending" || app?.status === "needs_info";
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Skeleton className="h-8 w-48" />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -316,11 +342,15 @@ export default function AdminRequestDetail() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <p className="text-muted-foreground">Application not found.</p>
-          <Link href="/admin/requests"><Button variant="outline" className="mt-4">Back to requests</Button></Link>
+          <Link href="/admin/requests">
+            <Button variant="outline" className="mt-4">Back to requests</Button>
+          </Link>
         </div>
       </div>
     );
   }
+
+  const isPending = app.status === "pending" || app.status === "needs_info";
 
   return (
     <div className="min-h-screen bg-background">
@@ -399,7 +429,6 @@ export default function AdminRequestDetail() {
       <div className="max-w-5xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left column: applicant info */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Company info */}
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2 mb-3">
               <Building className="w-4 h-4 text-primary" />
@@ -412,7 +441,6 @@ export default function AdminRequestDetail() {
             {app.mcNumber && <InfoRow label="MC" value={app.mcNumber} mono />}
           </div>
 
-          {/* Contact */}
           <div className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-center gap-2 mb-3">
               <User className="w-4 h-4 text-primary" />
@@ -428,7 +456,6 @@ export default function AdminRequestDetail() {
             </div>
           </div>
 
-          {/* Intended Use */}
           <div className="bg-card border border-border rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <Truck className="w-4 h-4 text-primary" />
@@ -440,7 +467,22 @@ export default function AdminRequestDetail() {
             )}
           </div>
 
-          {/* Submitted */}
+          {/* Renter response link (shown when needs_info) */}
+          {app.status === "needs_info" && (
+            <div className="bg-blue-950/30 border border-blue-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <MessageSquare className="w-4 h-4 text-blue-400" />
+                <span className="text-sm font-bold text-blue-400">Renter Response Link</span>
+              </div>
+              <p className="text-xs text-muted-foreground mb-2">
+                Share this link with the renter to let them respond through the site:
+              </p>
+              <code className="text-xs bg-muted px-2 py-1 rounded break-all block">
+                {window.location.origin}/applications/{app.id}/respond
+              </code>
+            </div>
+          )}
+
           <div className="bg-card border border-border rounded-xl p-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="w-3.5 h-3.5" />
@@ -451,7 +493,6 @@ export default function AdminRequestDetail() {
 
         {/* Right column: SAFER, notes, audit */}
         <div className="lg:col-span-2 space-y-5">
-          {/* SAFER panel */}
           <SaferPanel
             saferData={app.saferData}
             onRefresh={() => saferRefreshMut.mutate()}
@@ -470,16 +511,35 @@ export default function AdminRequestDetail() {
                 {notes.map((note) => {
                   const isInfoReq = note.body.startsWith("[More Info Request]");
                   const isCOI = note.body.startsWith("[COI Request]");
+                  const isRenterReply = note.body.startsWith("[Renter Reply]");
                   const body = note.body
                     .replace(/^\[More Info Request\]\s*/, "")
-                    .replace(/^\[COI Request\]\s*/, "");
+                    .replace(/^\[COI Request\]\s*/, "")
+                    .replace(/^\[Renter Reply\]\s*/, "");
+                  const bg = isInfoReq
+                    ? "bg-blue-950/40 border-blue-800"
+                    : isCOI
+                    ? "bg-orange-950/40 border-orange-800"
+                    : isRenterReply
+                    ? "bg-green-950/40 border-green-800"
+                    : "bg-muted border-border";
+                  const label = isInfoReq
+                    ? "More Info Requested"
+                    : isCOI
+                    ? "COI Request Sent"
+                    : isRenterReply
+                    ? "Renter Response"
+                    : null;
+                  const labelColor = isInfoReq
+                    ? "text-blue-400"
+                    : isCOI
+                    ? "text-orange-400"
+                    : isRenterReply
+                    ? "text-green-400"
+                    : "";
                   return (
-                    <div key={note.id} className={`rounded-lg p-3 text-sm border ${isInfoReq ? "bg-blue-950/40 border-blue-800" : isCOI ? "bg-orange-950/40 border-orange-800" : "bg-muted border-border"}`}>
-                      {(isInfoReq || isCOI) && (
-                        <div className={`text-xs font-bold mb-1 ${isInfoReq ? "text-blue-400" : "text-orange-400"}`}>
-                          {isInfoReq ? "More Info Requested" : "COI Request Sent"}
-                        </div>
-                      )}
+                    <div key={note.id} className={`rounded-lg p-3 text-sm border ${bg}`}>
+                      {label && <div className={`text-xs font-bold mb-1 ${labelColor}`}>{label}</div>}
                       <p className="text-foreground whitespace-pre-line">{body}</p>
                       <p className="text-muted-foreground text-xs mt-1">{formatDate(note.createdAt)}</p>
                     </div>
@@ -491,11 +551,11 @@ export default function AdminRequestDetail() {
             )}
 
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Add internal note</Label>
+              <Label className="text-xs text-muted-foreground">Add internal note (not sent to renter)</Label>
               <Textarea
                 value={noteBody}
                 onChange={(e) => setNoteBody(e.target.value)}
-                placeholder="Internal note (not sent to renter)..."
+                placeholder="Internal note..."
                 className="bg-background border-border resize-none text-sm"
                 rows={3}
               />
@@ -583,13 +643,13 @@ export default function AdminRequestDetail() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              Your questions will be emailed to the applicant. They'll be asked to reply by email.
+              Your questions will be emailed to the applicant. They can also respond directly through the site.
             </p>
             <Label>Questions / Information Needed *</Label>
             <Textarea
               value={needsInfoMsg}
               onChange={(e) => setNeedsInfoMsg(e.target.value)}
-              placeholder="e.g. Please provide your certificate of authority number and confirm the primary operating region."
+              placeholder="e.g. Please provide your certificate of authority number and confirm your primary lanes."
               className="bg-background border-border resize-none"
               rows={5}
             />
@@ -606,16 +666,6 @@ export default function AdminRequestDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) {
-  if (!value) return null;
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`text-sm text-foreground ${mono ? "font-mono" : "font-medium"}`}>{value}</span>
     </div>
   );
 }

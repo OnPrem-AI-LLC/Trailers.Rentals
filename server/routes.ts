@@ -378,6 +378,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Public: get application info (limited fields for renter response page) ──
+  app.get("/api/applications/:id/public", async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      return res.json({
+        id: application.id,
+        companyName: application.companyName,
+        ownerName: application.ownerName,
+        status: application.status,
+      });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Public: get questions for renter response page ───────────────────
+  app.get("/api/applications/:id/questions", async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application || application.status !== "needs_info") {
+        return res.json([]);
+      }
+      const notes = await storage.getAdminNotes("rental_application", req.params.id);
+      const questions = notes
+        .filter((n) => n.body.startsWith("[More Info Request]"))
+        .map((n) => ({ body: n.body, createdAt: n.createdAt }));
+      return res.json(questions);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Public: renter submits response to more-info request ─────────────
+  const renterResponseSchema = z.object({ response: z.string().min(1, "Response required") });
+
+  app.post("/api/applications/:id/respond", async (req: Request, res: Response) => {
+    try {
+      const { response } = renterResponseSchema.parse(req.body);
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (application.status !== "needs_info") {
+        return res.status(400).json({ message: "No additional information is currently required for this application." });
+      }
+
+      // Find a system/admin user to attribute note to (use null userId)
+      await storage.createAdminNote({
+        authorId: application.id, // use application ID as placeholder (no user auth on renter side)
+        entityType: "rental_application",
+        entityId: application.id,
+        body: `[Renter Reply] ${response}`,
+        isPinned: false,
+      });
+
+      await storage.createAuditLog({
+        actionType: "renter_replied",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `Renter (${application.companyName}) submitted a response to more-info request`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Admin: list applications ─────────────────────────────────────────
   app.get("/api/admin/applications", requireAdmin, async (req: Request, res: Response) => {
     try {
