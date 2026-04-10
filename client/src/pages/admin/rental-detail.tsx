@@ -35,6 +35,9 @@ interface RentalDetailData {
 }
 
 interface InvoiceData {
+  nextBillingDate: string | null;
+  stripeCustomerUrl: string | null;
+  stripeSubscriptionUrl: string | null;
   charges: {
     id: string; amount: number; currency: string; status: string | null;
     description: string | null; createdAt: string; receiptUrl: string | null;
@@ -523,12 +526,35 @@ export default function AdminRentalDetail() {
                     <div className="pt-2 border-t border-border space-y-2">
                       <div>
                         <div className="text-xs text-muted-foreground mb-0.5">Stripe Customer</div>
-                        <div className="font-mono text-xs text-muted-foreground truncate">{rental.stripeCustomerId}</div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-xs text-muted-foreground truncate">{rental.stripeCustomerId}</span>
+                          {invoiceData?.stripeCustomerUrl && (
+                            <a href={invoiceData.stripeCustomerUrl} target="_blank" rel="noreferrer" title="Open in Stripe" className="text-muted-foreground hover:text-primary flex-shrink-0">
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                       {rental.stripeSubscriptionId && (
                         <div>
                           <div className="text-xs text-muted-foreground mb-0.5">Monthly Subscription</div>
-                          <div className="font-mono text-xs text-green-400 truncate">{rental.stripeSubscriptionId}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs text-green-400 truncate">{rental.stripeSubscriptionId}</span>
+                            {invoiceData?.stripeSubscriptionUrl && (
+                              <a href={invoiceData.stripeSubscriptionUrl} target="_blank" rel="noreferrer" title="Open in Stripe" className="text-muted-foreground hover:text-primary flex-shrink-0">
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {invoiceData?.nextBillingDate && (
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Next Billing Date</div>
+                          <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-primary" />
+                            {new Date(invoiceData.nextBillingDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                          </div>
                         </div>
                       )}
                     </div>

@@ -72,6 +72,7 @@ export interface IStorage {
 
   // Rentals
   getRental(id: string): Promise<Rental | undefined>;
+  getRentalBySubscriptionId(subscriptionId: string): Promise<Rental | undefined>;
   listRentals(companyId?: string): Promise<Rental[]>;
   createRental(rental: InsertRental): Promise<Rental>;
   updateRental(id: string, data: UpdateRental): Promise<Rental | undefined>;
@@ -252,6 +253,11 @@ export class DatabaseStorage implements IStorage {
   // ── Rentals ────────────────────────────────────────────────────────
   async getRental(id: string): Promise<Rental | undefined> {
     const [row] = await db.select().from(rentals).where(eq(rentals.id, id));
+    return row ?? undefined;
+  }
+
+  async getRentalBySubscriptionId(subscriptionId: string): Promise<Rental | undefined> {
+    const [row] = await db.select().from(rentals).where(eq(rentals.stripeSubscriptionId, subscriptionId));
     return row ?? undefined;
   }
 

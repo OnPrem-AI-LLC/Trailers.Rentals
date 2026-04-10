@@ -1957,14 +1957,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied" });
       }
       if (!rental.stripeCustomerId) {
-        return res.json({ charges: [], invoices: [] });
+        return res.json({ charges: [], invoices: [], nextBillingDate: null, stripeCustomerUrl: null, stripeSubscriptionUrl: null });
       }
       const stripe = await getUncachableStripeClient();
       const [chargesResult, invoicesResult] = await Promise.all([
         stripe.charges.list({ customer: rental.stripeCustomerId, limit: 20 }),
         stripe.invoices.list({ customer: rental.stripeCustomerId, limit: 20 }),
       ]);
+
+      // Fetch next billing date from subscription if available
+      let nextBillingDate: string | null = null;
+      if (rental.stripeSubscriptionId) {
+        try {
+          const sub = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
+          if (sub.current_period_end) {
+            nextBillingDate = new Date(sub.current_period_end * 1000).toISOString();
+          }
+        } catch (e) {
+          console.warn('[invoices] Could not fetch subscription for next billing date:', e);
+        }
+      }
+
+      // Build Stripe dashboard links (test mode if not live key)
+      const isTestMode = !process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_');
+      const stripeDash = `https://dashboard.stripe.com${isTestMode ? '/test' : ''}`;
+      const stripeCustomerUrl = rental.stripeCustomerId
+        ? `${stripeDash}/customers/${rental.stripeCustomerId}`
+        : null;
+      const stripeSubscriptionUrl = rental.stripeSubscriptionId
+        ? `${stripeDash}/subscriptions/${rental.stripeSubscriptionId}`
+        : null;
+
       return res.json({
+        nextBillingDate,
+        stripeCustomerUrl,
+        stripeSubscriptionUrl,
         charges: chargesResult.data.map((c) => ({
           id: c.id,
           amount: c.amount,

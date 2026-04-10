@@ -608,3 +608,64 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
     text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
   });
 }
+
+// ── Monthly invoice email ─────────────────────────────────────────────────────
+export interface MonthlyInvoiceEmailData {
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerType: string;
+  trailerVin: string;
+  amount: number;         // cents
+  invoiceUrl: string | null;
+  pdfUrl: string | null;
+  billingPeriod?: string; // e.g. "May 2026"
+}
+
+export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Promise<void> {
+  if (!isConfigured()) {
+    console.log("[email] SendGrid not configured — skipping monthly invoice email");
+    return;
+  }
+
+  const safeName    = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeType    = esc(data.trailerType);
+  const safeVin     = esc(data.trailerVin);
+  const amountStr   = `$${(data.amount / 100).toLocaleString()}`;
+  const period      = data.billingPeriod ? esc(data.billingPeriod) : "this month";
+  const dashUrl     = `${domain()}/dashboard`;
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #0a0a0a; padding: 30px; text-align: center;">
+    <h1 style="color: #f59e0b; margin: 0; font-size: 24px;">Monthly Invoice</h1>
+    <p style="color: #9ca3af; margin: 8px 0 0;">Deluxe Logistics Inc.</p>
+  </div>
+  <div style="background: #111; padding: 30px;">
+    <p style="color: #e5e7eb;">Hi ${safeName},</p>
+    <p style="color: #9ca3af;">Your monthly rental invoice for <strong style="color:#e5e7eb;">${period}</strong> is ready.</p>
+    <div style="background: #1c1c1c; border: 1px solid #333; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width:100%; color:#9ca3af; font-size:14px; border-collapse:collapse;">
+        <tr><td style="padding:4px 0;">Company</td><td style="text-align:right; color:#e5e7eb;">${safeCompany}</td></tr>
+        <tr><td style="padding:4px 0;">Trailer</td><td style="text-align:right; color:#e5e7eb;">${safeType} — VIN ${safeVin}</td></tr>
+        <tr style="border-top:1px solid #333;">
+          <td style="padding:8px 0 4px; font-weight:bold; color:#e5e7eb;">Amount Due</td>
+          <td style="text-align:right; color:#f59e0b; font-weight:bold; font-size:18px;">${amountStr}</td>
+        </tr>
+      </table>
+    </div>
+    ${data.invoiceUrl ? `<div style="text-align:center; margin:24px 0;"><a href="${esc(data.invoiceUrl)}" style="background:#f59e0b; color:#000; padding:12px 28px; border-radius:6px; text-decoration:none; font-weight:bold;">View &amp; Pay Invoice</a></div>` : ''}
+    <p style="color:#6b7280; font-size:13px;">You can also view your payment history in your <a href="${dashUrl}" style="color:#f59e0b;">dashboard</a>.</p>
+    <p style="color:#6b7280; font-size:12px;">Questions? Contact us at <a href="mailto:info@deluxelogistics.com" style="color:#f59e0b;">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Invoice for ${period} — ${safeType} rental (${safeVin})`,
+    html,
+    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? info@deluxelogistics.com\n\nDeluxe Logistics Inc.`,
+  });
+}

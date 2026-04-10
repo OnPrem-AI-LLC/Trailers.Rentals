@@ -1,5 +1,7 @@
-import { getStripeSync } from './stripeClient';
+import { getStripeSync, getUncachableStripeClient } from './stripeClient';
 import { finalizeDepositPayment } from './deposit-service';
+import { storage } from './storage';
+import { sendMonthlyInvoiceEmail } from './email-service';
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
@@ -25,6 +27,7 @@ export class WebhookHandlers {
     }
 
     try {
+      // ── Deposit finalization ─────────────────────────────────────────────────
       if (event.type === 'payment_intent.succeeded') {
         const pi = event.data.object as {
           id: string;
@@ -43,10 +46,132 @@ export class WebhookHandlers {
             result,
           );
         }
+
+      // ── Recurring invoice paid ───────────────────────────────────────────────
       } else if (event.type === 'invoice.paid') {
-        const inv = event.data.object as { id: string; subscription: string | null };
+        const inv = event.data.object as {
+          id: string;
+          subscription: string | null;
+          amount_paid: number;
+          currency: string;
+          hosted_invoice_url: string | null;
+          invoice_pdf: string | null;
+          customer: string | null;
+          period_end?: number;
+          lines?: { data: { description: string | null }[] };
+        };
         console.log(`[webhook] Invoice ${inv.id} paid (subscription: ${inv.subscription ?? 'none'})`);
-        // Future: log receipt to payment history, send invoice email, etc.
+
+        // Skip deposit invoices — they are already handled by payment_intent.succeeded
+        if (!inv.subscription) {
+          console.log(`[webhook] Skipping non-subscription invoice ${inv.id}`);
+          return;
+        }
+
+        // Find the rental by subscriptionId
+        const rental = inv.subscription
+          ? await storage.getRentalBySubscriptionId(inv.subscription)
+          : null;
+
+        if (rental) {
+          // Determine billing period label
+          const periodEnd = inv.period_end
+            ? new Date(inv.period_end * 1000)
+            : new Date();
+          const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+          // Write audit log entry
+          await storage.createAuditLog({
+            userId: null,
+            actionType: 'recurring_payment_received',
+            entityType: 'rental',
+            entityId: rental.id,
+            description: `Recurring monthly invoice paid: $${(inv.amount_paid / 100).toLocaleString()} for ${billingPeriod}. Invoice: ${inv.id}`,
+            isAdminEntry: false,
+            ipAddress: null,
+          });
+
+          // Send renter email
+          try {
+            const user = rental.userId ? await storage.getUser(rental.userId) : null;
+            const trailer = await storage.getTrailer(rental.trailerId);
+            if (user && trailer) {
+              await sendMonthlyInvoiceEmail({
+                renterEmail: user.username,
+                renterName: user.name ?? user.username,
+                companyName: user.name ?? user.username,
+                trailerType: trailer.type,
+                trailerVin: trailer.vin,
+                amount: inv.amount_paid,
+                invoiceUrl: inv.hosted_invoice_url,
+                pdfUrl: inv.invoice_pdf,
+                billingPeriod,
+              });
+            }
+          } catch (emailErr) {
+            console.error('[webhook] Failed to send monthly invoice email:', emailErr);
+          }
+        } else {
+          console.warn(`[webhook] invoice.paid: no rental found for subscription ${inv.subscription}`);
+        }
+
+      // ── Invoice payment failed ───────────────────────────────────────────────
+      } else if (event.type === 'invoice.payment_failed') {
+        const inv = event.data.object as {
+          id: string;
+          subscription: string | null;
+          amount_due: number;
+          attempt_count?: number;
+        };
+        console.warn(`[webhook] Invoice payment FAILED: ${inv.id} (subscription: ${inv.subscription ?? 'none'})`);
+
+        const rental = inv.subscription
+          ? await storage.getRentalBySubscriptionId(inv.subscription)
+          : null;
+
+        if (rental) {
+          await storage.createAuditLog({
+            userId: null,
+            actionType: 'recurring_payment_failed',
+            entityType: 'rental',
+            entityId: rental.id,
+            description: `Recurring payment FAILED: $${(inv.amount_due / 100).toLocaleString()}, invoice ${inv.id}, attempt #${inv.attempt_count ?? 1}. Check Stripe dashboard.`,
+            isAdminEntry: false,
+            ipAddress: null,
+          });
+        }
+
+      // ── Subscription lifecycle ───────────────────────────────────────────────
+      } else if (event.type === 'customer.subscription.deleted') {
+        const sub = event.data.object as { id: string; metadata?: Record<string, string> };
+        const rental = await storage.getRentalBySubscriptionId(sub.id);
+        if (rental) {
+          await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+          await storage.createAuditLog({
+            userId: null,
+            actionType: 'subscription_cancelled',
+            entityType: 'rental',
+            entityId: rental.id,
+            description: `Stripe subscription ${sub.id} was cancelled/deleted (webhook event).`,
+            isAdminEntry: false,
+            ipAddress: null,
+          });
+        }
+
+      } else if (event.type === 'customer.subscription.updated') {
+        const sub = event.data.object as { id: string; status: string };
+        const rental = await storage.getRentalBySubscriptionId(sub.id);
+        if (rental) {
+          await storage.createAuditLog({
+            userId: null,
+            actionType: 'subscription_updated',
+            entityType: 'rental',
+            entityId: rental.id,
+            description: `Stripe subscription ${sub.id} updated — status: ${sub.status}.`,
+            isAdminEntry: false,
+            ipAddress: null,
+          });
+        }
       }
     } catch (err) {
       console.error(`[webhook] Business logic error for ${event.type}:`, err);
