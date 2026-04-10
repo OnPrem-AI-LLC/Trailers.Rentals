@@ -82,7 +82,7 @@ export class WebhookHandlers {
             : new Date();
           const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-          // Write audit log entry
+          // Write audit log entry (email is sent on invoice.finalized to avoid duplicates)
           await storage.createAuditLog({
             userId: null,
             actionType: 'recurring_payment_received',
@@ -92,30 +92,6 @@ export class WebhookHandlers {
             isAdminEntry: false,
             ipAddress: null,
           });
-
-          // Send renter email
-          try {
-            const user = rental.userId ? await storage.getUser(rental.userId) : null;
-            const trailer = await storage.getTrailer(rental.trailerId);
-            const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
-            if (user && trailer) {
-              const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username;
-              const companyName = company?.name ?? displayName;
-              await sendMonthlyInvoiceEmail({
-                renterEmail: user.username,
-                renterName: displayName,
-                companyName,
-                trailerType: trailer.type,
-                trailerVin: trailer.vin,
-                amount: inv.amount_paid,
-                invoiceUrl: inv.hosted_invoice_url,
-                pdfUrl: inv.invoice_pdf,
-                billingPeriod,
-              });
-            }
-          } catch (emailErr) {
-            console.error('[webhook] Failed to send monthly invoice email:', emailErr);
-          }
         } else {
           console.warn(`[webhook] invoice.paid: no rental found for subscription ${inv.subscription}`);
         }

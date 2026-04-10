@@ -85,31 +85,41 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     try {
       const stripe = await getUncachableStripeClient();
 
-      const price = await stripe.prices.create({
-        unit_amount: rental.monthlyRate,
-        currency: 'usd',
-        recurring: { interval: 'month' },
-        product_data: {
-          name: `Trailer Rental — monthly (rental ${rentalId.slice(-8).toUpperCase()})`,
+      // Idempotency key ensures both webhook + client-callback paths produce the same
+      // Stripe Price so duplicate concurrent calls don't create multiple prices.
+      const price = await stripe.prices.create(
+        {
+          unit_amount: rental.monthlyRate,
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product_data: {
+            name: `Trailer Rental — monthly (rental ${rentalId.slice(-8).toUpperCase()})`,
+          },
+          metadata: { rentalId },
         },
-        metadata: { rentalId },
-      });
+        { idempotencyKey: `price_rental_${rentalId}` },
+      );
 
       // trial_end = 30 days from now: the deposit covers the first month,
       // so recurring billing should not start until the next billing cycle.
       const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
-      const subscription = await stripe.subscriptions.create({
-        customer: effectiveCustomerId,
-        items: [{ price: price.id }],
-        metadata: { rentalId, type: 'monthly_rental' },
-        payment_settings: {
-          payment_method_types: ['card'],
-          save_default_payment_method: 'on_subscription',
-        },
-        proration_behavior: 'none',
-        trial_end: trialEnd, // first month already covered by deposit
-      } as Parameters<typeof stripe.subscriptions.create>[0]);
+      // Idempotency key ensures webhook + callback race produces only one subscription.
+      // Stripe returns the cached result if the same key is replayed within 24 h.
+      const subscription = await stripe.subscriptions.create(
+        {
+          customer: effectiveCustomerId,
+          items: [{ price: price.id }],
+          metadata: { rentalId, type: 'monthly_rental' },
+          payment_settings: {
+            payment_method_types: ['card'],
+            save_default_payment_method: 'on_subscription',
+          },
+          proration_behavior: 'none',
+          trial_end: trialEnd, // first month already covered by deposit
+        } as Parameters<typeof stripe.subscriptions.create>[0],
+        { idempotencyKey: `sub_create_rental_${rentalId}` },
+      );
 
       await storage.updateRental(rentalId, { stripeSubscriptionId: subscription.id });
       console.log(`[deposit] Monthly subscription ${subscription.id} created for rental ${rentalId}`);
