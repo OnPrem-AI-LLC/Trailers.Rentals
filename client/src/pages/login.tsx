@@ -11,15 +11,18 @@ import { Lock, Mail, ArrowLeft } from "lucide-react";
 
 export default function Login() {
   const { login, user } = useAuth();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Parse optional redirect query param (e.g. ?redirect=/dashboard/engine-hours/123)
+  const redirectTo = new URLSearchParams(location.split("?")[1] ?? "").get("redirect");
+
   // Redirect if already logged in
   if (user) {
-    navigate(user.role === "admin" ? "/admin" : "/dashboard");
+    navigate(redirectTo && redirectTo.startsWith("/") ? redirectTo : (user.role === "admin" ? "/admin" : "/dashboard"));
     return null;
   }
 
@@ -31,7 +34,8 @@ export default function Login() {
       // login redirects via query cache update — navigate after
       const updated = await fetch("/api/auth/me", { credentials: "include" });
       const me = await updated.json();
-      navigate(me.role === "admin" ? "/admin" : "/dashboard");
+      const dest = redirectTo && redirectTo.startsWith("/") ? redirectTo : (me.role === "admin" ? "/admin" : "/dashboard");
+      navigate(dest);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       toast({

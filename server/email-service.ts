@@ -810,7 +810,9 @@ export interface EngineHoursRequestData {
 
 export async function sendEngineHoursRequest(data: EngineHoursRequestData): Promise<void> {
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping engine hours request"); return; }
-  const submitUrl = `${domain()}/dashboard/engine-hours/${data.rentalId}`;
+  const dashboardUrl = `/dashboard/engine-hours/${data.rentalId}`;
+  // Link to login with a redirect param so logged-out users land directly on the submission page
+  const submitUrl = `${domain()}/login?redirect=${encodeURIComponent(dashboardUrl)}`;
   const safeName = esc(data.renterName);
   const safeCompany = esc(data.companyName);
   const safeVin = esc(data.trailerVin);
