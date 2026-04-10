@@ -39,6 +39,7 @@ function Router() {
       <Route path="/apply/:trailerId" component={Apply} />
       <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
       <Route path="/register/:inviteToken" component={Register} />
+      <Route path="/dashboard/sign-agreement/:rentalId" component={AgreementPage} />
       <Route path="/agreement/:rentalId" component={AgreementPage} />
       <Route component={NotFound} />
     </Switch>

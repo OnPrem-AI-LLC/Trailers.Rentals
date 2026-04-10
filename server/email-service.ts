@@ -442,7 +442,7 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
   const safeVin = esc(data.trailerVin);
   const safeType = esc(data.trailerType);
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
-  const signUrl = `${domain()}/agreement/${data.rentalId}`;
+  const signUrl = `${domain()}/dashboard/sign-agreement/${data.rentalId}`;
 
   if (!isConfigured()) {
     console.log("[email] SendGrid not configured — skipping agreement request email");

@@ -36,6 +36,28 @@ export async function uploadToCloudinary(
   });
 }
 
+export async function uploadRawToCloudinary(
+  buffer: Buffer,
+  folder = "deluxe-agreements",
+  publicId?: string
+): Promise<string> {
+  if (!isCloudinaryConfigured()) {
+    throw new Error("Cloudinary is not configured.");
+  }
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader
+      .upload_stream(
+        { folder, resource_type: "raw", ...(publicId ? { public_id: publicId } : {}) },
+        (error, result) => {
+          if (error) return reject(error);
+          if (!result) return reject(new Error("No result from Cloudinary"));
+          resolve(result.secure_url);
+        }
+      )
+      .end(buffer);
+  });
+}
+
 export async function deleteFromCloudinary(url: string): Promise<void> {
   if (!isCloudinaryConfigured()) return;
   try {

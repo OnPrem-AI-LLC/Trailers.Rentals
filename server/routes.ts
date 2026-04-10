@@ -15,7 +15,7 @@ import {
   type Rental,
 } from "@shared/schema";
 import { requireAuth, requireAdmin, requireRenter } from "./auth";
-import { uploadToCloudinary, isCloudinaryConfigured } from "./cloudinary";
+import { uploadToCloudinary, uploadRawToCloudinary, isCloudinaryConfigured } from "./cloudinary";
 import {
   sendAdminApplicationAlert,
   sendRenterAcknowledgment,
@@ -1231,11 +1231,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "This agreement has already been signed or is no longer pending." });
       }
 
+      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
+
       // Upload signature image to Cloudinary if provided
       let signatureUrl: string | undefined;
       if (signatureImage && isCloudinaryConfigured()) {
         try {
-          // Convert base64 data URL to buffer
           const base64Data = signatureImage.replace(/^data:image\/\w+;base64,/, "");
           const imageBuffer = Buffer.from(base64Data, "base64");
           signatureUrl = await uploadToCloudinary(imageBuffer, `signatures/${req.params.rentalId}`);
@@ -1245,11 +1247,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const signedAt = new Date();
+      const signedAtStr = signedAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+      const monthlyRateStr = `$${(rental.monthlyRate / 100).toLocaleString()}`;
+      const depositStr = `$${((rental.monthlyRate * 2) / 100).toLocaleString()}`;
+
+      // Generate signed agreement HTML document
+      let agreementUrl: string | undefined;
+      if (isCloudinaryConfigured()) {
+        try {
+          const agreementHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rental Agreement — Deluxe Logistics Inc.</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
+  h1 { font-size: 22px; border-bottom: 2px solid #e63946; padding-bottom: 10px; }
+  h2 { font-size: 16px; margin-top: 24px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  td { padding: 8px 12px; border: 1px solid #ddd; font-size: 14px; }
+  td:first-child { background: #f5f5f5; font-weight: bold; width: 35%; }
+  .sig-block { border: 2px solid #1a1a1a; border-radius: 4px; padding: 16px; margin-top: 32px; }
+  .sig-img { max-width: 300px; height: 80px; display: block; margin: 8px 0; border-bottom: 1px solid #333; }
+  .footer { margin-top: 40px; font-size: 12px; color: #666; border-top: 1px solid #ddd; padding-top: 16px; }
+  .watermark { font-size: 11px; color: #999; text-align: center; margin-top: 20px; }
+</style>
+</head>
+<body>
+<h1>TRAILER RENTAL AGREEMENT</h1>
+<p><strong>Deluxe Logistics Inc.</strong><br>818 Corning Way, Martinsburg, WV 25401<br>info@deluxelogistics.com</p>
+
+<h2>Rental Details</h2>
+<table>
+  <tr><td>Agreement ID</td><td>${req.params.rentalId}</td></tr>
+  <tr><td>Date Signed</td><td>${signedAtStr}</td></tr>
+  <tr><td>Equipment Type</td><td>${trailer?.type ?? "Trailer"}</td></tr>
+  <tr><td>VIN</td><td>${trailer?.vin ?? "N/A"}</td></tr>
+  ${trailer?.make ? `<tr><td>Make / Model / Year</td><td>${trailer.make}${trailer.model ? " " + trailer.model : ""}${trailer.year ? " (" + trailer.year + ")" : ""}</td></tr>` : ""}
+  <tr><td>Monthly Rental Rate</td><td>${monthlyRateStr}/month</td></tr>
+  <tr><td>Security Deposit</td><td>${depositStr} (2 months — fully refundable)</td></tr>
+  <tr><td>Mileage</td><td>UNLIMITED — No mileage fees</td></tr>
+  ${pickupDate ? `<tr><td>Requested Pickup Date</td><td>${new Date(pickupDate).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</td></tr>` : ""}
+</table>
+
+<h2>Renter Information</h2>
+<table>
+  <tr><td>Company Name</td><td>${company?.name ?? "N/A"}</td></tr>
+  <tr><td>Owner / Contact</td><td>${company?.ownerName ?? "N/A"}</td></tr>
+  <tr><td>DOT Number</td><td>${company?.dotNumber ?? "N/A"}</td></tr>
+  ${company?.mcNumber ? `<tr><td>MC Number</td><td>${company.mcNumber}</td></tr>` : ""}
+  <tr><td>Address</td><td>${company?.address ?? "N/A"}</td></tr>
+  <tr><td>Phone</td><td>${company?.phone ?? "N/A"}</td></tr>
+  <tr><td>Email</td><td>${user!.username}</td></tr>
+</table>
+
+<h2>Terms &amp; Conditions Summary</h2>
+<ol style="font-size:13px;line-height:1.7;">
+  <li><strong>Payment Terms:</strong> Monthly rental fee of ${monthlyRateStr} due on the same calendar day each month. A 2-month refundable security deposit of ${depositStr} is required before pickup.</li>
+  <li><strong>No Mileage Restrictions:</strong> This agreement includes unlimited mileage — no per-mile charges whatsoever.</li>
+  <li><strong>No Hidden Fees:</strong> Only the monthly rate and refundable deposit. No setup, origination, or administrative fees.</li>
+  <li><strong>Term:</strong> Month-to-month with 30 days written notice required to terminate.</li>
+  <li><strong>Condition &amp; Return:</strong> Equipment must be returned in the same condition as received, accounting for normal wear and tear.</li>
+  <li><strong>Insurance:</strong> Renter must maintain commercial auto insurance (minimum $1,000,000 liability) naming Deluxe Logistics Inc. as additional insured at all times.</li>
+  <li><strong>Permitted Use:</strong> Equipment may only be used for lawful commercial transportation in compliance with all applicable Federal Motor Carrier Safety Administration (FMCSA) regulations.</li>
+  <li><strong>Maintenance:</strong> Renter is responsible for routine maintenance (tires, lights, brakes). Major structural repairs will be addressed by Deluxe Logistics upon timely notice.</li>
+  <li><strong>Breach &amp; Default:</strong> Failure to make timely payment or breach of any material term gives Deluxe Logistics the right to repossess the equipment with 3 days notice.</li>
+  <li><strong>Indemnification:</strong> Renter agrees to indemnify and hold harmless Deluxe Logistics Inc. from any claims, damages, or liabilities arising from renter's use of the equipment.</li>
+  <li><strong>Governing Law:</strong> This agreement shall be governed by the laws of the State of West Virginia. Disputes will be resolved in Berkeley County, WV.</li>
+</ol>
+
+<div class="sig-block">
+  <p style="margin:0 0 8px;font-size:14px;"><strong>Electronic Signature</strong></p>
+  <p style="margin:0 0 4px;font-size:13px;">Signed by: <strong>${signedByName}</strong></p>
+  <p style="margin:0 0 8px;font-size:13px;">Date: ${signedAtStr}</p>
+  ${signatureUrl ? `<img src="${signatureUrl}" alt="Signature" class="sig-img" />` : `<p style="font-style:italic;color:#666;font-size:12px;">Signature captured electronically (typed)</p>`}
+  <p style="margin:8px 0 0;font-size:12px;color:#555;">
+    By signing this agreement electronically, the renter confirms they have read, understand, and agree to all terms and conditions set forth herein.
+    IP Address: ${req.ip ?? "recorded"} · Timestamp: ${signedAt.toISOString()}
+  </p>
+</div>
+
+<div class="footer">
+  <p>This document was generated electronically by Deluxe Logistics Inc. Agreement ID: ${req.params.rentalId}</p>
+</div>
+<div class="watermark">EXECUTED COPY — Deluxe Logistics Inc. · ${signedAtStr}</div>
+</body>
+</html>`;
+          agreementUrl = await uploadRawToCloudinary(
+            Buffer.from(agreementHtml, "utf8"),
+            "agreements",
+            `agreement_${req.params.rentalId}`
+          );
+        } catch (e) {
+          console.warn("[agreement] Cloudinary document upload failed:", e);
+        }
+      }
+
       const updatePayload: UpdateRental = {
         status: "pending_payment",
         agreementSignedAt: signedAt,
         signedByName,
         ...(signatureUrl ? { signatureUrl } : {}),
+        ...(agreementUrl ? { agreementUrl } : {}),
         ...(pickupDate ? { pickupDate: new Date(pickupDate) } : {}),
       };
       const updated = await storage.updateRental(req.params.rentalId, updatePayload);
@@ -1266,8 +1365,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Send emails (non-blocking)
-      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
-      const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
       sendAgreementSignedEmails({
         rentalId: req.params.rentalId,
         companyName: company?.name ?? "Unknown Company",

@@ -394,12 +394,13 @@ export default function AdminRequestDetail() {
   });
 
   // Linked rentals (only when application is approved and has a companyId)
-  const { data: linkedRentals, refetch: refetchRentals } = useQuery<Rental[]>({
+  type EnrichedRental = Rental & { trailerType: string | null; trailerVin: string | null };
+  const { data: linkedRentals, refetch: refetchRentals } = useQuery<EnrichedRental[]>({
     queryKey: ["/api/admin/rentals", "company", app?.companyId],
-    queryFn: async () => {
+    queryFn: async (): Promise<EnrichedRental[]> => {
       const res = await fetch(`/api/admin/rentals?companyId=${app!.companyId}`, { credentials: "include" });
       if (!res.ok) return [];
-      return res.json() as Promise<Rental[]>;
+      return res.json() as Promise<EnrichedRental[]>;
     },
     enabled: !!app?.companyId && app?.status === "approved" && !!user && user.role === "admin",
   });
@@ -787,8 +788,8 @@ export default function AdminRequestDetail() {
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm">{(rental as any).trailerType ?? "Trailer"}</span>
-                            <span className="text-xs text-muted-foreground font-mono">VIN: {(rental as any).trailerVin ?? "—"}</span>
+                            <span className="font-semibold text-sm">{rental.trailerType ?? "Trailer"}</span>
+                            <span className="text-xs text-muted-foreground font-mono">VIN: {rental.trailerVin ?? "—"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             ${((rental.monthlyRate ?? 0) / 100).toLocaleString()}/month
