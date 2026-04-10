@@ -44,8 +44,10 @@ import {
   CreditCard,
   Loader2,
   UserCheck,
+  Send,
+  ClipboardSignature,
 } from "lucide-react";
-import type { RentalApplication, AdminNote, AuditLog, Company, Document } from "@shared/schema";
+import type { Rental, RentalApplication, AdminNote, AuditLog, Company, Document } from "@shared/schema";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-yellow-950 text-yellow-400 border-yellow-800",
@@ -391,6 +393,43 @@ export default function AdminRequestDetail() {
     onError: () => toast({ title: "Failed to update company", variant: "destructive" }),
   });
 
+  // Linked rentals (only when application is approved and has a companyId)
+  const { data: linkedRentals, refetch: refetchRentals } = useQuery<Rental[]>({
+    queryKey: ["/api/admin/rentals", "company", app?.companyId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/rentals?companyId=${app!.companyId}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json() as Promise<Rental[]>;
+    },
+    enabled: !!app?.companyId && app?.status === "approved" && !!user && user.role === "admin",
+  });
+
+  const sendAgreementMut = useMutation({
+    mutationFn: (rentalId: string) =>
+      apiRequest("POST", `/api/admin/rentals/${rentalId}/send-agreement`, {}),
+    onSuccess: () => {
+      toast({ title: "Agreement sent", description: "The renter has been emailed a link to sign their agreement." });
+      refetchRentals();
+    },
+    onError: () => toast({ title: "Failed to send agreement", variant: "destructive" }),
+  });
+
+  const RENTAL_STATUS_LABELS: Record<string, string> = {
+    pending_agreement: "Awaiting Signature",
+    pending_payment: "Awaiting Payment",
+    active: "Active",
+    ended: "Ended",
+    cancelled: "Cancelled",
+  };
+
+  const RENTAL_STATUS_COLORS: Record<string, string> = {
+    pending_agreement: "bg-yellow-950 text-yellow-400 border-yellow-800",
+    pending_payment: "bg-blue-950 text-blue-400 border-blue-800",
+    active: "bg-green-950 text-green-400 border-green-800",
+    ended: "bg-zinc-800 text-zinc-400 border-zinc-600",
+    cancelled: "bg-red-950 text-red-400 border-red-800",
+  };
+
   const DOC_TYPE_LABELS: Record<string, string> = {
     coi: "Certificate of Insurance",
     certificate_of_authority: "Certificate of Authority",
@@ -728,6 +767,69 @@ export default function AdminRequestDetail() {
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">Company profile not available.</p>
+              )}
+            </div>
+          )}
+
+          {/* Linked Rentals — shown when application is approved */}
+          {app.status === "approved" && !isTokenView && (
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <ClipboardSignature className="w-4 h-4 text-primary" />
+                <h3 className="font-bold text-sm uppercase tracking-wider">Linked Rentals</h3>
+              </div>
+              {!linkedRentals || linkedRentals.length === 0 ? (
+                <p className="text-sm text-muted-foreground italic">No rentals linked to this company yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {linkedRentals.map((rental) => (
+                    <div key={rental.id} className="bg-muted/40 border border-border rounded-lg p-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm">{(rental as any).trailerType ?? "Trailer"}</span>
+                            <span className="text-xs text-muted-foreground font-mono">VIN: {(rental as any).trailerVin ?? "—"}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            ${((rental.monthlyRate ?? 0) / 100).toLocaleString()}/month
+                            {rental.pickupDate && (
+                              <span className="ml-2">· Pickup: {new Date(rental.pickupDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                            )}
+                          </p>
+                        </div>
+                        <Badge className={`text-xs border flex-shrink-0 ${RENTAL_STATUS_COLORS[rental.status] ?? "bg-zinc-800 text-zinc-400 border-zinc-600"}`}>
+                          {RENTAL_STATUS_LABELS[rental.status] ?? rental.status}
+                        </Badge>
+                      </div>
+
+                      {/* Signature info */}
+                      {rental.signatureUrl && (
+                        <div className="flex items-center gap-2 text-xs text-green-400 mb-3">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Signed · {rental.agreementSignedAt ? new Date(rental.agreementSignedAt).toLocaleDateString() : ""}
+                          <a href={rental.signatureUrl} target="_blank" rel="noreferrer" className="underline ml-1">View signature</a>
+                        </div>
+                      )}
+
+                      {/* Send Agreement button — only for pending_agreement rentals */}
+                      {rental.status === "pending_agreement" && (
+                        <Button
+                          size="sm"
+                          className="gap-2 bg-primary hover:bg-primary/90 text-white w-full sm:w-auto"
+                          onClick={() => sendAgreementMut.mutate(rental.id)}
+                          disabled={sendAgreementMut.isPending}
+                        >
+                          {sendAgreementMut.isPending ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Send className="w-3.5 h-3.5" />
+                          )}
+                          {sendAgreementMut.isPending ? "Sending..." : "Send Agreement to Renter"}
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}

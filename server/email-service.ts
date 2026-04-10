@@ -328,6 +328,17 @@ export interface AgreementData {
   monthlyRate: number; // cents
   signedAt: Date;
   signedByName: string;
+  pickupDate?: Date;
+}
+
+export interface AgreementRequestData {
+  rentalId: string;
+  companyName: string;
+  renterEmail: string;
+  renterName: string;
+  trailerVin: string;
+  trailerType: string;
+  monthlyRate: number; // cents
 }
 
 export async function sendAgreementSignedEmails(data: AgreementData): Promise<void> {
@@ -363,6 +374,7 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
         <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Signed By</td><td style="padding: 6px 0;">${safeSignedBy}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Date Signed</td><td style="padding: 6px 0;">${esc(signedDate)}</td></tr>
+        ${data.pickupDate ? `<tr><td style="padding: 6px 0; color: #64748b;">Requested Pickup</td><td style="padding: 6px 0; font-weight: bold;">${esc(data.pickupDate.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }))}</td></tr>` : ""}
       </table>
     </div>
     <p><strong>Next Steps:</strong> Our team will review your agreement and reach out regarding payment of the 2-month security deposit to activate your rental.</p>
@@ -396,6 +408,7 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
         <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Signed By</td><td style="padding: 6px 0;">${safeSignedBy}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Date</td><td style="padding: 6px 0;">${esc(signedDate)}</td></tr>
+        ${data.pickupDate ? `<tr><td style="padding: 6px 0; color: #64748b;">Requested Pickup</td><td style="padding: 6px 0; font-weight: bold; color: #e63946;">${esc(data.pickupDate.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }))}</td></tr>` : ""}
       </table>
     </div>
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
@@ -417,7 +430,66 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
       from: FROM,
       subject: `[ACTION NEEDED] Agreement signed — ${data.companyName} awaiting payment`,
       html: adminHtml,
-      text: `${data.companyName} has signed their rental agreement.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nRate: ${monthlyStr}\nSigned By: ${data.signedByName}\nDate: ${signedDate}\n\nView: ${adminUrl}`,
+      text: `${data.companyName} has signed their rental agreement.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nRate: ${monthlyStr}\nSigned By: ${data.signedByName}\nDate: ${signedDate}${data.pickupDate ? `\nRequested Pickup: ${data.pickupDate.toLocaleDateString()}` : ""}\n\nView: ${adminUrl}`,
     }),
   ]);
+}
+
+// ── 7. Agreement request email (admin triggers "please sign" to renter) ─────
+export async function sendAgreementRequestEmail(data: AgreementRequestData): Promise<void> {
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
+  const signUrl = `${domain()}/agreement/${data.rentalId}`;
+
+  if (!isConfigured()) {
+    console.log("[email] SendGrid not configured — skipping agreement request email");
+    return;
+  }
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Your Rental Agreement is Ready to Sign</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Great news — your rental agreement for <strong>${safeType} (VIN: ${safeVin})</strong> is ready for your electronic signature.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Equipment</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">No Mileage Fees</td><td style="padding: 6px 0; color: #22c55e; font-weight: bold;">Unlimited Miles</td></tr>
+      </table>
+    </div>
+    <p>Once you sign, you'll also select your preferred pickup date. After signing, your next step will be paying the 2-month security deposit to activate your rental.</p>
+    <a href="${signUrl}" style="display: inline-block; background: #e63946; color: white; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px; margin-bottom: 16px;">
+      Review &amp; Sign Agreement →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${signUrl}" style="color: #e63946;">${signUrl}</a></p>
+    <p><strong>What to have ready:</strong></p>
+    <ul style="color: #64748b; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.8;">
+      <li>Your full legal name for the signature</li>
+      <li>Your preferred pickup date and time</li>
+    </ul>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;">
+      <strong>Deluxe Logistics Inc.</strong><br/>
+      818 Corning Way, Martinsburg, WV 25401<br/>
+      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+    </p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Action Required: Sign your rental agreement — ${data.trailerType} (${data.trailerVin})`,
+    html,
+    text: `Hi ${data.renterName},\n\nYour rental agreement for ${data.trailerType} VIN: ${data.trailerVin} is ready to sign.\n\nMonthly Rate: ${monthlyStr} — No Mileage Fees\n\nSign here: ${signUrl}\n\nDeluxe Logistics Inc.`,
+  });
 }

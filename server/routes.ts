@@ -1214,11 +1214,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const signAgreementSchema = z.object({
     signedByName: z.string().min(2, "Please enter your full legal name"),
     agreed: z.boolean().refine(v => v === true, "You must agree to the terms"),
+    signatureImage: z.string().optional(), // base64 PNG data URL from canvas
+    pickupDate: z.string().datetime().optional(), // ISO datetime string
   });
 
   app.post("/api/agreements/:rentalId/sign", requireRenter, async (req: Request, res: Response) => {
     try {
-      const { signedByName, agreed } = signAgreementSchema.parse(req.body);
+      const { signedByName, agreed, signatureImage, pickupDate } = signAgreementSchema.parse(req.body);
       if (!agreed) return res.status(400).json({ message: "Agreement not accepted" });
 
       const user = await storage.getUser(req.session.userId!);
@@ -1229,19 +1231,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "This agreement has already been signed or is no longer pending." });
       }
 
+      // Upload signature image to Cloudinary if provided
+      let signatureUrl: string | undefined;
+      if (signatureImage && isCloudinaryConfigured()) {
+        try {
+          // Convert base64 data URL to buffer
+          const base64Data = signatureImage.replace(/^data:image\/\w+;base64,/, "");
+          const imageBuffer = Buffer.from(base64Data, "base64");
+          signatureUrl = await uploadToCloudinary(imageBuffer, `signatures/${req.params.rentalId}`);
+        } catch (e) {
+          console.warn("[signature] Cloudinary upload failed — storing without signature URL:", e);
+        }
+      }
+
       const signedAt = new Date();
-      const updated = await storage.updateRental(req.params.rentalId, {
+      const updatePayload: UpdateRental = {
         status: "pending_payment",
         agreementSignedAt: signedAt,
         signedByName,
-      });
+        ...(signatureUrl ? { signatureUrl } : {}),
+        ...(pickupDate ? { pickupDate: new Date(pickupDate) } : {}),
+      };
+      const updated = await storage.updateRental(req.params.rentalId, updatePayload);
 
       await storage.createAuditLog({
         userId: user!.id,
         actionType: "agreement_signed",
         entityType: "rental",
         entityId: req.params.rentalId,
-        description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId}`,
+        description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId}${pickupDate ? ` — pickup: ${new Date(pickupDate).toLocaleDateString()}` : ""}`,
+        metadata: JSON.stringify({ signatureUrl: signatureUrl ?? null, pickupDate: pickupDate ?? null }),
         isAdminEntry: false,
         ipAddress: req.ip,
       });
@@ -1259,6 +1278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyRate: rental.monthlyRate,
         signedAt,
         signedByName,
+        pickupDate: pickupDate ? new Date(pickupDate) : undefined,
       }).catch(e => console.error("[email] agreement signed email failed:", e));
 
       return res.json({ success: true, rental: updated });
@@ -1269,11 +1289,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/admin/rentals/:id/send-agreement — admin triggers "please sign" email to renter
+  app.post("/api/admin/rentals/:id/send-agreement", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      // Find the renter user linked to this rental's company
+      const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      if (!company) return res.status(400).json({ message: "No company linked to this rental" });
+
+      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
+
+      const { sendAgreementRequestEmail } = await import("./email-service");
+      await sendAgreementRequestEmail({
+        rentalId: rental.id,
+        companyName: company.name,
+        renterEmail: company.email,
+        renterName: company.ownerName,
+        trailerVin: trailer?.vin ?? "N/A",
+        trailerType: trailer?.type ?? "Trailer",
+        monthlyRate: rental.monthlyRate,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "agreement_email_sent",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Admin sent agreement signing request to ${company.email}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Failed to send agreement email" });
+    }
+  });
+
   // ── Admin: rentals ────────────────────────────────────────────────────────
   app.get("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const all = await storage.listRentals();
-      return res.json(all);
+      const companyId = typeof req.query.companyId === "string" ? req.query.companyId : undefined;
+      const all = await storage.listRentals(companyId);
+      // Enrich each rental with trailer type/vin for display
+      const enriched = await Promise.all(
+        all.map(async (r) => {
+          const trailer = await storage.getTrailer(r.trailerId).catch(() => null);
+          return { ...r, trailerType: trailer?.type ?? null, trailerVin: trailer?.vin ?? null };
+        })
+      );
+      return res.json(enriched);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
