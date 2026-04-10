@@ -1976,9 +1976,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ charges: [], invoices: [], nextBillingDate: null, stripeCustomerUrl: null, stripeSubscriptionUrl: null });
       }
       const stripe = await getUncachableStripeClient();
+      // Fetch charges and invoices; we filter client-side by rentalId/subscriptionId
+      // to prevent mixing charges across multiple rentals on the same Stripe customer.
       const [chargesResult, invoicesResult] = await Promise.all([
-        stripe.charges.list({ customer: rental.stripeCustomerId, limit: 20 }),
-        stripe.invoices.list({ customer: rental.stripeCustomerId, limit: 20 }),
+        stripe.charges.list({ customer: rental.stripeCustomerId, limit: 50 }),
+        stripe.invoices.list({ customer: rental.stripeCustomerId, limit: 50 }),
       ]);
 
       // Fetch next billing date from subscription if available
@@ -2005,11 +2007,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? `${stripeDash}/subscriptions/${rental.stripeSubscriptionId}`
         : null;
 
+      // Filter charges to those linked to this rental by metadata (deposit) or
+      // subscription invoices that generated a charge.
+      const rentalCharges = chargesResult.data.filter((c) => {
+        const meta = (c as unknown as { metadata?: Record<string, string> }).metadata ?? {};
+        return meta.rentalId === rental.id;
+      });
+
+      // Filter invoices to those linked to this rental's subscription or
+      // one-off invoices that have rentalId metadata.
+      const rentalInvoices = invoicesResult.data.filter((inv) => {
+        const raw = inv as unknown as { subscription?: string | null; metadata?: Record<string, string> };
+        if (rental.stripeSubscriptionId && raw.subscription === rental.stripeSubscriptionId) return true;
+        return (raw.metadata ?? {}).rentalId === rental.id;
+      });
+
       return res.json({
         nextBillingDate,
         stripeCustomerUrl,
         stripeSubscriptionUrl,
-        charges: chargesResult.data.map((c) => ({
+        charges: rentalCharges.map((c) => ({
           id: c.id,
           amount: c.amount,
           currency: c.currency,
@@ -2018,7 +2035,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           createdAt: new Date(c.created * 1000).toISOString(),
           receiptUrl: c.receipt_url,
         })),
-        invoices: invoicesResult.data.map((inv) => ({
+        invoices: rentalInvoices.map((inv) => ({
           id: inv.id,
           amount: inv.status === "paid" ? inv.amount_paid : inv.amount_due,
           currency: inv.currency,
