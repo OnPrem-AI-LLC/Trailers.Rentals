@@ -57,10 +57,10 @@ Note: `users.username` stores the email address (original field repurposed).
 
 ## Admin Account
 
-The admin account is seeded automatically on first startup.
+The admin account is seeded on first startup.
 
-- **Default email:** `admin@deluxelogistics.com` (override with `ADMIN_EMAIL` env var)
-- **Default password:** `DeluxeAdmin2024!` (override with `ADMIN_PASSWORD` env var)
+- **Production:** Requires `ADMIN_EMAIL` and `ADMIN_PASSWORD` env vars to be set. No admin is seeded without them.
+- **Development only:** Falls back to `admin@deluxelogistics.com` / `DeluxeAdmin2024!` if env vars are unset. These defaults must never be used in production.
 
 ## Color System (Dark Theme)
 
