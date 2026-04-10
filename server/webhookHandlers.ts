@@ -112,14 +112,30 @@ export class WebhookHandlers {
           if (rental) {
             const periodEnd = inv.period_end ? new Date(inv.period_end * 1000) : new Date();
             const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+            // Audit log for invoice generation
+            await storage.createAuditLog({
+              userId: null,
+              actionType: 'invoice_finalized',
+              entityType: 'rental',
+              entityId: rental.id,
+              description: `Monthly invoice finalized: $${(inv.amount_due / 100).toLocaleString()} for ${billingPeriod}. Invoice: ${inv.id}`,
+              isAdminEntry: false,
+              ipAddress: null,
+            });
+
+            // Send invoice email — fall back to company contact if no userId
             try {
               const user = rental.userId ? await storage.getUser(rental.userId) : null;
               const trailer = await storage.getTrailer(rental.trailerId);
               const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
-              if (user && trailer) {
-                const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username;
+              const renterEmail = user?.username ?? company?.email ?? null;
+              if (trailer && renterEmail) {
+                const displayName = user
+                  ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username
+                  : company?.name ?? renterEmail;
                 await sendMonthlyInvoiceEmail({
-                  renterEmail: user.username,
+                  renterEmail,
                   renterName: displayName,
                   companyName: company?.name ?? displayName,
                   trailerType: trailer.type,
@@ -129,6 +145,8 @@ export class WebhookHandlers {
                   pdfUrl: inv.invoice_pdf,
                   billingPeriod,
                 });
+              } else {
+                console.warn(`[webhook] invoice.finalized: no recipient for rental ${rental.id} (userId=${rental.userId ?? 'null'}, company.email=${company?.email ?? 'null'}) — skipping email`);
               }
             } catch (emailErr) {
               console.error('[webhook] Failed to send invoice finalized email:', emailErr);

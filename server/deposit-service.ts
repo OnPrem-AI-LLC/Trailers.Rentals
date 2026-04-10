@@ -165,16 +165,20 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     const trailer = await storage.getTrailer(rental.trailerId);
     if (company && trailer) {
       const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import('./email-service');
-      const emailJobs: Promise<void>[] = [
-        sendDepositReceivedAdminEmail({
-          rentalId,
-          companyName: company.name,
-          trailerVin: trailer.vin,
-          trailerType: trailer.type,
-          monthlyRate: rental.monthlyRate,
-          paymentIntentId,
-        }),
-      ];
+      const emailJobs: Promise<void>[] = [];
+      // Only send emails on first activation — skip on idempotent replays to prevent duplicates
+      if (!wasAlreadyActive) {
+        emailJobs.push(
+          sendDepositReceivedAdminEmail({
+            rentalId,
+            companyName: company.name,
+            trailerVin: trailer.vin,
+            trailerType: trailer.type,
+            monthlyRate: rental.monthlyRate,
+            paymentIntentId,
+          })
+        );
+      }
       // Only send renter email on first activation to avoid duplicate
       if (!wasAlreadyActive) {
         emailJobs.push(
