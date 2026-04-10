@@ -2189,10 +2189,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(rental.trailerId);
       const rateAtTime = trailer?.engineHourRate ?? null;
 
-      // Get previous reading
+      // Get previous reading and enforce monotonically increasing readings
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
       const previousReading = prev?.currentReading ?? null;
-      const hoursUsed = previousReading != null ? Math.max(0, currentReading - previousReading) : null;
+      if (previousReading != null && currentReading <= previousReading) {
+        return res.status(400).json({
+          message: `Reading must be greater than the previous reading (${previousReading} hrs). New reading: ${currentReading} hrs.`,
+        });
+      }
+      const hoursUsed = previousReading != null ? currentReading - previousReading : null;
       const calculatedCharge = (hoursUsed != null && rateAtTime != null) ? hoursUsed * rateAtTime : null;
 
       const entry = await storage.createEngineHourEntry({
@@ -2256,7 +2261,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
       const previousReading = prev?.currentReading ?? null;
-      const hoursUsed = previousReading != null ? Math.max(0, currentReading - previousReading) : null;
+      if (previousReading != null && currentReading <= previousReading) {
+        return res.status(400).json({
+          message: `Reading must be greater than the previous reading (${previousReading} hrs). New reading: ${currentReading} hrs.`,
+        });
+      }
+      const hoursUsed = previousReading != null ? currentReading - previousReading : null;
       const calculatedCharge = (hoursUsed != null && rateAtTime != null) ? hoursUsed * rateAtTime : null;
 
       const entry = await storage.createEngineHourEntry({
@@ -2352,26 +2362,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const stripe = await getUncachableStripeClient();
 
-      // Create an invoice item then finalize a one-off invoice
-      const invoiceItem = await stripe.invoiceItems.create({
+      // Create a pending invoice item attached to the subscription so it is
+      // collected on the customer's next billing cycle invoice (not billed immediately).
+      const invoiceItemPayload: Parameters<typeof stripe.invoiceItems.create>[0] = {
         customer: rental.stripeCustomerId,
         amount: entry.calculatedCharge,
         currency: "usd",
         description: `Engine hour surcharge — ${hoursLabel} on ${trailerLabel}`,
         metadata: { rentalId: rental.id, engineHourEntryId: entry.id, type: "engine_hours" },
-      });
+      };
+      // If the rental has an active subscription, attach directly to that subscription
+      // so Stripe picks it up on the next renewal invoice.
+      if (rental.stripeSubscriptionId) {
+        invoiceItemPayload.subscription = rental.stripeSubscriptionId;
+      }
+      const invoiceItem = await stripe.invoiceItems.create(invoiceItemPayload);
 
-      const invoice = await stripe.invoices.create({
-        customer: rental.stripeCustomerId,
-        auto_advance: true,
-        collection_method: "send_invoice",
-        days_until_due: 7,
-        metadata: { rentalId: rental.id, type: "engine_hours" },
-      });
-
-      await stripe.invoices.finalizeInvoice(invoice.id);
-
-      // Save invoice item ID to mark as billed
+      // Save invoice item ID to mark as queued for billing
       await storage.updateEngineHourEntry(entry.id, { stripeInvoiceItemId: invoiceItem.id });
 
       await storage.createAuditLog({
@@ -2379,13 +2386,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "engine_hours_billed",
         entityType: "rental",
         entityId: req.params.rentalId,
-        description: `Engine hour surcharge of $${(entry.calculatedCharge / 100).toFixed(2)} billed via Stripe invoice ${invoice.id}`,
-        metadata: JSON.stringify({ invoiceId: invoice.id, invoiceItemId: invoiceItem.id, entryId: entry.id }),
+        description: `Engine hour surcharge of $${(entry.calculatedCharge / 100).toFixed(2)} added to next invoice (item ${invoiceItem.id})`,
+        metadata: JSON.stringify({ invoiceItemId: invoiceItem.id, entryId: entry.id }),
         isAdminEntry: true,
         ipAddress: req.ip,
       });
 
-      return res.json({ success: true, invoiceId: invoice.id, invoiceItemId: invoiceItem.id });
+      return res.json({ success: true, invoiceItemId: invoiceItem.id, queuedForNextInvoice: true });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to bill engine hours" });

@@ -236,7 +236,7 @@ export default function AdminRentalDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "engine-hours"] });
       qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "invoices"] });
-      toast({ title: "Billed!", description: "Engine hour surcharge invoiced via Stripe." });
+      toast({ title: "Queued for next invoice!", description: "Engine hour surcharge will appear on the customer's next billing cycle invoice." });
     },
     onError: (err: Error) => toast({ title: "Billing failed", description: err.message, variant: "destructive" }),
   });
@@ -728,7 +728,7 @@ export default function AdminRentalDetail() {
                             disabled={billHoursMut.isPending}
                             onClick={() => billHoursMut.mutate(entry.id)}
                           >
-                            Bill ${(entry.calculatedCharge / 100).toFixed(2)}
+                            Queue ${(entry.calculatedCharge / 100).toFixed(2)} to Next Invoice
                           </Button>
                         )}
                       </div>
