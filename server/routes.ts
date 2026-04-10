@@ -9,7 +9,7 @@ import {
   type RentalApplication,
   type Rental,
 } from "@shared/schema";
-import { requireAuth, requireAdmin } from "./auth";
+import { requireAuth, requireAdmin, requireRenter } from "./auth";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
@@ -301,7 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     rentals: Rental[];
   }
 
-  app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/dashboard", requireRenter, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(404).json({ message: "User not found" });
