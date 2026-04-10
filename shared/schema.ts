@@ -99,11 +99,30 @@ export const rentals = pgTable("rentals", {
   signatureUrl: text("signature_url"),
   signedByName: text("signed_by_name"),
   pickupToken: varchar("pickup_token").unique(),
+  pickupConfirmedAt: timestamp("pickup_confirmed_at"),
+  returnToken: varchar("return_token").unique(),
+  returnConfirmedAt: timestamp("return_confirmed_at"),
   monthlyRate: integer("monthly_rate").notNull(), // in cents
   depositPaid: boolean("deposit_paid").notNull().default(false),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   stripeDepositIntentId: text("stripe_deposit_intent_id"), // active deposit PaymentIntent (reused to prevent duplicates)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Engine Hour Entries ────────────────────────────────────────────────
+export const engineHourEntries = pgTable("engine_hour_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rentalId: varchar("rental_id").notNull(),
+  currentReading: integer("current_reading").notNull(),
+  previousReading: integer("previous_reading"),
+  hoursUsed: integer("hours_used"),
+  rateAtTime: integer("rate_at_time"),
+  calculatedCharge: integer("calculated_charge"),
+  entryType: text("entry_type").notNull().default("renter_submitted"),
+  enteredBy: varchar("entered_by"),
+  notes: text("notes"),
+  stripeInvoiceItemId: text("stripe_invoice_item_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -143,6 +162,29 @@ export const auditLogs = pgTable("audit_logs", {
   metadata: text("metadata"), // JSON string
   ipAddress: text("ip_address"),
   isAdminEntry: boolean("is_admin_entry").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ── Driver Applications ────────────────────────────────────────────────
+export const driverApplications = pgTable("driver_applications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fullName: text("full_name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  cdlNumber: text("cdl_number").notNull(),
+  cdlState: text("cdl_state").notNull(),
+  cdlClass: text("cdl_class").notNull(), // "A" | "B" | "C"
+  yearsExperience: integer("years_experience").notNull(),
+  freightTypes: text("freight_types"), // JSON string array
+  desiredPosition: text("desired_position"), // "otr" | "regional" | "local"
+  hasTwic: boolean("has_twic").notNull().default(false),
+  hasHazmat: boolean("has_hazmat").notNull().default(false),
+  hasTanker: boolean("has_tanker").notNull().default(false),
+  references: text("refs"), // free-form text (column is named "refs" to avoid SQL reserved word)
+  coverLetter: text("cover_letter"),
+  resumeUrl: text("resume_url"),
+  status: text("status").notNull().default("pending"), // "pending" | "reviewed" | "interview" | "hired" | "rejected"
+  adminNotes: text("admin_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -227,6 +269,38 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
   createdAt: true,
 });
 
+export const insertDriverApplicationSchema = createInsertSchema(driverApplications).omit({
+  id: true,
+  createdAt: true,
+  status: true,
+  adminNotes: true,
+  resumeUrl: true,
+}).extend({
+  fullName: z.string().min(2, "Full name required"),
+  email: z.string().email("Valid email required"),
+  phone: z.string().min(7, "Phone required"),
+  cdlNumber: z.string().min(1, "CDL number required"),
+  cdlState: z.string().length(2, "2-letter state code required"),
+  cdlClass: z.enum(["A", "B", "C"]),
+  yearsExperience: z.number().int().min(0).max(60),
+  desiredPosition: z.enum(["otr", "regional", "local"]).optional(),
+  coverLetter: z.string().max(2000).optional(),
+  references: z.string().max(1000).optional(),
+});
+
+export const insertEngineHourEntrySchema = createInsertSchema(engineHourEntries).omit({
+  id: true,
+  createdAt: true,
+  previousReading: true,
+  hoursUsed: true,
+  rateAtTime: true,
+  calculatedCharge: true,
+  stripeInvoiceItemId: true,
+}).extend({
+  currentReading: z.number().int().min(0, "Reading must be 0 or greater"),
+  notes: z.string().max(500).optional(),
+});
+
 // ── Types ──────────────────────────────────────────────────────────────
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -245,6 +319,10 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertEngineHourEntry = z.infer<typeof insertEngineHourEntrySchema>;
+export type EngineHourEntry = typeof engineHourEntries.$inferSelect;
+export type InsertDriverApplication = z.infer<typeof insertDriverApplicationSchema>;
+export type DriverApplication = typeof driverApplications.$inferSelect;
 
 // Trailer with photos joined
 export type TrailerWithPhotos = Trailer & { photos: TrailerPhoto[] };

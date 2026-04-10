@@ -916,16 +916,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allTrailers = await storage.getTrailers(undefined, false);
       const pendingApps = await storage.listRentalApplications("pending");
       const allRentals = await storage.listRentals();
+      const activeRentals = allRentals.filter(r => r.status === "active" || r.status === "active_in_use");
+      const mrr = activeRentals.reduce((sum, r) => sum + r.monthlyRate, 0);
+      const pendingPickups = activeRentals.filter(r => !r.pickupConfirmedAt).length;
       return res.json({
         totalTrailers: allTrailers.filter(t => t.status !== "inactive").length,
         availableTrailers: allTrailers.filter(t => t.status === "available").length,
         rentedTrailers: allTrailers.filter(t => t.status === "rented").length,
         pendingApplications: pendingApps.length,
-        activeRentals: allRentals.filter(r => r.status === "active" || r.status === "active_in_use").length,
+        activeRentals: activeRentals.length,
+        mrr,
+        pendingPickups,
+        utilizationRate: allTrailers.filter(t => t.status !== "inactive").length > 0
+          ? Math.round((allTrailers.filter(t => t.status === "rented").length / allTrailers.filter(t => t.status !== "inactive").length) * 100)
+          : 0,
       });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/fmcsa — standalone FMCSA SAFER lookup for admin portal
+  app.get("/api/admin/fmcsa", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { dot, mc } = req.query as { dot?: string; mc?: string };
+      if (!dot && !mc) return res.status(400).json({ message: "Provide dot or mc query param" });
+      let result = null;
+      if (dot) result = await lookupByDot(dot.trim());
+      if ((!result || !result.success) && mc) result = await lookupByMc(mc.trim());
+      return res.json(result ?? { success: false, error: "No result found" });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "FMCSA lookup failed" });
     }
   });
 
@@ -2096,6 +2119,530 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (err: unknown) {
       console.error("Invoice fetch error:", err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/rentals/:id/info — rental + trailer details for renter (own company) or admin
+  app.get("/api/rentals/:id/info", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const trailer = await storage.getTrailer(rental.trailerId);
+      return res.json({
+        rental,
+        trailer: trailer ? {
+          id: trailer.id,
+          vin: trailer.vin,
+          type: trailer.type,
+          make: trailer.make,
+          year: trailer.year,
+          engineHourRate: trailer.engineHourRate,
+        } : null,
+      });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Engine Hours Tracking ─────────────────────────────────────────────────
+
+  // GET /api/rentals/:id/engine-hours — list entries (admin: any; renter: own company)
+  app.get("/api/rentals/:id/engine-hours", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const entries = await storage.getEngineHourEntries(req.params.id);
+      return res.json(entries);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/rentals/:id/engine-hours — renter submits a reading
+  app.post("/api/rentals/:id/engine-hours", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { insertEngineHourEntrySchema } = await import("@shared/schema");
+      const { currentReading, notes } = insertEngineHourEntrySchema
+        .pick({ currentReading: true, notes: true })
+        .parse(req.body);
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (user.companyId !== rental.companyId) return res.status(403).json({ message: "Access denied" });
+
+      // Get trailer for engine hour rate
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const rateAtTime = trailer?.engineHourRate ?? null;
+
+      // Get previous reading
+      const prev = await storage.getLatestEngineHourEntry(req.params.id);
+      const previousReading = prev?.currentReading ?? null;
+      const hoursUsed = previousReading != null ? Math.max(0, currentReading - previousReading) : null;
+      const calculatedCharge = (hoursUsed != null && rateAtTime != null) ? hoursUsed * rateAtTime : null;
+
+      const entry = await storage.createEngineHourEntry({
+        rentalId: req.params.id,
+        currentReading,
+        previousReading,
+        hoursUsed,
+        rateAtTime,
+        calculatedCharge,
+        entryType: "renter_submitted",
+        enteredBy: user.id,
+        notes: notes ?? null,
+      });
+
+      // Audit log
+      await storage.createAuditLog({
+        userId: user.id,
+        actionType: "engine_hours_submitted",
+        entityType: "rental",
+        entityId: req.params.id,
+        description: `Renter submitted engine hour reading: ${currentReading} hrs${hoursUsed != null ? ` (${hoursUsed} hrs used)` : ""}${calculatedCharge != null ? `, $${(calculatedCharge / 100).toFixed(2)} charge` : ""}`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      // Notify admin via email
+      const { sendEngineHoursReceivedAdmin } = await import("./email-service");
+      const company = await storage.getCompany(rental.companyId).catch(() => null);
+      await sendEngineHoursReceivedAdmin({
+        rentalId: req.params.id,
+        companyName: company?.name ?? "Unknown Company",
+        trailerVin: trailer?.vin ?? "N/A",
+        trailerType: trailer?.type ?? "trailer",
+        currentReading,
+        hoursUsed,
+        calculatedCharge,
+      }).catch((e: unknown) => console.error("[email] engine hours notify failed:", e));
+
+      return res.status(201).json(entry);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/admin/rentals/:id/engine-hours/manual — admin manual entry
+  app.post("/api/admin/rentals/:id/engine-hours/manual", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const schema = z.object({
+        currentReading: z.number().int().min(0),
+        notes: z.string().max(500).optional(),
+      });
+      const { currentReading, notes } = schema.parse(req.body);
+
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const rateAtTime = trailer?.engineHourRate ?? null;
+
+      const prev = await storage.getLatestEngineHourEntry(req.params.id);
+      const previousReading = prev?.currentReading ?? null;
+      const hoursUsed = previousReading != null ? Math.max(0, currentReading - previousReading) : null;
+      const calculatedCharge = (hoursUsed != null && rateAtTime != null) ? hoursUsed * rateAtTime : null;
+
+      const entry = await storage.createEngineHourEntry({
+        rentalId: req.params.id,
+        currentReading,
+        previousReading,
+        hoursUsed,
+        rateAtTime,
+        calculatedCharge,
+        entryType: "admin_manual",
+        enteredBy: req.session.userId!,
+        notes: notes ?? null,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "engine_hours_manual_entry",
+        entityType: "rental",
+        entityId: req.params.id,
+        description: `Admin entered engine hours manually: ${currentReading} hrs${hoursUsed != null ? ` (${hoursUsed} hrs used)` : ""}${calculatedCharge != null ? `, $${(calculatedCharge / 100).toFixed(2)} charge` : ""}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.status(201).json(entry);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/admin/rentals/:id/request-engine-hours — send email request to renter
+  app.post("/api/admin/rentals/:id/request-engine-hours", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const company = await storage.getCompany(rental.companyId).catch(() => null);
+      if (!company?.email) return res.status(400).json({ message: "Company email not on file" });
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const prev = await storage.getLatestEngineHourEntry(req.params.id);
+
+      const { sendEngineHoursRequest } = await import("./email-service");
+      await sendEngineHoursRequest({
+        rentalId: req.params.id,
+        renterEmail: company.email,
+        renterName: company.ownerName,
+        companyName: company.name,
+        trailerVin: trailer?.vin ?? "N/A",
+        trailerType: trailer?.type ?? "trailer",
+        previousReading: prev?.currentReading ?? null,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "engine_hours_requested",
+        entityType: "rental",
+        entityId: req.params.id,
+        description: `Admin requested engine hour reading from ${company.name}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/admin/rentals/:rentalId/engine-hours/:entryId/bill — bill via Stripe
+  app.post("/api/admin/rentals/:rentalId/engine-hours/:entryId/bill", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (!rental.stripeCustomerId) return res.status(400).json({ message: "No Stripe customer on file" });
+
+      const entries = await storage.getEngineHourEntries(req.params.rentalId);
+      const entry = entries.find((e) => e.id === req.params.entryId);
+      if (!entry) return res.status(404).json({ message: "Entry not found" });
+      if (!entry.calculatedCharge || entry.calculatedCharge <= 0) {
+        return res.status(400).json({ message: "No billable amount on this entry" });
+      }
+      if (entry.stripeInvoiceItemId) {
+        return res.status(400).json({ message: "This entry has already been billed" });
+      }
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const trailerLabel = trailer ? `${trailer.type} — VIN ${trailer.vin}` : "Trailer";
+      const hoursLabel = entry.hoursUsed != null ? `${entry.hoursUsed} engine hrs` : "engine hours";
+
+      const stripe = await getUncachableStripeClient();
+
+      // Create an invoice item then finalize a one-off invoice
+      const invoiceItem = await stripe.invoiceItems.create({
+        customer: rental.stripeCustomerId,
+        amount: entry.calculatedCharge,
+        currency: "usd",
+        description: `Engine hour surcharge — ${hoursLabel} on ${trailerLabel}`,
+        metadata: { rentalId: rental.id, engineHourEntryId: entry.id, type: "engine_hours" },
+      });
+
+      const invoice = await stripe.invoices.create({
+        customer: rental.stripeCustomerId,
+        auto_advance: true,
+        collection_method: "send_invoice",
+        days_until_due: 7,
+        metadata: { rentalId: rental.id, type: "engine_hours" },
+      });
+
+      await stripe.invoices.finalizeInvoice(invoice.id);
+
+      // Save invoice item ID to mark as billed
+      await storage.updateEngineHourEntry(entry.id, { stripeInvoiceItemId: invoiceItem.id });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "engine_hours_billed",
+        entityType: "rental",
+        entityId: req.params.rentalId,
+        description: `Engine hour surcharge of $${(entry.calculatedCharge / 100).toFixed(2)} billed via Stripe invoice ${invoice.id}`,
+        metadata: JSON.stringify({ invoiceId: invoice.id, invoiceItemId: invoiceItem.id, entryId: entry.id }),
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true, invoiceId: invoice.id, invoiceItemId: invoiceItem.id });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to bill engine hours" });
+    }
+  });
+
+  // ── QR Code Pickup / Return System ────────────────────────────────────────
+
+  // POST /api/admin/rentals/:id/generate-pickup-qr
+  app.post("/api/admin/rentals/:id/generate-pickup-qr", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      let token = rental.pickupToken;
+      if (!token) {
+        token = require("crypto").randomBytes(24).toString("hex");
+        await storage.updateRental(rental.id, { pickupToken: token });
+      }
+      const url = `${req.protocol}://${req.get("host")}/pickup/${token}`;
+      return res.json({ token, url });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/admin/rentals/:id/generate-return-qr
+  app.post("/api/admin/rentals/:id/generate-return-qr", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      let token = rental.returnToken;
+      if (!token) {
+        token = require("crypto").randomBytes(24).toString("hex");
+        await storage.updateRental(rental.id, { returnToken: token });
+      }
+      const url = `${req.protocol}://${req.get("host")}/return/${token}`;
+      return res.json({ token, url });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/pickup/:token — public
+  app.get("/api/pickup/:token", async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRentalByPickupToken(req.params.token);
+      if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      return res.json({
+        rentalId: rental.id,
+        alreadyConfirmed: !!rental.pickupConfirmedAt,
+        confirmedAt: rental.pickupConfirmedAt,
+        trailerVin: trailer?.vin ?? "Unknown",
+        trailerType: trailer?.type ?? "",
+        trailerMake: trailer?.make ?? "",
+        companyName: company?.name ?? "",
+        startDate: rental.startDate,
+      });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/pickup/:token/confirm — public
+  app.post("/api/pickup/:token/confirm", async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRentalByPickupToken(req.params.token);
+      if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
+      if (rental.pickupConfirmedAt) {
+        return res.json({ success: true, alreadyConfirmed: true, confirmedAt: rental.pickupConfirmedAt });
+      }
+      const now = new Date();
+      await storage.updateRental(rental.id, {
+        pickupConfirmedAt: now,
+        status: "active_in_use",
+        pickupDate: now,
+      });
+      await storage.createAuditLog({
+        entityType: "rental",
+        entityId: rental.id,
+        userId: null,
+        actionType: "pickup_confirmed",
+        metadata: JSON.stringify({ method: "qr_scan" }),
+        isAdminEntry: false,
+        ipAddress: req.ip,
+        description: "Pickup confirmed via QR code scan",
+      });
+      // Send pickup confirmation emails (fire and forget)
+      const pickupTrailer = await storage.getTrailer(rental.trailerId);
+      const pickupCompany = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      if (pickupCompany) {
+        const { sendPickupConfirmedEmails } = await import("./email-service");
+        sendPickupConfirmedEmails({
+          rentalId: rental.id,
+          companyName: pickupCompany.name,
+          renterEmail: pickupCompany.email,
+          renterName: pickupCompany.ownerName,
+          trailerVin: pickupTrailer?.vin ?? "Unknown",
+          trailerType: pickupTrailer?.type ?? "",
+          confirmedAt: now,
+        }).catch(console.error);
+      }
+      return res.json({ success: true, confirmedAt: now });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/return/:token — public
+  app.get("/api/return/:token", async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRentalByReturnToken(req.params.token);
+      if (!rental) return res.status(404).json({ message: "Invalid or expired return link" });
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      return res.json({
+        rentalId: rental.id,
+        alreadyConfirmed: !!rental.returnConfirmedAt,
+        confirmedAt: rental.returnConfirmedAt,
+        trailerVin: trailer?.vin ?? "Unknown",
+        trailerType: trailer?.type ?? "",
+        trailerMake: trailer?.make ?? "",
+        companyName: company?.name ?? "",
+        startDate: rental.startDate,
+      });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/return/:token/confirm — public
+  app.post("/api/return/:token/confirm", async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRentalByReturnToken(req.params.token);
+      if (!rental) return res.status(404).json({ message: "Invalid or expired return link" });
+      if (rental.returnConfirmedAt) {
+        return res.json({ success: true, alreadyConfirmed: true, confirmedAt: rental.returnConfirmedAt });
+      }
+      const now = new Date();
+      await storage.updateRental(rental.id, {
+        returnConfirmedAt: now,
+        status: "completed",
+      });
+      await storage.createAuditLog({
+        entityType: "rental",
+        entityId: rental.id,
+        userId: null,
+        actionType: "return_confirmed",
+        metadata: JSON.stringify({ method: "qr_scan" }),
+        isAdminEntry: false,
+        ipAddress: req.ip,
+        description: "Return confirmed via QR code scan",
+      });
+      // Send return confirmation emails (fire and forget)
+      const trailer2 = await storage.getTrailer(rental.trailerId);
+      const company2 = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      if (company2) {
+        const { sendReturnConfirmedEmails } = await import("./email-service");
+        sendReturnConfirmedEmails({
+          rentalId: rental.id,
+          companyName: company2.name,
+          renterEmail: company2.email,
+          renterName: company2.ownerName,
+          trailerVin: trailer2?.vin ?? "Unknown",
+          trailerType: trailer2?.type ?? "",
+          confirmedAt: now,
+        }).catch(console.error);
+      }
+      return res.json({ success: true, confirmedAt: now });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Driver Applications ──────────────────────────────────────────────
+
+  // POST /api/driver-applications — public submit
+  app.post("/api/driver-applications", async (req: Request, res: Response) => {
+    try {
+      const { insertDriverApplicationSchema } = await import("@shared/schema");
+      const parsed = insertDriverApplicationSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
+      const data = parsed.data;
+      const app2 = await storage.createDriverApplication({
+        ...data,
+        freightTypes: data.freightTypes ?? null,
+        desiredPosition: data.desiredPosition ?? null,
+        references: data.references ?? null,
+        coverLetter: data.coverLetter ?? null,
+      });
+      // Fire-and-forget emails
+      const { sendDriverApplicationConfirmation, sendDriverApplicationAdmin } = await import("./email-service");
+      const emailPayload = {
+        applicationId: app2.id,
+        fullName: app2.fullName,
+        email: app2.email,
+        phone: app2.phone,
+        cdlClass: app2.cdlClass,
+        cdlState: app2.cdlState,
+        yearsExperience: app2.yearsExperience,
+        desiredPosition: app2.desiredPosition,
+        hasTwic: app2.hasTwic,
+        hasHazmat: app2.hasHazmat,
+        hasTanker: app2.hasTanker,
+        coverLetter: app2.coverLetter,
+      };
+      sendDriverApplicationConfirmation(emailPayload).catch(console.error);
+      sendDriverApplicationAdmin(emailPayload).catch(console.error);
+      return res.status(201).json({ success: true, id: app2.id });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/driver-applications — admin list
+  app.get("/api/admin/driver-applications", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const status = typeof req.query.status === "string" ? req.query.status : undefined;
+      const apps = await storage.listDriverApplications(status);
+      return res.json(apps);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/driver-applications/:id — admin single
+  app.get("/api/admin/driver-applications/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const app2 = await storage.getDriverApplication(req.params.id);
+      if (!app2) return res.status(404).json({ message: "Application not found" });
+      return res.json(app2);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/admin/driver-applications/:id — admin update status/notes
+  app.patch("/api/admin/driver-applications/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { status, adminNotes } = req.body as { status?: string; adminNotes?: string };
+      const allowed = ["pending", "reviewed", "interview", "hired", "rejected"];
+      if (status && !allowed.includes(status)) return res.status(400).json({ message: "Invalid status" });
+      const updated = await storage.updateDriverApplication(req.params.id, { ...(status ? { status } : {}), ...(adminNotes !== undefined ? { adminNotes } : {}) });
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      return res.json(updated);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });

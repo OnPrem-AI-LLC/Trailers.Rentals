@@ -16,6 +16,8 @@ import {
   type InsertAuditLog,
   type AdminNote,
   type InsertAdminNote,
+  type EngineHourEntry,
+  type DriverApplication,
   users,
   trailers,
   trailerPhotos,
@@ -25,6 +27,8 @@ import {
   documents,
   auditLogs,
   adminNotes,
+  engineHourEntries,
+  driverApplications,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, ne } from "drizzle-orm";
@@ -73,6 +77,8 @@ export interface IStorage {
   // Rentals
   getRental(id: string): Promise<Rental | undefined>;
   getRentalBySubscriptionId(subscriptionId: string): Promise<Rental | undefined>;
+  getRentalByPickupToken(token: string): Promise<Rental | undefined>;
+  getRentalByReturnToken(token: string): Promise<Rental | undefined>;
   listRentals(companyId?: string): Promise<Rental[]>;
   createRental(rental: InsertRental): Promise<Rental>;
   updateRental(id: string, data: UpdateRental): Promise<Rental | undefined>;
@@ -91,6 +97,18 @@ export interface IStorage {
   // Audit Logs
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>;
+
+  // Engine Hour Entries
+  createEngineHourEntry(entry: typeof engineHourEntries.$inferInsert): Promise<EngineHourEntry>;
+  getEngineHourEntries(rentalId: string): Promise<EngineHourEntry[]>;
+  getLatestEngineHourEntry(rentalId: string): Promise<EngineHourEntry | undefined>;
+  updateEngineHourEntry(id: string, data: Partial<typeof engineHourEntries.$inferInsert>): Promise<EngineHourEntry | undefined>;
+
+  // Driver Applications
+  createDriverApplication(data: typeof driverApplications.$inferInsert): Promise<DriverApplication>;
+  getDriverApplication(id: string): Promise<DriverApplication | undefined>;
+  listDriverApplications(status?: string): Promise<DriverApplication[]>;
+  updateDriverApplication(id: string, data: Partial<typeof driverApplications.$inferInsert>): Promise<DriverApplication | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -261,6 +279,16 @@ export class DatabaseStorage implements IStorage {
     return row ?? undefined;
   }
 
+  async getRentalByPickupToken(token: string): Promise<Rental | undefined> {
+    const [row] = await db.select().from(rentals).where(eq(rentals.pickupToken, token));
+    return row ?? undefined;
+  }
+
+  async getRentalByReturnToken(token: string): Promise<Rental | undefined> {
+    const [row] = await db.select().from(rentals).where(eq(rentals.returnToken, token));
+    return row ?? undefined;
+  }
+
   async listRentals(companyId?: string): Promise<Rental[]> {
     if (companyId) {
       return db
@@ -355,6 +383,70 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(auditLogs.createdAt));
     }
     return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  }
+
+  // ── Engine Hour Entries ────────────────────────────────────────────
+  async createEngineHourEntry(entry: typeof engineHourEntries.$inferInsert): Promise<EngineHourEntry> {
+    const [row] = await db.insert(engineHourEntries).values(entry).returning();
+    return row;
+  }
+
+  async getEngineHourEntries(rentalId: string): Promise<EngineHourEntry[]> {
+    return db
+      .select()
+      .from(engineHourEntries)
+      .where(eq(engineHourEntries.rentalId, rentalId))
+      .orderBy(desc(engineHourEntries.createdAt));
+  }
+
+  async getLatestEngineHourEntry(rentalId: string): Promise<EngineHourEntry | undefined> {
+    const [row] = await db
+      .select()
+      .from(engineHourEntries)
+      .where(eq(engineHourEntries.rentalId, rentalId))
+      .orderBy(desc(engineHourEntries.createdAt))
+      .limit(1);
+    return row ?? undefined;
+  }
+
+  async updateEngineHourEntry(id: string, data: Partial<typeof engineHourEntries.$inferInsert>): Promise<EngineHourEntry | undefined> {
+    const [row] = await db
+      .update(engineHourEntries)
+      .set(data)
+      .where(eq(engineHourEntries.id, id))
+      .returning();
+    return row ?? undefined;
+  }
+
+  // ── Driver Applications ─────────────────────────────────────────────
+  async createDriverApplication(data: typeof driverApplications.$inferInsert): Promise<DriverApplication> {
+    const [row] = await db.insert(driverApplications).values(data).returning();
+    return row;
+  }
+
+  async getDriverApplication(id: string): Promise<DriverApplication | undefined> {
+    const [row] = await db.select().from(driverApplications).where(eq(driverApplications.id, id));
+    return row ?? undefined;
+  }
+
+  async listDriverApplications(status?: string): Promise<DriverApplication[]> {
+    if (status) {
+      return db
+        .select()
+        .from(driverApplications)
+        .where(eq(driverApplications.status, status))
+        .orderBy(desc(driverApplications.createdAt));
+    }
+    return db.select().from(driverApplications).orderBy(desc(driverApplications.createdAt));
+  }
+
+  async updateDriverApplication(id: string, data: Partial<typeof driverApplications.$inferInsert>): Promise<DriverApplication | undefined> {
+    const [row] = await db
+      .update(driverApplications)
+      .set(data)
+      .where(eq(driverApplications.id, id))
+      .returning();
+    return row ?? undefined;
   }
 }
 

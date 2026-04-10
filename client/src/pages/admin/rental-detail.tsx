@@ -1,4 +1,5 @@
 import { useState } from "react";
+import QRCode from "qrcode";
 import { useLocation, Link, useParams } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
@@ -14,8 +15,10 @@ import {
   Truck, Building2, ChevronLeft, FileText, ExternalLink, CheckCircle,
   CreditCard, Calendar, Clock, AlertTriangle, Receipt, Download,
   Activity, DollarSign, User, Hash, Mail, Phone, PlusCircle, XCircle,
+  Gauge, Send, QrCode, PackageCheck, RotateCcw,
 } from "lucide-react";
-import type { Rental, Document, AuditLog, Company } from "@shared/schema";
+import { Textarea } from "@/components/ui/textarea";
+import type { Rental, Document, AuditLog, Company, EngineHourEntry } from "@shared/schema";
 
 interface TrailerInfo {
   id: string;
@@ -73,6 +76,11 @@ export default function AdminRentalDetail() {
   const [invoiceAmount, setInvoiceAmount] = useState("");
   const [invoiceDesc, setInvoiceDesc] = useState("");
   const [cancelSubConfirm, setCancelSubConfirm] = useState(false);
+  const [showManualHoursForm, setShowManualHoursForm] = useState(false);
+  const [manualReading, setManualReading] = useState("");
+  const [manualNotes, setManualNotes] = useState("");
+  const [pickupQR, setPickupQR] = useState<{ url: string; dataUrl: string } | null>(null);
+  const [returnQR, setReturnQR] = useState<{ url: string; dataUrl: string } | null>(null);
 
   const { data, isLoading } = useQuery<RentalDetailData>({
     queryKey: ["/api/admin/rentals", rentalId],
@@ -180,6 +188,83 @@ export default function AdminRentalDetail() {
       toast({ title: "Subscription created", description: "Monthly billing is now active." });
     },
     onError: (err: Error) => toast({ title: "Failed to create subscription", description: err.message, variant: "destructive" }),
+  });
+
+  // Engine Hours
+  const { data: engineHours = [], isLoading: hoursLoading } = useQuery<EngineHourEntry[]>({
+    queryKey: ["/api/rentals", rentalId, "engine-hours"],
+    queryFn: async () => {
+      const res = await fetch(`/api/rentals/${rentalId}/engine-hours`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load engine hours");
+      return res.json();
+    },
+    enabled: !!user && !!rentalId,
+  });
+
+  const requestHoursMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/request-engine-hours`, {});
+      if (!res.ok) { const e = await res.json() as { message: string }; throw new Error(e.message); }
+      return res.json();
+    },
+    onSuccess: () => toast({ title: "Request sent!", description: "Renter emailed a link to submit their engine hours." }),
+    onError: (err: Error) => toast({ title: "Failed to send request", description: err.message, variant: "destructive" }),
+  });
+
+  const manualEntryMut = useMutation({
+    mutationFn: async (payload: { currentReading: number; notes?: string }) => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/engine-hours/manual`, payload);
+      if (!res.ok) { const e = await res.json() as { message: string }; throw new Error(e.message); }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "engine-hours"] });
+      setShowManualHoursForm(false);
+      setManualReading("");
+      setManualNotes("");
+      toast({ title: "Entry logged!", description: "Manual engine hour entry saved." });
+    },
+    onError: (err: Error) => toast({ title: "Failed to log entry", description: err.message, variant: "destructive" }),
+  });
+
+  const billHoursMut = useMutation({
+    mutationFn: async (entryId: string) => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/engine-hours/${entryId}/bill`, {});
+      if (!res.ok) { const e = await res.json() as { message: string }; throw new Error(e.message); }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "engine-hours"] });
+      qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "invoices"] });
+      toast({ title: "Billed!", description: "Engine hour surcharge invoiced via Stripe." });
+    },
+    onError: (err: Error) => toast({ title: "Billing failed", description: err.message, variant: "destructive" }),
+  });
+
+  const genPickupQRMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/generate-pickup-qr`, {});
+      if (!res.ok) { const e = await res.json() as { message: string }; throw new Error(e.message); }
+      return res.json() as Promise<{ token: string; url: string }>;
+    },
+    onSuccess: async (data) => {
+      const dataUrl = await QRCode.toDataURL(data.url, { width: 240, margin: 2 });
+      setPickupQR({ url: data.url, dataUrl });
+    },
+    onError: (err: Error) => toast({ title: "Failed to generate QR", description: err.message, variant: "destructive" }),
+  });
+
+  const genReturnQRMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/generate-return-qr`, {});
+      if (!res.ok) { const e = await res.json() as { message: string }; throw new Error(e.message); }
+      return res.json() as Promise<{ token: string; url: string }>;
+    },
+    onSuccess: async (data) => {
+      const dataUrl = await QRCode.toDataURL(data.url, { width: 240, margin: 2 });
+      setReturnQR({ url: data.url, dataUrl });
+    },
+    onError: (err: Error) => toast({ title: "Failed to generate QR", description: err.message, variant: "destructive" }),
   });
 
   if (authLoading || !user) {
@@ -438,6 +523,219 @@ export default function AdminRentalDetail() {
                   </div>
                 </div>
               )}
+
+              {/* QR Code Pickup / Return */}
+              <div className="bg-card border border-border rounded-xl p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <QrCode className="w-4 h-4 text-primary" />
+                  <h2 className="font-bold text-sm uppercase tracking-wider">Pickup &amp; Return QR Codes</h2>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Pickup QR */}
+                  <div className="bg-secondary/20 border border-border rounded-xl p-4 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-amber-400">
+                      <PackageCheck className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase tracking-wider">Pickup</span>
+                    </div>
+                    {rental?.pickupConfirmedAt ? (
+                      <div className="flex flex-col items-center gap-1 text-center">
+                        <CheckCircle className="w-8 h-8 text-green-400" />
+                        <span className="text-xs text-green-400 font-semibold">Picked Up</span>
+                        <span className="text-[10px] text-muted-foreground">{new Date(rental.pickupConfirmedAt).toLocaleString()}</span>
+                      </div>
+                    ) : pickupQR ? (
+                      <>
+                        <img src={pickupQR.dataUrl} alt="Pickup QR Code" className="rounded-lg w-40 h-40 bg-white p-1" />
+                        <p className="text-[10px] text-muted-foreground text-center break-all">{pickupQR.url}</p>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-[10px] text-muted-foreground gap-1"
+                          onClick={() => genPickupQRMut.mutate()}
+                          disabled={genPickupQRMut.isPending}
+                        >
+                          <RotateCcw className="w-3 h-3" />Regenerate
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-amber-800 text-amber-400 hover:bg-amber-950 text-xs gap-1.5"
+                        disabled={genPickupQRMut.isPending}
+                        onClick={() => genPickupQRMut.mutate()}
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        {genPickupQRMut.isPending ? "Generating…" : "Generate Pickup QR"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Return QR */}
+                  <div className="bg-secondary/20 border border-border rounded-xl p-4 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-blue-400">
+                      <RotateCcw className="w-4 h-4" />
+                      <span className="text-xs font-bold uppercase tracking-wider">Return</span>
+                    </div>
+                    {rental?.returnConfirmedAt ? (
+                      <div className="flex flex-col items-center gap-1 text-center">
+                        <CheckCircle className="w-8 h-8 text-green-400" />
+                        <span className="text-xs text-green-400 font-semibold">Returned</span>
+                        <span className="text-[10px] text-muted-foreground">{new Date(rental.returnConfirmedAt).toLocaleString()}</span>
+                      </div>
+                    ) : returnQR ? (
+                      <>
+                        <img src={returnQR.dataUrl} alt="Return QR Code" className="rounded-lg w-40 h-40 bg-white p-1" />
+                        <p className="text-[10px] text-muted-foreground text-center break-all">{returnQR.url}</p>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-[10px] text-muted-foreground gap-1"
+                          onClick={() => genReturnQRMut.mutate()}
+                          disabled={genReturnQRMut.isPending}
+                        >
+                          <RotateCcw className="w-3 h-3" />Regenerate
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-blue-800 text-blue-400 hover:bg-blue-950 text-xs gap-1.5"
+                        disabled={genReturnQRMut.isPending}
+                        onClick={() => genReturnQRMut.mutate()}
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        {genReturnQRMut.isPending ? "Generating…" : "Generate Return QR"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Engine Hours */}
+              <div className="bg-card border border-border rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Gauge className="w-4 h-4 text-primary" />
+                    <h2 className="font-bold text-sm uppercase tracking-wider">Engine Hours</h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1.5 border-border"
+                      disabled={requestHoursMut.isPending}
+                      onClick={() => requestHoursMut.mutate()}
+                    >
+                      <Send className="w-3 h-3" />
+                      {requestHoursMut.isPending ? "Sending…" : "Request Reading"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1.5 border-border"
+                      onClick={() => setShowManualHoursForm((v) => !v)}
+                    >
+                      <PlusCircle className="w-3 h-3" />
+                      Manual Entry
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Manual entry form */}
+                {showManualHoursForm && (
+                  <div className="mb-4 p-3 bg-secondary/30 rounded-lg space-y-2 border border-border">
+                    <p className="text-xs text-muted-foreground">Enter the current engine hour reading from the trailer.</p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="e.g. 12450"
+                        value={manualReading}
+                        onChange={(e) => setManualReading(e.target.value)}
+                        className="h-8 text-sm w-36"
+                      />
+                      <span className="text-xs text-muted-foreground">hours</span>
+                    </div>
+                    <Textarea
+                      placeholder="Notes (optional)"
+                      value={manualNotes}
+                      onChange={(e) => setManualNotes(e.target.value)}
+                      rows={2}
+                      className="text-sm"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-primary hover:bg-primary/90 text-white"
+                        disabled={manualEntryMut.isPending || !manualReading}
+                        onClick={() => {
+                          const val = parseInt(manualReading, 10);
+                          if (isNaN(val) || val < 0) {
+                            toast({ title: "Invalid reading", description: "Enter a valid hour reading", variant: "destructive" });
+                            return;
+                          }
+                          manualEntryMut.mutate({ currentReading: val, notes: manualNotes || undefined });
+                        }}
+                      >
+                        {manualEntryMut.isPending ? "Saving…" : "Save Entry"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setShowManualHoursForm(false); setManualReading(""); setManualNotes(""); }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Entries list */}
+                {hoursLoading ? (
+                  <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>
+                ) : engineHours.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic">No engine hour readings recorded yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {engineHours.map((entry) => (
+                      <div key={entry.id} className="flex items-start justify-between gap-3 p-3 bg-secondary/20 rounded-lg border border-border/50">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-base">{entry.currentReading.toLocaleString()} hrs</span>
+                            <Badge className={`text-[10px] ${entry.entryType === "admin_manual" ? "bg-purple-950 border-purple-800 text-purple-300" : "bg-blue-950 border-blue-800 text-blue-300"}`}>
+                              {entry.entryType === "admin_manual" ? "Admin" : "Renter"}
+                            </Badge>
+                          </div>
+                          {entry.hoursUsed != null && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {entry.hoursUsed} hrs used
+                              {entry.calculatedCharge != null && (
+                                <span className="ml-1.5 text-amber-400 font-medium">
+                                  → ${(entry.calculatedCharge / 100).toFixed(2)} surcharge
+                                </span>
+                              )}
+                              {entry.stripeInvoiceItemId && (
+                                <span className="ml-1.5 text-green-400">✓ Billed</span>
+                              )}
+                            </div>
+                          )}
+                          {entry.notes && <div className="text-xs text-muted-foreground mt-0.5 italic">"{entry.notes}"</div>}
+                          <div className="text-xs text-muted-foreground mt-0.5">{new Date(entry.createdAt).toLocaleString()}</div>
+                        </div>
+                        {/* Bill button */}
+                        {entry.calculatedCharge != null && entry.calculatedCharge > 0 && !entry.stripeInvoiceItemId && rental?.stripeCustomerId && (
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs bg-amber-700 hover:bg-amber-600 text-white flex-shrink-0"
+                            disabled={billHoursMut.isPending}
+                            onClick={() => billHoursMut.mutate(entry.id)}
+                          >
+                            Bill ${(entry.calculatedCharge / 100).toFixed(2)}
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right sidebar — admin controls */}

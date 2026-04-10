@@ -23,6 +23,11 @@ import AgreementPage from "@/pages/agreement";
 import AdminRentals from "@/pages/admin/rentals";
 import AdminRentalDetail from "@/pages/admin/rental-detail";
 import PaymentPage from "@/pages/payment";
+import EngineHoursPage from "@/pages/engine-hours";
+import PickupConfirmPage from "@/pages/pickup-confirm";
+import ReturnConfirmPage from "@/pages/return-confirm";
+import AdminFMCSAPage from "@/pages/admin/fmcsa";
+import AdminDriverApplications from "@/pages/admin/driver-applications";
 
 function Router() {
   return (
@@ -46,7 +51,12 @@ function Router() {
       <Route path="/register/:inviteToken" component={Register} />
       <Route path="/dashboard/sign-agreement/:rentalId" component={AgreementPage} />
       <Route path="/dashboard/payment/:rentalId" component={PaymentPage} />
+      <Route path="/dashboard/engine-hours/:rentalId" component={EngineHoursPage} />
       <Route path="/agreement/:rentalId" component={AgreementPage} />
+      <Route path="/pickup/:token" component={PickupConfirmPage} />
+      <Route path="/return/:token" component={ReturnConfirmPage} />
+      <Route path="/admin/fmcsa" component={AdminFMCSAPage} />
+      <Route path="/admin/driver-applications" component={AdminDriverApplications} />
       <Route component={NotFound} />
     </Switch>
   );

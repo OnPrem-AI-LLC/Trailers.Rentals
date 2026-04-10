@@ -127,9 +127,22 @@ The admin account is seeded on first startup.
   - Email #8: sendDepositConfirmedEmail() — renter activation confirmation
   - Auto monthly subscription created after deposit (Stripe Price + Subscription auto-created)
 
+- [x] Task 7: Engine Hours Tracking
+  - `engine_hour_entries` table (8 cols); `engineHourRate` on trailers (cents/hr, reefers only)
+  - Renter page `/dashboard/engine-hours/:rentalId` — live charge preview, history list, submit reading
+  - Admin rental detail panel — request reading via email, manual entry form, bill-to-Stripe button per entry
+  - 5 API routes: GET list, POST renter submit, POST admin manual, POST request email, POST bill via Stripe
+  - 2 email helpers: `sendEngineHoursRequest`, `sendEngineHoursReceivedAdmin`
+  - Renter endpoint uses `/api/rentals/:id/info` (not admin endpoint)
+
+- [x] Task 8: QR Code Pickup / Return System
+  - `pickup_token`, `pickup_confirmed_at`, `return_token`, `return_confirmed_at` added to rentals
+  - Public pages `/pickup/:token` and `/return/:token` — mobile-friendly tap-to-confirm UI
+  - Admin rental detail panel — "Pickup & Return QR Codes" section, generate QR (shows scannable PNG), shows timestamp when confirmed
+  - 6 API routes: generate-pickup-qr, generate-return-qr, GET/POST pickup/:token, GET/POST return/:token
+  - Confirmation updates rental status + creates audit log entry
+
 ### Pending
-- [ ] Task 7: Engine Hour Tracking (reefer units)
-- [ ] Task 8: QR Code Pickup System
 - [ ] Task 9: Admin Tools (audit logs, FMCSA, document management)
 - [ ] Task 10: Email Automation (SendGrid)
 - [ ] Task 11: Driver Hiring (full application form)

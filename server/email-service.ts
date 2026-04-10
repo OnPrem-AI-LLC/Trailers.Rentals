@@ -669,3 +669,330 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? info@deluxelogistics.com\n\nDeluxe Logistics Inc.`,
   });
 }
+
+// ── QR Pickup confirmed notification ──────────────────────────────────────────
+export interface QREventData {
+  rentalId: string;
+  companyName: string;
+  renterEmail: string;
+  renterName: string;
+  trailerVin: string;
+  trailerType: string;
+  confirmedAt: Date;
+}
+
+export async function sendPickupConfirmedEmails(data: QREventData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping pickup confirmed email"); return; }
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const dateStr = esc(data.confirmedAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }));
+  const dashUrl = `${domain()}/dashboard`;
+
+  const renterHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #052e16; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #4ade80; margin: 0; font-size: 20px;">Pickup Confirmed!</h1>
+    <p style="color: #86efac; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Your trailer pickup has been confirmed. Welcome aboard!</p>
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Pickup Confirmed</td><td style="padding: 4px 0; color: #16a34a;">${dateStr}</td></tr>
+      </table>
+    </div>
+    <p>Your rental is now <strong style="color: #16a34a;">in use</strong>. Monthly billing is active. View your dashboard to track invoices and documents.</p>
+    <a href="${dashUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Dashboard →
+    </a>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  const adminHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #052e16; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #4ade80; margin: 0; font-size: 18px;">Pickup Confirmed via QR Scan</h1>
+    <p style="color: #86efac; margin: 6px 0 0;">Deluxe Logistics Admin</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p><strong>${safeCompany}</strong> has scanned the pickup QR code and confirmed trailer receipt.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0;">${safeCompany}</td></tr>
+      <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+      <tr><td style="padding: 4px 0; color: #64748b;">Confirmed At</td><td style="padding: 4px 0; color: #16a34a;">${dateStr}</td></tr>
+    </table>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold;">View Rental →</a>
+  </div>
+</div>`;
+
+  await Promise.allSettled([
+    sgMail.send({ to: data.renterEmail, from: FROM, subject: `Pickup confirmed — ${data.trailerType} (${data.trailerVin})`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nPickup Time: ${dateStr}\n\nView your dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.` }),
+    sgMail.send({ to: ADMIN_EMAIL, from: FROM, subject: `[Pickup] ${data.companyName} confirmed pickup via QR`, html: adminHtml, text: `${data.companyName} confirmed pickup via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }),
+  ]);
+}
+
+export async function sendReturnConfirmedEmails(data: QREventData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping return confirmed email"); return; }
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const dateStr = esc(data.confirmedAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }));
+  const dashUrl = `${domain()}/dashboard`;
+
+  const renterHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #0c1a2e; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #60a5fa; margin: 0; font-size: 20px;">Return Confirmed — Thank You!</h1>
+    <p style="color: #93c5fd; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Your trailer return has been confirmed. Thank you for choosing Deluxe Logistics!</p>
+    <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Return Confirmed</td><td style="padding: 4px 0; color: #2563eb;">${dateStr}</td></tr>
+      </table>
+    </div>
+    <p>Your rental has been marked as <strong>completed</strong>. Any outstanding invoices will be finalized shortly.</p>
+    <a href="${dashUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Dashboard →
+    </a>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  const adminHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #0c1a2e; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #60a5fa; margin: 0; font-size: 18px;">Return Confirmed via QR Scan</h1>
+    <p style="color: #93c5fd; margin: 6px 0 0;">Deluxe Logistics Admin</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p><strong>${safeCompany}</strong> has scanned the return QR code and confirmed trailer return. Rental is now <strong>completed</strong>.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0;">${safeCompany}</td></tr>
+      <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+      <tr><td style="padding: 4px 0; color: #64748b;">Return Time</td><td style="padding: 4px 0; color: #2563eb;">${dateStr}</td></tr>
+    </table>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold;">View Rental →</a>
+  </div>
+</div>`;
+
+  await Promise.allSettled([
+    sgMail.send({ to: data.renterEmail, from: FROM, subject: `Return confirmed — ${data.trailerType} (${data.trailerVin}) — Thank you!`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer return has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReturn Time: ${dateStr}\n\nThank you for choosing Deluxe Logistics!\n\nDeluxe Logistics Inc.` }),
+    sgMail.send({ to: ADMIN_EMAIL, from: FROM, subject: `[Return] ${data.companyName} returned trailer via QR`, html: adminHtml, text: `${data.companyName} confirmed return via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }),
+  ]);
+}
+
+// ── Engine Hours: Request email ─────────────────────────────────────────────
+export interface EngineHoursRequestData {
+  rentalId: string;
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerVin: string;
+  trailerType: string;
+  previousReading?: number | null;
+}
+
+export async function sendEngineHoursRequest(data: EngineHoursRequestData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping engine hours request"); return; }
+  const submitUrl = `${domain()}/dashboard/engine-hours/${data.rentalId}`;
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const prevReading = data.previousReading != null ? data.previousReading.toLocaleString() : "None";
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Engine Hour Reading Requested</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Deluxe Logistics is requesting your current reefer engine hour reading for your trailer.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Last Reading</td><td style="padding: 4px 0;">${prevReading} hours</td></tr>
+      </table>
+    </div>
+    <p>Please submit your current hour reading using the button below:</p>
+    <a href="${esc(submitUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      Submit Engine Hours →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or paste this link: <a href="${esc(submitUrl)}" style="color: #e63946;">${esc(submitUrl)}</a></p>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Engine hour reading requested — ${safeType} VIN ${safeVin}`,
+    html,
+    text: `Hi ${data.renterName},\n\nDeluxe Logistics is requesting your current reefer engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nLast Reading: ${prevReading} hours\n\nSubmit here: ${submitUrl}\n\nDeluxe Logistics Inc.`,
+  });
+}
+
+// ── Engine Hours: Admin notification when renter submits ───────────────────
+export interface EngineHoursSubmittedData {
+  rentalId: string;
+  companyName: string;
+  trailerVin: string;
+  trailerType: string;
+  currentReading: number;
+  hoursUsed: number | null;
+  calculatedCharge: number | null;
+}
+
+export async function sendEngineHoursReceivedAdmin(data: EngineHoursSubmittedData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping engine hours admin notify"); return; }
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const chargeStr = data.calculatedCharge != null ? `$${(data.calculatedCharge / 100).toLocaleString()}` : "N/A";
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Engine Hours Submitted</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental Portal</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p><strong>${safeCompany}</strong> has submitted an engine hour reading.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Current Reading</td><td style="padding: 4px 0; font-weight: bold;">${data.currentReading.toLocaleString()} hrs</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Hours Used</td><td style="padding: 4px 0;">${data.hoursUsed != null ? data.hoursUsed.toLocaleString() + " hrs" : "N/A"}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Calculated Charge</td><td style="padding: 4px 0; font-weight: bold; color: #e63946;">${chargeStr}</td></tr>
+      </table>
+    </div>
+    <a href="${esc(adminUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
+      View Rental &amp; Bill →
+    </a>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    subject: `[Engine Hours] ${safeCompany} submitted reading — ${chargeStr} due`,
+    html,
+    text: `${data.companyName} submitted an engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReading: ${data.currentReading} hrs\nHours Used: ${data.hoursUsed ?? "N/A"}\nCharge: ${chargeStr}\n\nView: ${adminUrl}\n\nDeluxe Logistics Inc.`,
+  });
+}
+
+// ── Driver Application Emails ─────────────────────────────────────────────
+
+export interface DriverApplicationEmailData {
+  applicationId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  cdlClass: string;
+  cdlState: string;
+  yearsExperience: number;
+  desiredPosition?: string | null;
+  hasTwic: boolean;
+  hasHazmat: boolean;
+  hasTanker: boolean;
+  coverLetter?: string | null;
+}
+
+export async function sendDriverApplicationConfirmation(data: DriverApplicationEmailData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping driver app confirmation"); return; }
+  const safeName = esc(data.fullName);
+  const positionLabel = data.desiredPosition === "otr" ? "OTR" : data.desiredPosition === "regional" ? "Regional" : data.desiredPosition === "local" ? "Local" : "Any";
+  const endorsements = [data.hasTwic && "TWIC", data.hasHazmat && "Hazmat", data.hasTanker && "Tanker"].filter(Boolean).join(", ") || "None";
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Application Received</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Inc. — Driver Hiring</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi <strong>${safeName}</strong>,</p>
+    <p>Thank you for applying to drive for Deluxe Logistics. We've received your application and will review it within 2 business days. If you're a strong match, we'll reach out to schedule a quick call.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <p style="font-weight: bold; margin: 0 0 10px; font-size: 14px;">Your Application Summary</p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b; width: 40%;">CDL Class</td><td style="padding: 4px 0;">Class ${esc(data.cdlClass)} — ${esc(data.cdlState)}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Experience</td><td style="padding: 4px 0;">${data.yearsExperience} year(s)</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Position</td><td style="padding: 4px 0;">${positionLabel}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Endorsements</td><td style="padding: 4px 0;">${endorsements}</td></tr>
+      </table>
+    </div>
+    <p style="font-size: 13px; color: #64748b;">Questions? Reply to this email or contact us at jobs@deluxelogistics.com.</p>
+    <p style="font-size: 13px; color: #64748b;">— The Deluxe Logistics Team</p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.email,
+    from: FROM,
+    subject: "We received your driver application — Deluxe Logistics",
+    html,
+    text: `Hi ${data.fullName},\n\nThank you for applying to drive for Deluxe Logistics. We'll review your application within 2 business days.\n\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} year(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nQuestions? Email jobs@deluxelogistics.com\n\n— Deluxe Logistics Inc.`,
+  });
+}
+
+export async function sendDriverApplicationAdmin(data: DriverApplicationEmailData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping driver app admin notify"); return; }
+  const safeName = esc(data.fullName);
+  const adminUrl = `${domain()}/admin/driver-applications`;
+  const positionLabel = data.desiredPosition === "otr" ? "OTR" : data.desiredPosition === "regional" ? "Regional" : data.desiredPosition === "local" ? "Local" : "Any";
+  const endorsements = [data.hasTwic && "TWIC", data.hasHazmat && "Hazmat", data.hasTanker && "Tanker"].filter(Boolean).join(", ") || "None";
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">New Driver Application</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Hiring Portal</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p><strong>${safeName}</strong> submitted a driver application.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b; width: 40%;">Email</td><td style="padding: 4px 0;">${esc(data.email)}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Phone</td><td style="padding: 4px 0;">${esc(data.phone)}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">CDL Class</td><td style="padding: 4px 0;">Class ${esc(data.cdlClass)} — ${esc(data.cdlState)}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Experience</td><td style="padding: 4px 0;">${data.yearsExperience} year(s)</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Position</td><td style="padding: 4px 0;">${positionLabel}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Endorsements</td><td style="padding: 4px 0;">${endorsements}</td></tr>
+      </table>
+    </div>
+    <a href="${esc(adminUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
+      Review Application →
+    </a>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    subject: `[New Driver Application] ${data.fullName} — Class ${data.cdlClass} CDL, ${data.yearsExperience} yrs exp`,
+    html,
+    text: `New driver application from ${data.fullName}\n\nEmail: ${data.email}\nPhone: ${data.phone}\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} yr(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nReview: ${adminUrl}\n\nDeluxe Logistics Inc.`,
+  });
+}
