@@ -85,11 +85,18 @@ export default function Header() {
                 </div>
               </>
             ) : (
-              <Link href="/login">
-                <Button size="sm" className="bg-primary hover:bg-primary/90 text-white">
-                  Sign In
-                </Button>
-              </Link>
+              <>
+                <Link href="/signup">
+                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                    Create Account
+                  </Button>
+                </Link>
+                <Link href="/login">
+                  <Button size="sm" className="bg-primary hover:bg-primary/90 text-white">
+                    Sign In
+                  </Button>
+                </Link>
+              </>
             )}
           </nav>
 
@@ -128,9 +135,16 @@ export default function Header() {
                 </button>
               </>
             ) : (
-              <Link href="/login" onClick={() => setMobileOpen(false)}>
-                <div className="px-3 py-2 text-sm font-medium text-primary">Sign In</div>
-              </Link>
+              <>
+                <Link href="/signup" onClick={() => setMobileOpen(false)}>
+                  <div className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
+                    Create Account
+                  </div>
+                </Link>
+                <Link href="/login" onClick={() => setMobileOpen(false)}>
+                  <div className="px-3 py-2 text-sm font-medium text-primary">Sign In</div>
+                </Link>
+              </>
             )}
           </div>
         )}

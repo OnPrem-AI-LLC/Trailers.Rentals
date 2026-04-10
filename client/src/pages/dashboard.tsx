@@ -7,23 +7,37 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Truck, FileText, Clock, CircleDollarSign, LogOut } from "lucide-react";
+import type { Rental } from "@shared/schema";
+
+interface DashboardData {
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    companyId: string | null | undefined;
+  };
+  rentals: Rental[];
+}
 
 export default function Dashboard() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
 
   useEffect(() => {
-    if (!authLoading && !user) navigate("/login");
-    if (!authLoading && user?.role === "admin") navigate("/admin");
+    if (authLoading) return;
+    if (!user) navigate("/login");
+    else if (user.role === "admin") navigate("/admin");
   }, [user, authLoading, navigate]);
 
-  const { data: dashData, isLoading: dataLoading } = useQuery<any>({
+  const { data: dashData, isLoading: dataLoading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
     enabled: !!user && user.role === "renter",
     queryFn: async () => {
       const res = await fetch("/api/dashboard", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load dashboard");
-      return res.json();
+      return res.json() as Promise<DashboardData>;
     },
   });
 
@@ -35,7 +49,7 @@ export default function Dashboard() {
     );
   }
 
-  const rentals = dashData?.rentals ?? [];
+  const rentals: Rental[] = dashData?.rentals ?? [];
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -86,7 +100,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-4">
-              {rentals.map((rental: any) => (
+              {rentals.map((rental) => (
                 <div key={rental.id} className="bg-card border border-border rounded-xl p-5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -99,7 +113,9 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold">${(rental.monthlyRate / 100).toLocaleString()}/mo</div>
+                      <div className="font-bold">
+                        ${(rental.monthlyRate / 100).toLocaleString()}/mo
+                      </div>
                     </div>
                   </div>
 
@@ -129,11 +145,12 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Documents section (placeholder) */}
+        {/* Documents placeholder */}
         <div>
           <h2 className="text-lg font-bold mb-4">Documents</h2>
           <div className="border border-dashed border-border rounded-xl p-8 text-center text-muted-foreground text-sm">
-            Your uploaded documents (COI, Certificate of Authority, Driver's License) will appear here.
+            Your uploaded documents (COI, Certificate of Authority, Driver's License) will appear
+            here.
           </div>
         </div>
       </div>

@@ -7,6 +7,11 @@ import { seedAdminUser } from "./seed-admin";
 
 const PgSession = connectPgSimple(session);
 
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret && process.env.NODE_ENV === "production") {
+  throw new Error("SESSION_SECRET environment variable is required in production");
+}
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -19,7 +24,7 @@ app.use(
       tableName: "session",
       createTableIfMissing: true,
     }),
-    secret: process.env.SESSION_SECRET || "deluxe-logistics-dev-secret-change-in-prod",
+    secret: sessionSecret ?? "deluxe-dev-only-change-in-prod",
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -34,7 +39,7 @@ app.use(
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedJsonResponse: Record<string, unknown> | undefined = undefined;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
@@ -60,14 +65,17 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Seed admin user on startup
   await seedAdminUser();
 
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const status = typeof err === "object" && err !== null && "status" in err
+      ? (err as { status: number }).status
+      : 500;
+    const message = typeof err === "object" && err !== null && "message" in err
+      ? (err as { message: string }).message
+      : "Internal Server Error";
     res.status(status).json({ message });
     throw err;
   });
@@ -78,7 +86,7 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT ?? "5000", 10);
   server.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
     log(`serving on port ${port}`);
   });

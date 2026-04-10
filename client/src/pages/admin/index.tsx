@@ -49,8 +49,9 @@ export default function AdminPortal() {
   const [, navigate] = useLocation();
 
   useEffect(() => {
-    if (!authLoading && !user) navigate("/login");
-    if (!authLoading && user && user.role !== "admin") navigate("/dashboard");
+    if (authLoading) return;
+    if (!user) navigate("/login");
+    else if (user.role !== "admin") navigate("/dashboard");
   }, [user, authLoading, navigate]);
 
   const { data: summary, isLoading } = useQuery<DashboardSummary>({

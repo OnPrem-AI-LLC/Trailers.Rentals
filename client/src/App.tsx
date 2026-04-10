@@ -11,6 +11,7 @@ import Dashboard from "@/pages/dashboard";
 import AdminPortal from "@/pages/admin/index";
 import TrailerDetail from "@/pages/trailer-detail";
 import Jobs from "@/pages/jobs";
+import Signup from "@/pages/signup";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/admin" component={AdminPortal} />
       <Route path="/trailers/:id" component={TrailerDetail} />
       <Route path="/jobs" component={Jobs} />
+      <Route path="/signup" component={Signup} />
       <Route component={NotFound} />
     </Switch>
   );
