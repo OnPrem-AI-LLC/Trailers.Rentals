@@ -199,9 +199,10 @@ export default function PaymentPage() {
     }
   }, [configData]);
 
-  // Create PaymentIntent
+  // Create PaymentIntent (only once — guard prevents duplicate creation if rental data re-fetches)
   useEffect(() => {
     if (!stripePromise || !rentalId || !user) return;
+    if (intentData) return; // already have a live PaymentIntent, don't create another
     if (rental && rental.depositPaid) {
       setSuccess(true);
       return;
@@ -210,6 +211,7 @@ export default function PaymentPage() {
       setIntentError(`Rental is not awaiting payment (status: ${rental.status})`);
       return;
     }
+    if (!rental) return; // wait until rental data loads before creating PI
 
     (async () => {
       try {
@@ -225,7 +227,7 @@ export default function PaymentPage() {
         setIntentError("Failed to initialize payment. Please refresh the page.");
       }
     })();
-  }, [stripePromise, rentalId, user, rental]);
+  }, [stripePromise, rentalId, user, rental, intentData]);
 
   function handleSuccess() {
     setSuccess(true);

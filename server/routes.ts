@@ -1717,7 +1717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: depositAmount,
         currency: "usd",
         customer: customerId,
-        description: `2-month security deposit — ${trailerLabel} (${rental.monthlyRate / 100 * 2 / 100} × 2 mo)`,
+        description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
         metadata: { rentalId, type: "deposit", companyId: rental.companyId },
         // Save payment method for off-session recurring billing (monthly subscription)
         setup_future_usage: "off_session",

@@ -97,12 +97,14 @@ export class WebhookHandlers {
           try {
             const user = rental.userId ? await storage.getUser(rental.userId) : null;
             const trailer = await storage.getTrailer(rental.trailerId);
+            const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
             if (user && trailer) {
               const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username;
+              const companyName = company?.name ?? displayName;
               await sendMonthlyInvoiceEmail({
                 renterEmail: user.username,
                 renterName: displayName,
-                companyName: displayName,
+                companyName,
                 trailerType: trailer.type,
                 trailerVin: trailer.vin,
                 amount: inv.amount_paid,
