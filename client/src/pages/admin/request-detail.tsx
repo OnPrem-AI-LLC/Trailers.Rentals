@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -32,11 +33,19 @@ import {
   Phone,
   Mail,
   Building,
+  Building2,
   StickyNote,
   Activity,
   MessageSquare,
+  Edit,
+  Hash,
+  ExternalLink,
+  FileText,
+  CreditCard,
+  Loader2,
+  UserCheck,
 } from "lucide-react";
-import type { RentalApplication, AdminNote, AuditLog } from "@shared/schema";
+import type { RentalApplication, AdminNote, AuditLog, Company, Document } from "@shared/schema";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-yellow-950 text-yellow-400 border-yellow-800",
@@ -244,6 +253,11 @@ export default function AdminRequestDetail() {
   const [needsInfoOpen, setNeedsInfoOpen] = useState(false);
   const [needsInfoMsg, setNeedsInfoMsg] = useState("");
   const [noteBody, setNoteBody] = useState("");
+  const [editCompanyOpen, setEditCompanyOpen] = useState(false);
+  const [companyForm, setCompanyForm] = useState<{
+    name: string; ownerName: string; authorizedUser: string; email: string;
+    phone: string; address: string; mcNumber: string; dotNumber: string; driverLicenseNumber: string;
+  }>({ name: "", ownerName: "", authorizedUser: "", email: "", phone: "", address: "", mcNumber: "", dotNumber: "", driverLicenseNumber: "" });
 
   // Parse ?tk= admin magic-link token from URL
   const adminLinkToken = new URLSearchParams(searchStr).get("tk") ?? null;
@@ -352,6 +366,38 @@ export default function AdminRequestDetail() {
     onSuccess: () => { setNoteBody(""); invalidate(); },
     onError: () => toast({ title: "Failed to save note", variant: "destructive" }),
   });
+
+  // Company profile (only after approval when companyId is available)
+  const { data: companyProfile, isLoading: companyLoading } = useQuery<{
+    company: Company; documents: Document[];
+  }>({
+    queryKey: ["/api/admin/companies", app?.companyId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/companies/${app!.companyId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Not found");
+      return res.json();
+    },
+    enabled: !!app?.companyId && !!user && user.role === "admin",
+  });
+
+  const updateCompanyMut = useMutation({
+    mutationFn: (data: typeof companyForm) =>
+      apiRequest("PATCH", `/api/admin/companies/${app?.companyId}`, data),
+    onSuccess: () => {
+      toast({ title: "Company profile updated" });
+      setEditCompanyOpen(false);
+      qc.invalidateQueries({ queryKey: ["/api/admin/companies", app?.companyId] });
+    },
+    onError: () => toast({ title: "Failed to update company", variant: "destructive" }),
+  });
+
+  const DOC_TYPE_LABELS: Record<string, string> = {
+    coi: "Certificate of Insurance",
+    certificate_of_authority: "Certificate of Authority",
+    drivers_license: "Driver's License",
+    registration: "Vehicle Registration",
+    agreement: "Rental Agreement",
+  };
 
   if (authLoading || (!user && !isTokenView)) {
     return (
@@ -551,6 +597,137 @@ export default function AdminRequestDetail() {
             readOnly={isTokenView}
           />
 
+          {/* Company Profile Panel — shown after approval when companyId exists */}
+          {app.companyId && (
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-primary" />
+                  <h3 className="font-bold text-sm uppercase tracking-wider">Renter Company Profile</h3>
+                </div>
+                {!isTokenView && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs"
+                    onClick={() => {
+                      const c = companyProfile?.company;
+                      if (c) {
+                        setCompanyForm({
+                          name: c.name ?? "",
+                          ownerName: c.ownerName ?? "",
+                          authorizedUser: c.authorizedUser ?? "",
+                          email: c.email ?? "",
+                          phone: c.phone ?? "",
+                          address: c.address ?? "",
+                          mcNumber: c.mcNumber ?? "",
+                          dotNumber: c.dotNumber ?? "",
+                          driverLicenseNumber: c.driverLicenseNumber ?? "",
+                        });
+                      }
+                      setEditCompanyOpen(true);
+                    }}
+                    disabled={companyLoading}
+                  >
+                    <Edit className="w-3 h-3" />
+                    Edit
+                  </Button>
+                )}
+              </div>
+
+              {companyLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ) : companyProfile ? (
+                <>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm mb-5">
+                    <div>
+                      <span className="text-xs text-muted-foreground">Legal Name</span>
+                      <p className="font-semibold">{companyProfile.company.name}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Owner</span>
+                      <p>{companyProfile.company.ownerName}</p>
+                    </div>
+                    {companyProfile.company.authorizedUser && (
+                      <div className="col-span-2">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><UserCheck className="w-3 h-3" />Authorized User</span>
+                        <p>{companyProfile.company.authorizedUser}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.dotNumber && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />DOT</span>
+                        <p className="font-mono">{companyProfile.company.dotNumber}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.mcNumber && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />MC</span>
+                        <p className="font-mono">{companyProfile.company.mcNumber}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.phone && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />Phone</span>
+                        <p>{companyProfile.company.phone}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.email && (
+                      <div>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="w-3 h-3" />Email</span>
+                        <p>{companyProfile.company.email}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.driverLicenseNumber && (
+                      <div className="col-span-2">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1"><CreditCard className="w-3 h-3" />Driver's License</span>
+                        <p className="font-mono">{companyProfile.company.driverLicenseNumber}</p>
+                      </div>
+                    )}
+                    {companyProfile.company.address && (
+                      <div className="col-span-2">
+                        <span className="text-xs text-muted-foreground">Address</span>
+                        <p>{companyProfile.company.address}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Documents */}
+                  <div>
+                    <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-2">Documents on File</p>
+                    {companyProfile.documents.length === 0 ? (
+                      <p className="text-sm text-muted-foreground italic">No documents uploaded yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {companyProfile.documents.map(doc => (
+                          <div key={doc.id} className="flex items-center gap-3 text-sm bg-muted/40 rounded-lg px-3 py-2">
+                            <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-muted-foreground block">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</span>
+                              <a href={doc.url} target="_blank" rel="noreferrer" className="text-primary hover:underline flex items-center gap-1 truncate">
+                                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                                <span className="truncate">{doc.fileName}</span>
+                              </a>
+                            </div>
+                            {doc.isAdminOnly && (
+                              <Badge className="text-xs bg-yellow-950 text-yellow-400 border border-yellow-800 flex-shrink-0">Admin only</Badge>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Company profile not available.</p>
+              )}
+            </div>
+          )}
+
           {/* Admin Notes / Correspondence */}
           <div className="bg-card border border-border rounded-xl p-5">
             <div className="flex items-center gap-2 mb-4">
@@ -650,6 +827,66 @@ export default function AdminRequestDetail() {
           </div>
         </div>
       </div>
+
+      {/* Edit Company modal */}
+      <Dialog open={editCompanyOpen} onOpenChange={setEditCompanyOpen}>
+        <DialogContent className="bg-card border-border max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-primary" />
+              Edit Company Profile
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label className="text-xs text-muted-foreground mb-1 block">Legal Company Name</Label>
+              <Input value={companyForm.name} onChange={e => setCompanyForm(f => ({ ...f, name: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Owner Name</Label>
+              <Input value={companyForm.ownerName} onChange={e => setCompanyForm(f => ({ ...f, ownerName: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Authorized User</Label>
+              <Input value={companyForm.authorizedUser} onChange={e => setCompanyForm(f => ({ ...f, authorizedUser: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">DOT Number</Label>
+              <Input value={companyForm.dotNumber} onChange={e => setCompanyForm(f => ({ ...f, dotNumber: e.target.value }))} className="bg-background border-border font-mono" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">MC Number</Label>
+              <Input value={companyForm.mcNumber} onChange={e => setCompanyForm(f => ({ ...f, mcNumber: e.target.value }))} className="bg-background border-border font-mono" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Email</Label>
+              <Input type="email" value={companyForm.email} onChange={e => setCompanyForm(f => ({ ...f, email: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Phone</Label>
+              <Input value={companyForm.phone} onChange={e => setCompanyForm(f => ({ ...f, phone: e.target.value }))} className="bg-background border-border" />
+            </div>
+            <div className="col-span-2">
+              <Label className="text-xs text-muted-foreground mb-1 block">Driver's License Number</Label>
+              <Input value={companyForm.driverLicenseNumber} onChange={e => setCompanyForm(f => ({ ...f, driverLicenseNumber: e.target.value }))} className="bg-background border-border font-mono" />
+            </div>
+            <div className="col-span-2">
+              <Label className="text-xs text-muted-foreground mb-1 block">Address</Label>
+              <Input value={companyForm.address} onChange={e => setCompanyForm(f => ({ ...f, address: e.target.value }))} className="bg-background border-border" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCompanyOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => updateCompanyMut.mutate(companyForm)}
+              disabled={updateCompanyMut.isPending}
+              className="bg-primary hover:bg-primary/90 text-white gap-2"
+            >
+              {updateCompanyMut.isPending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject modal */}
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>

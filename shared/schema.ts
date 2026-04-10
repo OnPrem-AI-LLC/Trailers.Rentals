@@ -29,6 +29,7 @@ export const companies = pgTable("companies", {
   dotNumber: text("dot_number"),
   phone: text("phone").notNull(),
   address: text("address"),
+  driverLicenseNumber: text("driver_license_number"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -63,6 +64,7 @@ export const trailerPhotos = pgTable("trailer_photos", {
 export const rentalApplications = pgTable("rental_applications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   trailerId: varchar("trailer_id").notNull(),
+  companyId: varchar("company_id"), // set after approval, links to companies table
   companyName: text("company_name").notNull(),
   ownerName: text("owner_name").notNull(),
   authorizedUser: text("authorized_user"),
@@ -95,6 +97,7 @@ export const rentals = pgTable("rentals", {
   agreementSignedAt: timestamp("agreement_signed_at"),
   agreementUrl: text("agreement_url"),
   signatureUrl: text("signature_url"),
+  signedByName: text("signed_by_name"),
   pickupToken: varchar("pickup_token").unique(),
   monthlyRate: integer("monthly_rate").notNull(), // in cents
   depositPaid: boolean("deposit_paid").notNull().default(false),

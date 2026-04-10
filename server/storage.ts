@@ -39,8 +39,9 @@ export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-  updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
+  getUserByInviteToken(token: string): Promise<User | undefined>;
+  createUser(user: InsertUser & { inviteToken?: string | null; inviteExpiry?: Date | null }): Promise<User>;
+  updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
 
   // Trailers
   getTrailers(status?: string, excludeInactive?: boolean): Promise<TrailerWithPhotos[]>;
@@ -75,7 +76,9 @@ export interface IStorage {
 
   // Documents
   createDocument(doc: InsertDocument): Promise<Document>;
+  getDocument(id: string): Promise<Document | undefined>;
   getDocuments(companyId?: string, rentalId?: string): Promise<Document[]>;
+  deleteDocument(id: string): Promise<void>;
 
   // Admin Notes
   createAdminNote(note: InsertAdminNote): Promise<AdminNote>;
@@ -99,13 +102,20 @@ export class DatabaseStorage implements IStorage {
     return user ?? undefined;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+  async getUserByInviteToken(token: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.inviteToken, token));
+    return user ?? undefined;
+  }
+
+  async createUser(insertUser: InsertUser & { inviteToken?: string | null; inviteExpiry?: Date | null }): Promise<User> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [user] = await db.insert(users).values(insertUser as any).returning();
     return user;
   }
 
-  async updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined> {
-    const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+  async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [user] = await db.update(users).set(data as any).where(eq(users.id, id)).returning();
     return user ?? undefined;
   }
 
@@ -272,6 +282,11 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  async getDocument(id: string): Promise<Document | undefined> {
+    const [row] = await db.select().from(documents).where(eq(documents.id, id));
+    return row ?? undefined;
+  }
+
   async getDocuments(companyId?: string, rentalId?: string): Promise<Document[]> {
     if (companyId) {
       return db
@@ -308,6 +323,10 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAdminNote(id: string): Promise<void> {
     await db.delete(adminNotes).where(eq(adminNotes.id, id));
+  }
+
+  async deleteDocument(id: string): Promise<void> {
+    await db.delete(documents).where(eq(documents.id, id));
   }
 
   // ── Audit Logs ─────────────────────────────────────────────────────

@@ -21,6 +21,8 @@ import {
   sendRejectionEmail,
   sendCOIRequest,
   sendMoreInfoRequest,
+  sendInviteEmail,
+  sendAgreementSignedEmails,
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
 import bcrypt from "bcrypt";
@@ -578,16 +580,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const application = await storage.getRentalApplication(req.params.id);
       if (!application) return res.status(404).json({ message: "Application not found" });
-      const updated = await storage.updateRentalApplication(application.id, { status: "approved" });
+
+      // Create or find company record
+      let company = application.companyId ? await storage.getCompany(application.companyId) : undefined;
+      if (!company) {
+        company = await storage.createCompany({
+          name: application.companyName,
+          ownerName: application.ownerName,
+          authorizedUser: application.authorizedUser ?? undefined,
+          email: application.email,
+          mcNumber: application.mcNumber ?? undefined,
+          dotNumber: application.dotNumber,
+          phone: application.phone,
+        });
+      }
+
+      // Create or update stub user for renter invite
+      const inviteToken = randomBytes(32).toString("hex");
+      const inviteExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+
+      let renterUser = await storage.getUserByEmail(application.email);
+      if (!renterUser) {
+        renterUser = await storage.createUser({
+          username: application.email,
+          password: "", // placeholder until registration complete
+          firstName: application.ownerName.split(" ")[0] || application.ownerName,
+          lastName: application.ownerName.split(" ").slice(1).join(" ") || "",
+          role: "renter",
+          isActive: false,
+          companyId: company.id,
+          inviteToken,
+          inviteExpiry,
+        });
+      } else {
+        renterUser = await storage.updateUser(renterUser.id, {
+          companyId: company.id,
+          isActive: false,
+          inviteToken,
+          inviteExpiry,
+        }) ?? renterUser;
+      }
+
+      // Update application status and link company
+      const updated = await storage.updateRentalApplication(application.id, {
+        status: "approved",
+        companyId: company.id,
+      });
+
       await storage.createAuditLog({
         userId: req.session.userId!,
         actionType: "application_approved",
         entityType: "rental_application",
         entityId: application.id,
-        description: `Application approved for ${application.companyName}`,
+        description: `Application approved for ${application.companyName} — invite sent to ${application.email}`,
+        metadata: JSON.stringify({ companyId: company.id, userId: renterUser.id }),
         isAdminEntry: true,
         ipAddress: req.ip,
       });
+
+      // Send invite email (non-fatal)
+      sendInviteEmail(application.email, application.ownerName, inviteToken)
+        .catch((e: unknown) => console.warn("[email] invite send failed:", e));
+
       return res.json(updated);
     } catch (err: unknown) {
       console.error(err);
@@ -794,22 +848,396 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ── Renter dashboard ────────────────────────────────────────────────
-  interface DashboardResponse {
-    user: { id: string; email: string; firstName: string; lastName: string; role: string; companyId: string | null | undefined };
-    rentals: Rental[];
-  }
-
   app.get("/api/dashboard", requireRenter, async (req: Request, res: Response) => {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(404).json({ message: "User not found" });
-      const userRentals = user.companyId ? await storage.listRentals(user.companyId) : ([] as Rental[]);
-      const response: DashboardResponse = {
+      const [userRentals, userDocs, company] = await Promise.all([
+        user.companyId ? storage.listRentals(user.companyId) : Promise.resolve([] as Rental[]),
+        user.companyId ? storage.getDocuments(user.companyId) : Promise.resolve([]),
+        user.companyId ? storage.getCompany(user.companyId) : Promise.resolve(undefined),
+      ]);
+      return res.json({
         user: { id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role, companyId: user.companyId },
         rentals: userRentals,
-      };
-      return res.json(response);
+        documents: userDocs,
+        company: company ?? null,
+      });
     } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Invite validation (public) ──────────────────────────────────────
+  app.get("/api/invite/:token", async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUserByInviteToken(req.params.token);
+      if (!user) return res.status(404).json({ message: "Invalid or expired invite link" });
+      if (user.inviteExpiry && user.inviteExpiry < new Date()) {
+        return res.status(410).json({ message: "This invite link has expired. Please contact Deluxe Logistics for a new invite." });
+      }
+      // Return just enough info for pre-filling the registration form
+      const company = user.companyId ? await storage.getCompany(user.companyId) : null;
+      return res.json({
+        email: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        companyName: company?.name ?? "",
+      });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Complete registration via invite (public) ───────────────────────
+  const registerInviteSchema = z.object({
+    inviteToken: z.string().min(1),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+    driverLicenseNumber: z.string().min(1, "Driver's license number is required"),
+  });
+
+  app.post("/api/auth/register-invite", async (req: Request, res: Response) => {
+    try {
+      const { inviteToken, password, firstName, lastName, driverLicenseNumber } = registerInviteSchema.parse(req.body);
+      const user = await storage.getUserByInviteToken(inviteToken);
+      if (!user) return res.status(404).json({ message: "Invalid or expired invite link" });
+      if (user.inviteExpiry && user.inviteExpiry < new Date()) {
+        return res.status(410).json({ message: "This invite link has expired. Please contact Deluxe Logistics for a new invite." });
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      const updatedUser = await storage.updateUser(user.id, {
+        password: hashed,
+        firstName,
+        lastName,
+        isActive: true,
+        inviteToken: null as unknown as string,
+        inviteExpiry: null as unknown as Date,
+      });
+      if (!updatedUser) return res.status(500).json({ message: "Failed to activate account" });
+
+      // Save driver's license number to company
+      if (user.companyId) {
+        await storage.updateCompany(user.companyId, { driverLicenseNumber }).catch(() => { /* non-fatal */ });
+      }
+
+      await storage.createAuditLog({
+        userId: updatedUser.id,
+        actionType: "account_registered",
+        entityType: "user",
+        entityId: updatedUser.id,
+        description: `Renter account activated for ${updatedUser.username}`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      // Auto log in
+      req.session.userId = updatedUser.id;
+      req.session.userRole = updatedUser.role;
+      return res.json({ id: updatedUser.id, email: updatedUser.username, firstName: updatedUser.firstName, lastName: updatedUser.lastName, role: updatedUser.role });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Documents — renter ───────────────────────────────────────────────
+  app.get("/api/documents", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.companyId) return res.json([]);
+      const docs = await storage.getDocuments(user.companyId);
+      return res.json(docs.filter(d => !d.isAdminOnly));
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  const docUploadSchema = z.object({
+    type: z.enum(["coi", "certificate_of_authority", "drivers_license"]),
+  });
+
+  app.post("/api/documents/upload", requireRenter, upload.single("file"), async (req: Request, res: Response) => {
+    try {
+      const { type } = docUploadSchema.parse(req.body);
+      if (!req.file) return res.status(400).json({ message: "No file provided" });
+
+      let url: string;
+      if (isCloudinaryConfigured()) {
+        url = await uploadToCloudinary(req.file.buffer, `documents/${type}`);
+      } else {
+        return res.status(503).json({ message: "Document storage not configured. Please set Cloudinary environment variables." });
+      }
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user?.companyId) return res.status(400).json({ message: "No company account linked. Please contact admin." });
+
+      const doc = await storage.createDocument({
+        companyId: user.companyId,
+        type,
+        url,
+        fileName: req.file.originalname,
+        isAdminOnly: false,
+        uploadedBy: user.id,
+      });
+
+      await storage.createAuditLog({
+        userId: user.id,
+        actionType: "document_uploaded",
+        entityType: "company",
+        entityId: user.companyId,
+        description: `Document uploaded: ${type} (${req.file.originalname})`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      return res.json(doc);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Upload failed" });
+    }
+  });
+
+  app.delete("/api/documents/:id", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      const doc = await storage.getDocument(req.params.id);
+      if (!doc) return res.status(404).json({ message: "Document not found" });
+      if (doc.companyId !== user?.companyId) return res.status(403).json({ message: "Not authorized" });
+      if (doc.isAdminOnly) return res.status(403).json({ message: "Cannot delete admin-only document" });
+      await storage.deleteDocument(doc.id);
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: company profile ───────────────────────────────────────────
+  app.get("/api/admin/companies/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const company = await storage.getCompany(req.params.id);
+      if (!company) return res.status(404).json({ message: "Company not found" });
+      const docs = await storage.getDocuments(req.params.id);
+      return res.json({ company, documents: docs });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  const updateCompanySchema = z.object({
+    name: z.string().min(1).optional(),
+    ownerName: z.string().optional(),
+    authorizedUser: z.string().optional().nullable(),
+    email: z.string().email().optional(),
+    mcNumber: z.string().optional().nullable(),
+    dotNumber: z.string().optional().nullable(),
+    phone: z.string().optional(),
+    address: z.string().optional().nullable(),
+    driverLicenseNumber: z.string().optional().nullable(),
+  });
+
+  app.patch("/api/admin/companies/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const updates = updateCompanySchema.parse(req.body);
+      const company = await storage.updateCompany(req.params.id, updates);
+      if (!company) return res.status(404).json({ message: "Company not found" });
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "company_edited_by_admin",
+        entityType: "company",
+        entityId: req.params.id,
+        description: `Admin manually updated company profile for ${company.name}`,
+        metadata: JSON.stringify(updates),
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json(company);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: upload document for company ──────────────────────────────
+  app.post("/api/admin/companies/:id/documents", requireAdmin, upload.single("file"), async (req: Request, res: Response) => {
+    try {
+      const typeSchema = z.object({ type: z.enum(["coi", "certificate_of_authority", "drivers_license", "registration", "agreement"]), isAdminOnly: z.string().optional() });
+      const { type, isAdminOnly } = typeSchema.parse(req.body);
+      if (!req.file) return res.status(400).json({ message: "No file provided" });
+
+      let url: string;
+      if (isCloudinaryConfigured()) {
+        url = await uploadToCloudinary(req.file.buffer, `documents/${type}`);
+      } else {
+        return res.status(503).json({ message: "Document storage not configured." });
+      }
+
+      const doc = await storage.createDocument({
+        companyId: req.params.id,
+        type,
+        url,
+        fileName: req.file.originalname,
+        isAdminOnly: isAdminOnly === "true",
+        uploadedBy: req.session.userId,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "document_uploaded_by_admin",
+        entityType: "company",
+        entityId: req.params.id,
+        description: `Admin uploaded document: ${type} (${req.file.originalname})`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json(doc);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Upload failed" });
+    }
+  });
+
+  // ── Agreements ──────────────────────────────────────────────────────────
+  // GET /api/agreements/:rentalId — renter views their agreement
+  app.get("/api/agreements/:rentalId", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      const rental = await storage.getRental(req.params.rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (rental.companyId !== user?.companyId) return res.status(403).json({ message: "Not authorized" });
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+
+      return res.json({ rental, trailer: trailer ?? null, company: company ?? null });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/agreements/:rentalId/sign — renter signs agreement
+  const signAgreementSchema = z.object({
+    signedByName: z.string().min(2, "Please enter your full legal name"),
+    agreed: z.boolean().refine(v => v === true, "You must agree to the terms"),
+  });
+
+  app.post("/api/agreements/:rentalId/sign", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { signedByName, agreed } = signAgreementSchema.parse(req.body);
+      if (!agreed) return res.status(400).json({ message: "Agreement not accepted" });
+
+      const user = await storage.getUser(req.session.userId!);
+      const rental = await storage.getRental(req.params.rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (rental.companyId !== user?.companyId) return res.status(403).json({ message: "Not authorized" });
+      if (rental.status !== "pending_agreement") {
+        return res.status(409).json({ message: "This agreement has already been signed or is no longer pending." });
+      }
+
+      const signedAt = new Date();
+      const updated = await storage.updateRental(req.params.rentalId, {
+        status: "pending_payment",
+        agreementSignedAt: signedAt,
+        signedByName,
+      });
+
+      await storage.createAuditLog({
+        userId: user!.id,
+        actionType: "agreement_signed",
+        entityType: "rental",
+        entityId: req.params.rentalId,
+        description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId}`,
+        isAdminEntry: false,
+        ipAddress: req.ip,
+      });
+
+      // Send emails (non-blocking)
+      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
+      sendAgreementSignedEmails({
+        rentalId: req.params.rentalId,
+        companyName: company?.name ?? "Unknown Company",
+        renterEmail: user!.username,
+        renterName: `${user!.firstName} ${user!.lastName}`,
+        trailerVin: trailer?.vin ?? "N/A",
+        trailerType: trailer?.type ?? "Trailer",
+        monthlyRate: rental.monthlyRate,
+        signedAt,
+        signedByName,
+      }).catch(e => console.error("[email] agreement signed email failed:", e));
+
+      return res.json({ success: true, rental: updated });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0]?.message ?? "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: rentals ────────────────────────────────────────────────────────
+  app.get("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const all = await storage.listRentals();
+      return res.json(all);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
+      const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
+      const docs = rental.companyId ? await storage.getDocuments(rental.companyId) : [];
+      return res.json({ rental, trailer, company, documents: docs });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const updateSchema = z.object({
+        status: z.enum(["pending_agreement", "pending_payment", "active", "active_in_use", "completed", "cancelled"]).optional(),
+        startDate: z.string().datetime().optional().nullable(),
+        endDate: z.string().datetime().optional().nullable(),
+        pickupDate: z.string().datetime().optional().nullable(),
+        monthlyRate: z.number().positive().optional(),
+        depositPaid: z.boolean().optional(),
+        agreementSignedAt: z.string().datetime().optional().nullable(),
+      });
+      const updates = updateSchema.parse(req.body);
+      const rental = await storage.updateRental(req.params.id, updates as Parameters<typeof storage.updateRental>[1]);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "rental_updated_by_admin",
+        entityType: "rental",
+        entityId: req.params.id,
+        description: `Admin updated rental ${req.params.id}: ${JSON.stringify(updates)}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json(rental);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }

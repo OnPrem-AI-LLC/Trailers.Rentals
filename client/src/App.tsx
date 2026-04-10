@@ -18,6 +18,8 @@ import Jobs from "@/pages/jobs";
 import Signup from "@/pages/signup";
 import Apply from "@/pages/apply";
 import ApplicationRespond from "@/pages/application-respond";
+import Register from "@/pages/register";
+import AgreementPage from "@/pages/agreement";
 
 function Router() {
   return (
@@ -36,6 +38,8 @@ function Router() {
       <Route path="/signup" component={Signup} />
       <Route path="/apply/:trailerId" component={Apply} />
       <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
+      <Route path="/register/:inviteToken" component={Register} />
+      <Route path="/agreement/:rentalId" component={AgreementPage} />
       <Route component={NotFound} />
     </Switch>
   );
