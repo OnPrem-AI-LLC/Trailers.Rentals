@@ -92,8 +92,21 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       console.log(`[deposit] Monthly subscription ${subscription.id} created for rental ${rentalId}`);
       subscriptionCreated = true;
     } catch (err) {
-      // Non-fatal — admin can manually retry via admin billing controls
       console.error(`[deposit] Subscription creation failed for rental ${rentalId}:`, err);
+      // Surface to audit log so admin can see the failure and retry via billing controls
+      try {
+        await storage.createAuditLog({
+          userId: null,
+          actionType: 'subscription_creation_failed',
+          entityType: 'rental',
+          entityId: rentalId,
+          description: `Auto-subscription creation failed after deposit: ${err instanceof Error ? err.message : String(err)}. Admin can retry via billing controls.`,
+          isAdminEntry: false,
+          ipAddress: null,
+        });
+      } catch (logErr) {
+        console.error('[deposit] Could not write subscription failure audit log:', logErr);
+      }
     }
   }
 

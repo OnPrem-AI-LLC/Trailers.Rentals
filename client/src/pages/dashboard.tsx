@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
-  Building2, Phone, Mail, Hash, MessageSquare, ChevronDown, ChevronUp, Send,
+  Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send,
   Receipt, Download
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
@@ -196,9 +196,19 @@ function RentalInvoiceHistory({ rentalId }: { rentalId: string }) {
                   <div>
                     <div className="font-medium text-foreground">{entry.description ?? "Payment"}</div>
                     <div className="text-muted-foreground">{new Date(entry.createdAt).toLocaleDateString()}</div>
+                    {entry.status && entry.status !== "succeeded" && (
+                      <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        entry.status === "paid" ? "bg-green-950 text-green-400" :
+                        entry.status === "open" ? "bg-orange-950 text-orange-400" :
+                        entry.status === "void" ? "bg-red-950 text-red-400" :
+                        "bg-muted text-muted-foreground"
+                      }`}>{entry.status}</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
-                    <span className="font-semibold text-green-400">${(entry.amount / 100).toLocaleString()}</span>
+                    <span className={`font-semibold ${entry.status === "open" ? "text-orange-400" : "text-green-400"}`}>
+                      ${(entry.amount / 100).toLocaleString()}
+                    </span>
                     {(entry.receiptUrl ?? entry.invoiceUrl ?? entry.pdfUrl) && (
                       <a
                         href={(entry.receiptUrl ?? entry.invoiceUrl ?? entry.pdfUrl)!}

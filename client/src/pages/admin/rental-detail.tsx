@@ -163,6 +163,22 @@ export default function AdminRentalDetail() {
     onError: (err: Error) => toast({ title: "Failed to cancel subscription", description: err.message, variant: "destructive" }),
   });
 
+  const createSubMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/create-subscription`, {});
+      if (!res.ok) {
+        const err = await res.json() as { message: string };
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/rentals", rentalId] });
+      toast({ title: "Subscription created", description: "Monthly billing is now active." });
+    },
+    onError: (err: Error) => toast({ title: "Failed to create subscription", description: err.message, variant: "destructive" }),
+  });
+
   if (authLoading || !user) {
     return <div className="min-h-screen bg-background flex items-center justify-center"><Skeleton className="h-8 w-48" /></div>;
   }
@@ -347,9 +363,19 @@ export default function AdminRentalDetail() {
                           <div>
                             <div className="font-medium">{inv.description}</div>
                             <div className="text-xs text-muted-foreground">{new Date(inv.createdAt).toLocaleDateString()}</div>
+                            {inv.status && (
+                              <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                inv.status === "paid" ? "bg-green-950 text-green-400" :
+                                inv.status === "open" ? "bg-orange-950 text-orange-400" :
+                                inv.status === "void" ? "bg-red-950 text-red-400" :
+                                "bg-muted text-muted-foreground"
+                              }`}>{inv.status}</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-3">
-                            <span className="font-semibold">${(inv.amount / 100).toLocaleString()}</span>
+                            <span className={`font-semibold ${inv.status === "open" ? "text-orange-400" : ""}`}>
+                              ${(inv.amount / 100).toLocaleString()}
+                            </span>
                             {inv.invoiceUrl && (
                               <a href={inv.invoiceUrl} target="_blank" rel="noreferrer" className="text-primary hover:text-primary/80">
                                 <ExternalLink className="w-3.5 h-3.5" />
@@ -569,6 +595,25 @@ export default function AdminRentalDetail() {
                             Cancel
                           </Button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Retry subscription if missing on active rental */}
+                    {rental.depositPaid && !rental.stripeSubscriptionId && (
+                      <div className="pt-2 border-t border-border">
+                        <div className="flex items-start gap-2 p-2 bg-orange-950/20 border border-orange-900/50 rounded-lg text-xs text-orange-300 mb-2">
+                          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                          No monthly subscription on file. Auto-creation may have failed. Retry below.
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full gap-2 border-green-700 text-green-400 hover:text-green-300 hover:bg-green-950/20"
+                          disabled={createSubMut.isPending}
+                          onClick={() => createSubMut.mutate()}
+                        >
+                          {createSubMut.isPending ? "Creating…" : "Create Monthly Subscription"}
+                        </Button>
                       </div>
                     )}
 

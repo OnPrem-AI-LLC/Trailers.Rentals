@@ -1488,11 +1488,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stripeSubscriptionId: z.string().nullable().optional(),
       });
       const body = updateSchema.parse(req.body);
-      const payload: UpdateRental = { ...body };
-      if (body.startDate !== undefined) payload.startDate = body.startDate ? new Date(body.startDate) : null;
-      if (body.endDate !== undefined) payload.endDate = body.endDate ? new Date(body.endDate) : null;
-      if (body.pickupDate !== undefined) payload.pickupDate = body.pickupDate ? new Date(body.pickupDate) : null;
-      if (body.agreementSignedAt !== undefined) payload.agreementSignedAt = body.agreementSignedAt ? new Date(body.agreementSignedAt) : null;
+      const payload: UpdateRental = {
+        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.monthlyRate !== undefined ? { monthlyRate: body.monthlyRate } : {}),
+        ...(body.depositPaid !== undefined ? { depositPaid: body.depositPaid } : {}),
+        ...(body.stripeSubscriptionId !== undefined ? { stripeSubscriptionId: body.stripeSubscriptionId } : {}),
+        ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
+        ...(body.endDate !== undefined ? { endDate: body.endDate ? new Date(body.endDate) : null } : {}),
+        ...(body.pickupDate !== undefined ? { pickupDate: body.pickupDate ? new Date(body.pickupDate) : null } : {}),
+        ...(body.agreementSignedAt !== undefined ? { agreementSignedAt: body.agreementSignedAt ? new Date(body.agreementSignedAt) : null } : {}),
+      };
       const rental = await storage.updateRental(req.params.id, payload);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
       await storage.createAuditLog({
@@ -1563,6 +1568,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error("Admin create-invoice error:", err);
       return res.status(500).json({ message: err.message || "Failed to create invoice" });
+    }
+  });
+
+  // Admin: retry/create subscription for a rental (if auto-creation failed)
+  app.post("/api/admin/rentals/:id/create-subscription", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (!rental.stripeCustomerId) {
+        return res.status(400).json({ message: "No Stripe customer on file for this rental" });
+      }
+      if (rental.stripeSubscriptionId) {
+        return res.status(400).json({ message: "Subscription already exists" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      const price = await stripe.prices.create({
+        unit_amount: rental.monthlyRate,
+        currency: "usd",
+        recurring: { interval: "month" },
+        product_data: {
+          name: `Trailer Rental — monthly (rental ${rental.id.slice(-8).toUpperCase()})`,
+        },
+        metadata: { rentalId: rental.id },
+      });
+
+      const subscription = await stripe.subscriptions.create({
+        customer: rental.stripeCustomerId,
+        items: [{ price: price.id }],
+        metadata: { rentalId: rental.id, type: "monthly_rental" },
+        payment_settings: { payment_method_types: ["card"] },
+        proration_behavior: "none",
+      });
+
+      await storage.updateRental(rental.id, { stripeSubscriptionId: subscription.id });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "subscription_created_by_admin",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Admin manually created monthly subscription ${subscription.id} (retry)`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true, subscriptionId: subscription.id });
+    } catch (err: any) {
+      console.error("Admin create-subscription error:", err);
+      return res.status(500).json({ message: err.message || "Failed to create subscription" });
     }
   });
 
@@ -1921,7 +1976,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
         invoices: invoicesResult.data.map((inv) => ({
           id: inv.id,
-          amount: inv.amount_paid,
+          amount: inv.status === "paid" ? inv.amount_paid : inv.amount_due,
           currency: inv.currency,
           status: inv.status,
           description: inv.lines?.data?.[0]?.description ?? "Monthly rental",
