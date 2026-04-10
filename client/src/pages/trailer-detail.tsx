@@ -1,10 +1,20 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation, Link } from "wouter";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Thermometer, Package, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  Thermometer,
+  Package,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
 
 function formatPrice(cents: number): string {
@@ -14,6 +24,7 @@ function formatPrice(cents: number): string {
 export default function TrailerDetail() {
   const { id } = useParams();
   const [, navigate] = useLocation();
+  const [activeIdx, setActiveIdx] = useState(0);
 
   const { data: trailer, isLoading, isError } = useQuery<TrailerWithPhotos>({
     queryKey: ["/api/trailers", id],
@@ -30,7 +41,7 @@ export default function TrailerDetail() {
       <div className="min-h-screen flex flex-col bg-background">
         <Header />
         <div className="max-w-4xl mx-auto w-full px-4 py-12 space-y-6">
-          <Skeleton className="h-64 w-full rounded-xl" />
+          <Skeleton className="h-[360px] w-full rounded-xl" />
           <Skeleton className="h-8 w-1/2" />
           <Skeleton className="h-4 w-1/3" />
         </div>
@@ -57,10 +68,18 @@ export default function TrailerDetail() {
     );
   }
 
-  const primaryPhoto = trailer.photos.find((p) => p.isPrimary) || trailer.photos[0];
-  const otherPhotos = trailer.photos.filter((p) => p !== primaryPhoto);
+  const sortedPhotos = [...trailer.photos].sort((a, b) => {
+    if (a.isPrimary) return -1;
+    if (b.isPrimary) return 1;
+    return a.displayOrder - b.displayOrder;
+  });
+
+  const activePhoto = sortedPhotos[activeIdx] ?? null;
   const isAvailable = trailer.status === "available";
   const features: string[] = trailer.features ? JSON.parse(trailer.features) : [];
+
+  const prev = () => setActiveIdx((i) => (i - 1 + sortedPhotos.length) % sortedPhotos.length);
+  const next = () => setActiveIdx((i) => (i + 1) % sortedPhotos.length);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -78,9 +97,14 @@ export default function TrailerDetail() {
         <div className="grid lg:grid-cols-2 gap-10">
           {/* Photos */}
           <div className="space-y-3">
-            <div className="aspect-[4/3] bg-card border border-border rounded-xl overflow-hidden">
-              {primaryPhoto ? (
-                <img src={primaryPhoto.url} alt="Trailer" className="w-full h-full object-cover" />
+            {/* Main image */}
+            <div className="relative aspect-[4/3] bg-card border border-border rounded-xl overflow-hidden group">
+              {activePhoto ? (
+                <img
+                  src={activePhoto.url}
+                  alt="Trailer"
+                  className="w-full h-full object-cover transition-all duration-300"
+                />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-muted-foreground">
                   {trailer.type === "reefer" ? (
@@ -90,13 +114,53 @@ export default function TrailerDetail() {
                   )}
                 </div>
               )}
-            </div>
-            {otherPhotos.length > 0 && (
-              <div className="grid grid-cols-3 gap-2">
-                {otherPhotos.slice(0, 3).map((photo) => (
-                  <div key={photo.id} className="aspect-square bg-card border border-border rounded-lg overflow-hidden">
-                    <img src={photo.url} alt="Trailer" className="w-full h-full object-cover" />
+              {/* Nav arrows (only if multiple photos) */}
+              {sortedPhotos.length > 1 && (
+                <>
+                  <button
+                    onClick={prev}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="Previous photo"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={next}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="Next photo"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                  {/* Dot indicators */}
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                    {sortedPhotos.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setActiveIdx(i)}
+                        className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                          i === activeIdx ? "bg-white" : "bg-white/40"
+                        }`}
+                        aria-label={`Photo ${i + 1}`}
+                      />
+                    ))}
                   </div>
+                </>
+              )}
+            </div>
+
+            {/* Thumbnails */}
+            {sortedPhotos.length > 1 && (
+              <div className="grid grid-cols-5 gap-2">
+                {sortedPhotos.map((photo, i) => (
+                  <button
+                    key={photo.id}
+                    onClick={() => setActiveIdx(i)}
+                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
+                      i === activeIdx ? "border-primary" : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    <img src={photo.url} alt={`View ${i + 1}`} className="w-full h-full object-cover" />
+                  </button>
                 ))}
               </div>
             )}

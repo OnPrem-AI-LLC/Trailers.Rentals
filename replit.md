@@ -13,8 +13,9 @@ Full-stack trailer rental management platform for Deluxe Logistics Inc. Rebuilt 
 - **Backend:** Express.js + TypeScript
 - **Database:** PostgreSQL via Drizzle ORM
 - **Auth:** express-session + connect-pg-simple + bcrypt
+- **File storage:** Cloudinary (requires CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET env vars; degrades gracefully if not set — URL input still works)
+- **QR codes:** `qrcode` npm package (generates PNG for pickup codes)
 - **Payments (planned):** Stripe
-- **File storage (planned):** Cloudinary
 - **Email (planned):** SendGrid
 - **E-sig (planned):** draw/type built-in + DocuSign scaffold
 
@@ -26,10 +27,12 @@ client/src/
     home.tsx              # Dark homepage with trailer inventory grid
     login.tsx             # Login page (session auth)
     dashboard.tsx         # Renter portal
-    trailer-detail.tsx    # Single trailer view + apply CTA
+    trailer-detail.tsx    # Single trailer view + photo carousel + apply CTA
     jobs.tsx              # Driver hiring page
     admin/
       index.tsx           # Admin portal dashboard
+      inventory.tsx       # Trailer inventory list (filter/status/retire/restore/QR)
+      trailer-form.tsx    # Add/edit trailer form (Cloudinary upload + URL paste)
   components/
     header.tsx            # Sticky nav with auth-aware links
     footer.tsx            # Minimal footer
@@ -42,6 +45,7 @@ server/
   routes.ts               # All API routes
   storage.ts              # DatabaseStorage class (all CRUD)
   auth.ts                 # requireAuth / requireAdmin middleware
+  cloudinary.ts           # Cloudinary upload/delete helpers
   seed-admin.ts           # Seeds initial admin account on startup
   db.ts                   # Drizzle DB connection
 
@@ -74,20 +78,23 @@ The admin account is seeded on first startup.
 
 ### Completed
 - [x] Task 1: Foundation & Homepage Rebuild
-  - Database schema (all 8 tables created via raw SQL)
-  - Auth middleware (session-based)
+  - Database schema (9 tables via raw SQL + CHECK constraints)
+  - Auth middleware (session-based), bcrypt, admin/renter roles
   - All API routes (trailers, auth, applications, admin, dashboard)
   - Dark homepage with hero + inventory grid + how-it-works
-  - Login page
-  - Admin portal stub
-  - Renter dashboard stub
-  - Trailer detail page
-  - Jobs/hiring page
-  - Header + Footer
-  - Admin seeded on startup
+  - Login, signup, admin portal, renter dashboard, trailer detail, jobs pages
+  - Header + Footer, admin seeded on startup (env var driven)
+
+- [x] Task 2: Inventory Management System
+  - Cloudinary integration with graceful degradation (photo URL paste fallback)
+  - QR code PNG generation per trailer (encodes pickup URL)
+  - Admin inventory list: filter tabs, stats, status management (retire/restore/maintenance)
+  - Trailer add/edit form: all fields, dynamic features list, photo upload + URL paste, primary photo selection
+  - Photo carousel on trailer detail page (prev/next arrows, dot indicators, thumbnail strip)
+  - Inactive trailers excluded from public homepage/API; visible to admin only
+  - Audit log entries on all admin trailer actions
 
 ### Pending
-- [ ] Task 2: Trailer Inventory Management (admin CRUD, Cloudinary upload)
 - [ ] Task 3: Rental Application Flow (multi-step form, FMCSA SAFER lookup)
 - [ ] Task 4: Renter Accounts & Company Profiles (invite flow)
 - [ ] Task 5: Rental Agreements & E-Signature

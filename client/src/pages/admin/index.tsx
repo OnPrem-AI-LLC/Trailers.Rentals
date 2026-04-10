@@ -125,7 +125,7 @@ export default function AdminPortal() {
                 <Truck className="w-5 h-5 text-primary" />
                 <h2 className="font-bold">Trailer Inventory</h2>
               </div>
-              <Link href="/admin/trailers/new">
+              <Link href="/admin/inventory/new">
                 <Button size="sm" className="bg-primary hover:bg-primary/90 text-white gap-2">
                   <Plus className="w-4 h-4" />
                   Add Trailer
@@ -135,7 +135,7 @@ export default function AdminPortal() {
             <p className="text-sm text-muted-foreground mb-4">
               Manage your trailer fleet — add units, update status, upload photos.
             </p>
-            <Link href="/admin/trailers">
+            <Link href="/admin/inventory">
               <Button variant="outline" size="sm" className="w-full">
                 Manage Trailers
               </Button>

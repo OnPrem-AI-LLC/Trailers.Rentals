@@ -27,7 +27,7 @@ import {
   adminNotes,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, ne } from "drizzle-orm";
 
 // Inferred insert types from Drizzle (include all columns, auto-gen fields are optional)
 type InsertRentalApplication = typeof rentalApplications.$inferInsert;
@@ -43,7 +43,7 @@ export interface IStorage {
   updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
 
   // Trailers
-  getTrailers(status?: string): Promise<TrailerWithPhotos[]>;
+  getTrailers(status?: string, excludeInactive?: boolean): Promise<TrailerWithPhotos[]>;
   getTrailer(id: string): Promise<TrailerWithPhotos | undefined>;
   createTrailer(trailer: InsertTrailer): Promise<Trailer>;
   updateTrailer(id: string, data: Partial<InsertTrailer>): Promise<Trailer | undefined>;
@@ -107,10 +107,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Trailers ───────────────────────────────────────────────────────
-  async getTrailers(status?: string): Promise<TrailerWithPhotos[]> {
-    const rows = status
-      ? await db.select().from(trailers).where(eq(trailers.status, status)).orderBy(desc(trailers.createdAt))
-      : await db.select().from(trailers).orderBy(desc(trailers.createdAt));
+  async getTrailers(status?: string, excludeInactive = false): Promise<TrailerWithPhotos[]> {
+    let rows: Trailer[];
+    if (status) {
+      rows = await db.select().from(trailers).where(eq(trailers.status, status)).orderBy(desc(trailers.createdAt));
+    } else if (excludeInactive) {
+      rows = await db.select().from(trailers).where(ne(trailers.status, "inactive")).orderBy(desc(trailers.createdAt));
+    } else {
+      rows = await db.select().from(trailers).orderBy(desc(trailers.createdAt));
+    }
 
     const photos = await db.select().from(trailerPhotos);
     return rows.map((t) => ({

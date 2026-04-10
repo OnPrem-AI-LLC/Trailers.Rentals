@@ -9,6 +9,8 @@ import Home from "@/pages/home";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import AdminPortal from "@/pages/admin/index";
+import AdminInventory from "@/pages/admin/inventory";
+import TrailerFormPage from "@/pages/admin/trailer-form";
 import TrailerDetail from "@/pages/trailer-detail";
 import Jobs from "@/pages/jobs";
 import Signup from "@/pages/signup";
@@ -21,6 +23,9 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/admin" component={AdminPortal} />
+      <Route path="/admin/inventory" component={AdminInventory} />
+      <Route path="/admin/inventory/new" component={TrailerFormPage} />
+      <Route path="/admin/inventory/:id" component={TrailerFormPage} />
       <Route path="/trailers/:id" component={TrailerDetail} />
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />
