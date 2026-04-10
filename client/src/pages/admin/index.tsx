@@ -156,7 +156,7 @@ export default function AdminPortal() {
             <p className="text-sm text-muted-foreground mb-4">
               Review incoming applications, check FMCSA SAFER data, approve or deny.
             </p>
-            <Link href="/admin/applications">
+            <Link href="/admin/requests">
               <Button variant="outline" size="sm" className="w-full">
                 View Applications
               </Button>

@@ -11,6 +11,8 @@ import Dashboard from "@/pages/dashboard";
 import AdminPortal from "@/pages/admin/index";
 import AdminInventory from "@/pages/admin/inventory";
 import TrailerFormPage from "@/pages/admin/trailer-form";
+import AdminRequests from "@/pages/admin/requests";
+import AdminRequestDetail from "@/pages/admin/request-detail";
 import TrailerDetail from "@/pages/trailer-detail";
 import Jobs from "@/pages/jobs";
 import Signup from "@/pages/signup";
@@ -26,6 +28,8 @@ function Router() {
       <Route path="/admin/inventory" component={AdminInventory} />
       <Route path="/admin/inventory/new" component={TrailerFormPage} />
       <Route path="/admin/inventory/:id" component={TrailerFormPage} />
+      <Route path="/admin/requests" component={AdminRequests} />
+      <Route path="/admin/requests/:id" component={AdminRequestDetail} />
       <Route path="/trailers/:id" component={TrailerDetail} />
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />

@@ -15,6 +15,14 @@ import {
 } from "@shared/schema";
 import { requireAuth, requireAdmin, requireRenter } from "./auth";
 import { uploadToCloudinary, isCloudinaryConfigured } from "./cloudinary";
+import {
+  sendAdminApplicationAlert,
+  sendRenterAcknowledgment,
+  sendRejectionEmail,
+  sendCOIRequest,
+  sendMoreInfoRequest,
+} from "./email-service";
+import { lookupByDot } from "./safer";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
@@ -33,9 +41,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userId = user.id;
       req.session.userRole = user.role;
       return res.json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -69,9 +77,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       req.session.userId = user.id;
       req.session.userRole = user.role;
       return res.status(201).json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -87,8 +95,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const url = await uploadToCloudinary(req.file.buffer);
       return res.json({ url });
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Upload failed" });
     }
   });
@@ -97,12 +105,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/trailers", async (req: Request, res: Response) => {
     try {
       const status = req.query.status as string | undefined;
-      // Public: exclude inactive unless status explicitly requested
       const filter = status ?? "public";
       const trailerList = await storage.getTrailers(filter === "public" ? undefined : filter, filter === "public");
       return res.json(trailerList);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -112,8 +119,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(req.params.id);
       if (!trailer || trailer.status === "inactive") return res.status(404).json({ message: "Trailer not found" });
       return res.json(trailer);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -121,10 +128,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Trailers (admin) ────────────────────────────────────────────────
   app.get("/api/admin/trailers", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const trailerList = await storage.getTrailers(undefined, false); // include inactive
+      const trailerList = await storage.getTrailers(undefined, false);
       return res.json(trailerList);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -143,9 +150,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress: req.ip,
       });
       return res.json(trailer);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -166,14 +173,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress: req.ip,
       });
       return res.json(trailer);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // Soft-delete (set status to inactive)
   app.delete("/api/admin/trailers/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const trailer = await storage.updateTrailer(req.params.id, { status: "inactive" });
@@ -183,18 +189,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "retire_trailer",
         entityType: "trailer",
         entityId: trailer.id,
-        description: `Retired (soft-deleted) trailer: ${trailer.vin}`,
+        description: `Retired trailer: ${trailer.vin}`,
         isAdminEntry: true,
         ipAddress: req.ip,
       });
       return res.json({ success: true });
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // Restore retired trailer to available
   app.post("/api/admin/trailers/:id/restore", requireAdmin, async (req: Request, res: Response) => {
     try {
       const trailer = await storage.updateTrailer(req.params.id, { status: "available" });
@@ -204,13 +209,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "restore_trailer",
         entityType: "trailer",
         entityId: trailer.id,
-        description: `Restored trailer to available: ${trailer.vin}`,
+        description: `Restored trailer: ${trailer.vin}`,
         isAdminEntry: true,
         ipAddress: req.ip,
       });
       return res.json(trailer);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -221,26 +226,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { url, isPrimary, displayOrder } = insertTrailerPhotoSchema.omit({ trailerId: true }).parse(req.body);
       const photo = await storage.addTrailerPhoto({ trailerId: req.params.id, url, isPrimary: isPrimary ?? false, displayOrder: displayOrder ?? 0 });
       return res.json(photo);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
   app.patch("/api/admin/photos/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const updateSchema = z.object({
-        isPrimary: z.boolean().optional(),
-        displayOrder: z.number().int().optional(),
-      });
+      const updateSchema = z.object({ isPrimary: z.boolean().optional(), displayOrder: z.number().int().optional() });
       const data = updateSchema.parse(req.body);
       const photo = await storage.updateTrailerPhoto(req.params.id, data);
       if (!photo) return res.status(404).json({ message: "Photo not found" });
       return res.json(photo);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -249,14 +251,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const photo = await storage.getTrailerPhoto(req.params.id);
       if (photo?.url) {
-        // Best-effort: remove from Cloudinary (non-fatal if it fails)
         const { deleteFromCloudinary } = await import("./cloudinary");
         await deleteFromCloudinary(photo.url);
       }
       await storage.deleteTrailerPhoto(req.params.id);
       return res.json({ success: true });
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -267,10 +268,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(req.params.id);
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
 
-      const domain = process.env.REPLIT_DEV_DOMAIN
+      const domainUrl = process.env.REPLIT_DEV_DOMAIN
         ? `https://${process.env.REPLIT_DEV_DOMAIN}`
         : "https://deluxelogistics.com";
-      const pickupUrl = `${domain}/pickup/${trailer.id}`;
+      const pickupUrl = `${domainUrl}/pickup/${trailer.id}`;
 
       const qrBuffer = await QRCode.toBuffer(pickupUrl, {
         type: "png",
@@ -282,8 +283,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Content-Disposition", `attachment; filename="trailer-${trailer.vin}-qr.png"`);
       return res.send(qrBuffer);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -293,8 +294,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const notes = await storage.getAdminNotes(req.params.entityType, req.params.entityId);
       return res.json(notes);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -304,9 +305,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = insertAdminNoteSchema.parse({ ...req.body, authorId: req.session.userId });
       const note = await storage.createAdminNote(data);
       return res.json(note);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -315,48 +316,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await storage.deleteAdminNote(req.params.id);
       return res.json({ success: true });
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // ── Rental Applications ─────────────────────────────────────────────
+  // ── Rental Applications — public submission ──────────────────────────
   app.post("/api/applications", async (req: Request, res: Response) => {
     try {
       const data = insertRentalApplicationSchema.parse(req.body);
       const adminToken = randomBytes(32).toString("hex");
       const application = await storage.createRentalApplication({ ...data, adminToken, status: "pending" });
+
+      // Fetch trailer for email context
+      let trailerVin: string | undefined;
+      let trailerType: string | undefined;
+      let priceMonthly: number | undefined;
+      try {
+        const trailer = await storage.getTrailer(application.trailerId);
+        trailerVin = trailer?.vin;
+        trailerType = trailer?.type;
+        priceMonthly = trailer?.priceMonthly;
+      } catch { /* non-fatal */ }
+
+      const appData = {
+        id: application.id,
+        companyName: application.companyName,
+        ownerName: application.ownerName,
+        email: application.email,
+        phone: application.phone,
+        dotNumber: application.dotNumber,
+        mcNumber: application.mcNumber,
+        intendedUse: application.intendedUse,
+        intendedUseDetails: application.intendedUseDetails,
+        trailerVin,
+        trailerType,
+        priceMonthly,
+      };
+
+      // Fire emails — non-fatal if SendGrid fails
+      await Promise.allSettled([
+        sendAdminApplicationAlert(appData),
+        sendRenterAcknowledgment(appData),
+      ]);
+
+      await storage.createAuditLog({
+        actionType: "application_submitted",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `New rental application from ${application.companyName} (DOT: ${application.dotNumber})`,
+        ipAddress: req.ip,
+        isAdminEntry: false,
+      });
+
       return res.json({ success: true, id: application.id });
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
+  // ── Admin: list applications ─────────────────────────────────────────
   app.get("/api/admin/applications", requireAdmin, async (req: Request, res: Response) => {
     try {
       const status = req.query.status as string | undefined;
       const applications = await storage.listRentalApplications(status);
       return res.json(applications);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
+  // ── Admin: get single application (auto-runs SAFER lookup) ──────────
   app.get("/api/admin/applications/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const application = await storage.getRentalApplication(req.params.id);
       if (!application) return res.status(404).json({ message: "Application not found" });
+
+      // Auto-run SAFER if not cached
+      if (!application.saferData && application.dotNumber) {
+        try {
+          const safer = await lookupByDot(application.dotNumber);
+          const saferJson = JSON.stringify(safer);
+          await storage.updateRentalApplication(application.id, { saferData: saferJson });
+          return res.json({ ...application, saferData: saferJson });
+        } catch { /* non-fatal: return without SAFER */ }
+      }
+
       return res.json(application);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
+  // ── Admin: general update ────────────────────────────────────────────
   const applicationUpdateSchema = z.object({
     status: z.enum(["pending", "approved", "rejected", "needs_info"]).optional(),
     adminNotes: z.string().optional(),
@@ -379,9 +436,194 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress: req.ip,
       });
       return res.json(application);
-    } catch (error) {
-      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      console.error(error);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: approve ───────────────────────────────────────────────────
+  app.post("/api/admin/applications/:id/approve", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      const updated = await storage.updateRentalApplication(application.id, { status: "approved" });
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "application_approved",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `Application approved for ${application.companyName}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json(updated);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: reject ────────────────────────────────────────────────────
+  const rejectSchema = z.object({ reason: z.string().optional() });
+
+  app.post("/api/admin/applications/:id/reject", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { reason } = rejectSchema.parse(req.body);
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const updated = await storage.updateRentalApplication(application.id, {
+        status: "rejected",
+        adminNotes: reason || application.adminNotes,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "application_rejected",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `Application rejected for ${application.companyName}${reason ? `: ${reason}` : ""}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      await sendRejectionEmail({
+        id: application.id,
+        companyName: application.companyName,
+        ownerName: application.ownerName,
+        email: application.email,
+        phone: application.phone,
+        dotNumber: application.dotNumber,
+        mcNumber: application.mcNumber,
+        intendedUse: application.intendedUse,
+      }, reason).catch((e: unknown) => console.warn("[email] rejection send failed:", e));
+
+      return res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: request more info ─────────────────────────────────────────
+  const needsInfoSchema = z.object({ message: z.string().min(1, "Message required") });
+
+  app.post("/api/admin/applications/:id/needs-info", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { message } = needsInfoSchema.parse(req.body);
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      const updated = await storage.updateRentalApplication(application.id, { status: "needs_info" });
+
+      // Store as admin note for the thread
+      await storage.createAdminNote({
+        authorId: req.session.userId!,
+        entityType: "rental_application",
+        entityId: application.id,
+        body: `[More Info Request] ${message}`,
+        isPinned: false,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "application_needs_info",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `More info requested from ${application.companyName}`,
+        metadata: JSON.stringify({ message }),
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      await sendMoreInfoRequest({
+        id: application.id,
+        companyName: application.companyName,
+        ownerName: application.ownerName,
+        email: application.email,
+        phone: application.phone,
+        dotNumber: application.dotNumber,
+        mcNumber: application.mcNumber,
+        intendedUse: application.intendedUse,
+      }, message).catch((e: unknown) => console.warn("[email] more-info send failed:", e));
+
+      return res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: send COI request ──────────────────────────────────────────
+  app.post("/api/admin/applications/:id/coi-request", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      await storage.createAdminNote({
+        authorId: req.session.userId!,
+        entityType: "rental_application",
+        entityId: application.id,
+        body: "[COI Request] Certificate of Insurance request sent to renter.",
+        isPinned: false,
+      });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "application_coi_requested",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `COI request sent to ${application.companyName}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      await sendCOIRequest({
+        id: application.id,
+        companyName: application.companyName,
+        ownerName: application.ownerName,
+        email: application.email,
+        phone: application.phone,
+        dotNumber: application.dotNumber,
+        mcNumber: application.mcNumber,
+        intendedUse: application.intendedUse,
+      }).catch((e: unknown) => console.warn("[email] COI send failed:", e));
+
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: re-run SAFER lookup ───────────────────────────────────────
+  app.post("/api/admin/applications/:id/safer-refresh", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      if (!application.dotNumber) return res.status(400).json({ message: "No DOT number on application" });
+
+      const safer = await lookupByDot(application.dotNumber);
+      const saferJson = JSON.stringify(safer);
+      await storage.updateRentalApplication(application.id, { saferData: saferJson });
+      return res.json({ saferData: saferJson, parsed: safer });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: audit logs for an entity ─────────────────────────────────
+  app.get("/api/admin/audit/:entityType/:entityId", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const logs = await storage.getAuditLogs(req.params.entityType, req.params.entityId);
+      return res.json(logs);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -399,8 +641,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pendingApplications: pendingApps.length,
         activeRentals: allRentals.filter(r => r.status === "active" || r.status === "active_in_use").length,
       });
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -421,8 +663,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rentals: userRentals,
       };
       return res.json(response);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
