@@ -386,7 +386,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isAdminEntry: false,
       });
 
-      return res.json({ success: true, id: application.id, renterToken: application.renterToken });
+      return res.json({ success: true, id: application.id });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);

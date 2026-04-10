@@ -128,7 +128,25 @@ export async function lookupByMc(mcNumber: string): Promise<SaferLookupResult> {
     const carrier = data?.content?.carrier;
     if (!carrier) return { success: false, error: "No carrier data in response.", source: "fmcsa_api" };
 
-    return { success: true, carrier: { legalName: carrier.legalName as string, dotNumber: carrier.dotNumber as string, rawData: carrier }, source: "fmcsa_api" };
+    const saferCarrier: SaferCarrier = {
+      dotNumber: carrier.dotNumber ? String(carrier.dotNumber) : undefined,
+      legalName: carrier.legalName ? String(carrier.legalName) : undefined,
+      dbaName: carrier.dbaName ? String(carrier.dbaName) : undefined,
+      allowedToOperate: carrier.allowedToOperate as string | undefined,
+      bipdInsuranceOnFile: carrier.bipdInsuranceOnFile ? Number(carrier.bipdInsuranceOnFile) : undefined,
+      cargoInsuranceOnFile: carrier.cargoInsuranceOnFile ? Number(carrier.cargoInsuranceOnFile) : undefined,
+      safetyRating: carrier.safetyRating ? String(carrier.safetyRating) : undefined,
+      safetyRatingDate: carrier.safetyRatingDate ? String(carrier.safetyRatingDate) : undefined,
+      mcNumber: carrier.docketNumber ? String(carrier.docketNumber) : carrier.mcNumber ? String(carrier.mcNumber) : undefined,
+      dotStatus: carrier.allowedToOperate === "Y" ? "Active / Authorized" : carrier.allowedToOperate === "N" ? "Not Authorized" : undefined,
+      mcAuthority: carrier.commonAuthorityStatus ? String(carrier.commonAuthorityStatus) : carrier.contractAuthorityStatus ? String(carrier.contractAuthorityStatus) : undefined,
+      operatingStatus: carrier.operatingStatus ? String(carrier.operatingStatus) : undefined,
+      totalDrivers: carrier.totalDrivers ? Number(carrier.totalDrivers) : undefined,
+      totalPowerUnits: carrier.totalPowerUnits ? Number(carrier.totalPowerUnits) : undefined,
+      entityType: carrier.entityType ? String(carrier.entityType) : undefined,
+      rawData: carrier,
+    };
+    return { success: true, carrier: saferCarrier, source: "fmcsa_api" };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return { success: false, error: `SAFER lookup failed: ${message}`, source: "fmcsa_api" };

@@ -87,7 +87,7 @@ interface SaferResult {
   source: "fmcsa_api" | "unavailable";
 }
 
-function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string | null; onRefresh: () => void; refreshing: boolean }) {
+function SaferPanel({ saferData, onRefresh, refreshing, readOnly }: { saferData?: string | null; onRefresh: () => void; refreshing: boolean; readOnly?: boolean }) {
   let result: SaferResult | null = null;
   try { if (saferData) result = JSON.parse(saferData) as SaferResult; } catch { /* ignore */ }
 
@@ -99,14 +99,16 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
             <Shield className="w-4 h-4 text-primary" />
             <h3 className="font-bold text-sm uppercase tracking-wider">FMCSA SAFER Data</h3>
           </div>
-          <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Looking up..." : "Run Lookup"}
-          </Button>
+          {!readOnly && (
+            <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Looking up..." : "Run Lookup"}
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
           <Info className="w-4 h-4 flex-shrink-0" />
-          <span>SAFER lookup pending. Click "Run Lookup" to query FMCSA.</span>
+          <span>SAFER lookup pending.</span>
         </div>
       </div>
     );
@@ -120,10 +122,12 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
             <Shield className="w-4 h-4 text-primary" />
             <h3 className="font-bold text-sm uppercase tracking-wider">FMCSA SAFER Data</h3>
           </div>
-          <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            Retry
-          </Button>
+          {!readOnly && (
+            <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Retry
+            </Button>
+          )}
         </div>
         <div className="flex items-start gap-2 text-sm">
           <AlertTriangle className="w-4 h-4 text-yellow-500 flex-shrink-0 mt-0.5" />
@@ -159,10 +163,12 @@ function SaferPanel({ saferData, onRefresh, refreshing }: { saferData?: string |
           <Shield className="w-4 h-4 text-primary" />
           <h3 className="font-bold text-sm uppercase tracking-wider">FMCSA SAFER Data</h3>
         </div>
-        <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        {!readOnly && (
+          <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2 text-muted-foreground">
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -542,6 +548,7 @@ export default function AdminRequestDetail() {
             saferData={app.saferData}
             onRefresh={() => saferRefreshMut.mutate()}
             refreshing={saferRefreshMut.isPending}
+            readOnly={isTokenView}
           />
 
           {/* Admin Notes / Correspondence */}
@@ -595,26 +602,28 @@ export default function AdminRequestDetail() {
               <p className="text-sm text-muted-foreground mb-4">No notes yet.</p>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Add internal note (not sent to renter)</Label>
-              <Textarea
-                value={noteBody}
-                onChange={(e) => setNoteBody(e.target.value)}
-                placeholder="Internal note..."
-                className="bg-background border-border resize-none text-sm"
-                rows={3}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => noteBody.trim() && addNoteMut.mutate(noteBody.trim())}
-                disabled={!noteBody.trim() || addNoteMut.isPending}
-                className="gap-2"
-              >
-                <StickyNote className="w-3.5 h-3.5" />
-                Save Note
-              </Button>
-            </div>
+            {!isTokenView && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Add internal note (not sent to renter)</Label>
+                <Textarea
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  placeholder="Internal note..."
+                  className="bg-background border-border resize-none text-sm"
+                  rows={3}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => noteBody.trim() && addNoteMut.mutate(noteBody.trim())}
+                  disabled={!noteBody.trim() || addNoteMut.isPending}
+                  className="gap-2"
+                >
+                  <StickyNote className="w-3.5 h-3.5" />
+                  Save Note
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Audit trail */}
