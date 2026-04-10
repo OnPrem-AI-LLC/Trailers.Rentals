@@ -88,9 +88,16 @@ export default function Apply() {
       setForm((prev) => ({ ...prev, [field]: e.target.value }));
     };
 
+  const [intendedUseError, setIntendedUseError] = useState<string | null>(null);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!trailerId) return;
+    if (!form.intendedUse) {
+      setIntendedUseError("Please select a primary use for the trailer.");
+      return;
+    }
+    setIntendedUseError(null);
     mutation.mutate({ ...form, trailerId });
   };
 
@@ -335,7 +342,7 @@ export default function Apply() {
               <Label htmlFor="intendedUse">Primary Use *</Label>
               <Select
                 value={form.intendedUse}
-                onValueChange={(val) => setForm((prev) => ({ ...prev, intendedUse: val }))}
+                onValueChange={(val) => { setForm((prev) => ({ ...prev, intendedUse: val })); setIntendedUseError(null); }}
               >
                 <SelectTrigger className="bg-background border-border">
                   <SelectValue placeholder="Select primary use..." />
@@ -352,6 +359,9 @@ export default function Apply() {
                   <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
+              {intendedUseError && (
+                <p className="text-xs text-destructive">{intendedUseError}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">

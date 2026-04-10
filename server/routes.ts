@@ -384,8 +384,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Admin token magic-link: read-only application view (no session needed) ──
   app.get("/api/applications/admin-token/:adminToken", async (req: Request, res: Response) => {
     try {
-      const application = await storage.getRentalApplicationByToken(req.params.adminToken);
+      let application = await storage.getRentalApplicationByToken(req.params.adminToken);
       if (!application) return res.status(404).json({ message: "Invalid or expired token" });
+
+      // Auto-trigger SAFER lookup on first visit (same behaviour as session-based endpoint)
+      if (!application.saferData && application.dotNumber) {
+        try {
+          const saferResult = await lookupByDot(application.dotNumber);
+          const updated = await storage.updateRentalApplication(application.id, {
+            saferData: JSON.stringify(saferResult),
+            saferLookedUpAt: new Date(),
+          });
+          if (updated) application = updated;
+        } catch { /* non-fatal */ }
+      }
 
       // Fetch associated data
       const [notes, auditLogs] = await Promise.all([
