@@ -15,9 +15,9 @@ Full-stack trailer rental management platform for Deluxe Logistics Inc. Rebuilt 
 - **Auth:** express-session + connect-pg-simple + bcrypt
 - **File storage:** Cloudinary (requires CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET env vars; degrades gracefully if not set — URL input still works)
 - **QR codes:** `qrcode` npm package (generates PNG for pickup codes)
-- **Payments (planned):** Stripe
-- **Email (planned):** SendGrid
-- **E-sig (planned):** draw/type built-in + DocuSign scaffold
+- **Payments:** Stripe (via Replit connector `conn_stripe_01KNWDD4NMZHY2VJ4PNGMJJP97`) — deposit + monthly subscription checkout sessions
+- **Email:** SendGrid (SENDGRID_API_KEY set)
+- **E-signature:** Built-in typed-name e-signature on `/agreement/:rentalId`
 
 ## Architecture
 
@@ -41,13 +41,20 @@ client/src/
     use-auth.tsx          # Auth context provider + useAuth hook
 
 server/
-  index.ts                # Express app entry, session middleware
-  routes.ts               # All API routes
+  index.ts                # Express app entry — Stripe webhook registered BEFORE express.json(), then session middleware, then Stripe init
+  routes.ts               # All API routes (auth, trailers, applications, rentals, docs, admin, Stripe payments)
   storage.ts              # DatabaseStorage class (all CRUD)
   auth.ts                 # requireAuth / requireAdmin middleware
   cloudinary.ts           # Cloudinary upload/delete helpers
   seed-admin.ts           # Seeds initial admin account on startup
   db.ts                   # Drizzle DB connection
+  stripeClient.ts         # Stripe SDK client (via Replit connector, never cache)
+  webhookHandlers.ts      # Stripe webhook processing (delegates to stripe-replit-sync)
+  email-service.ts        # SendGrid email helpers
+  safer.ts                # FMCSA SAFER API lookups
+
+scripts/
+  seed-stripe-products.ts # Stripe product seeder (placeholder; pricing is dynamic per-rental)
 
 shared/
   schema.ts               # Drizzle schema + Zod schemas + TypeScript types
@@ -94,11 +101,23 @@ The admin account is seeded on first startup.
   - Inactive trailers excluded from public homepage/API; visible to admin only
   - Audit log entries on all admin trailer actions
 
+- [x] Task 3: Rental Application Flow — multi-step form, FMCSA SAFER lookup, admin review, invite email
+- [x] Task 4: Renter Accounts & Company Profiles — invite token registration, dashboard, document CRUD, company profile panel
+- [x] Task 5: Rental Agreements & E-Signature — /agreement/:rentalId, typed-name e-sig, emails, audit logging
+- [x] Task 6: Payments / Stripe
+  - Stripe connected via Replit OAuth connector
+  - stripe + stripe-replit-sync installed; Stripe schema migrations run on startup
+  - Managed webhook auto-registered at /api/stripe/webhook (registered BEFORE express.json())
+  - POST /api/stripe/create-deposit-session — 2-month security deposit as one-time Stripe Checkout
+  - POST /api/stripe/create-subscription-session — monthly rental subscription Checkout
+  - POST /api/stripe/confirm-deposit — admin manual deposit override
+  - GET /api/rentals/:id/payment-status — renter payment status
+  - GET /api/stripe/config — returns publishable key for frontend
+  - Dashboard "Pay Security Deposit" button redirects to Stripe Checkout
+  - Dashboard "Set Up Monthly Billing" button for post-deposit subscription
+  - Payment return URLs handle success/cancel toast messages
+
 ### Pending
-- [ ] Task 3: Rental Application Flow (multi-step form, FMCSA SAFER lookup)
-- [ ] Task 4: Renter Accounts & Company Profiles (invite flow)
-- [ ] Task 5: Rental Agreements & E-Signature
-- [ ] Task 6: Payments (Stripe deposits + monthly subscriptions)
 - [ ] Task 7: Engine Hour Tracking (reefer units)
 - [ ] Task 8: QR Code Pickup System
 - [ ] Task 9: Admin Tools (audit logs, FMCSA, document management)

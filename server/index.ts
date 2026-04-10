@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedAdminUser } from "./seed-admin";
+import { WebhookHandlers } from "./webhookHandlers";
 
 const PgSession = connectPgSimple(session);
 
@@ -13,10 +14,31 @@ if (!sessionSecret && process.env.NODE_ENV === "production") {
 }
 
 const app = express();
+
+// ── Stripe webhook MUST be registered BEFORE express.json() ─────────────
+// Webhook needs raw Buffer, not parsed JSON
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req: Request, res: Response) => {
+    const signature = req.headers["stripe-signature"];
+    if (!signature) return res.status(400).json({ error: "Missing stripe-signature" });
+    const sig = Array.isArray(signature) ? signature[0] : signature;
+    try {
+      await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      return res.status(200).json({ received: true });
+    } catch (err: any) {
+      console.error("Stripe webhook error:", err.message);
+      return res.status(400).json({ error: "Webhook processing error" });
+    }
+  }
+);
+
+// ── Body parsing (after webhook route) ──────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// ── Session middleware ───────────────────────────────────────────────
+// ── Session middleware ───────────────────────────────────────────────────
 app.use(
   session({
     store: new PgSession({
@@ -35,7 +57,7 @@ app.use(
   })
 );
 
-// ── Request logging ──────────────────────────────────────────────────
+// ── Request logging ──────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -64,8 +86,39 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Stripe initialization ────────────────────────────────────────────────
+async function initStripe() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    log("WARNING: DATABASE_URL not set — skipping Stripe initialization");
+    return;
+  }
+  try {
+    const { runMigrations } = await import("stripe-replit-sync");
+    log("Initializing Stripe schema...");
+    await runMigrations({ databaseUrl, schema: "stripe" });
+    log("Stripe schema ready");
+
+    const { getStripeSync } = await import("./stripeClient");
+    const stripeSync = await getStripeSync();
+
+    const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+    await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
+    log("Stripe webhook configured");
+
+    // Sync existing data in background
+    stripeSync.syncBackfill()
+      .then(() => log("Stripe data synced"))
+      .catch((err: any) => log(`Stripe sync warning: ${err.message}`));
+  } catch (err: any) {
+    log(`WARNING: Stripe initialization failed: ${err.message}`);
+    // Non-fatal — app continues without Stripe
+  }
+}
+
 (async () => {
   await seedAdminUser();
+  await initStripe();
 
   const server = await registerRoutes(app);
 

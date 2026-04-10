@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import QRCode from "qrcode";
 import { storage } from "./storage";
+import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
   insertRentalApplicationSchema,
   insertTrailerSchema,
@@ -1238,6 +1239,197 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json(rental);
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Stripe Payment Routes ────────────────────────────────────────────
+
+  // Get Stripe publishable key (for frontend)
+  app.get("/api/stripe/config", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const publishableKey = await getStripePublishableKey();
+      return res.json({ publishableKey });
+    } catch (err: any) {
+      return res.status(503).json({ message: "Stripe not configured" });
+    }
+  });
+
+  // Create deposit checkout session (2-month security deposit as one-time payment)
+  app.post("/api/stripe/create-deposit-session", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      // Ensure this renter owns this rental
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (rental.status !== "pending_payment") {
+        return res.status(400).json({ message: "Rental is not awaiting payment" });
+      }
+      if (rental.depositPaid) {
+        return res.status(400).json({ message: "Deposit already paid" });
+      }
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const company = await storage.getCompany(rental.companyId);
+
+      const stripe = await getUncachableStripeClient();
+
+      // Create or get Stripe customer tied to this rental
+      let customerId = rental.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.username,
+          name: company?.name ?? user.firstName + " " + user.lastName,
+          metadata: { rentalId, companyId: rental.companyId, userId: user.id },
+        });
+        customerId = customer.id;
+        await storage.updateRental(rentalId, { stripeCustomerId: customerId } as any);
+      }
+
+      const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
+      const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        payment_method_types: ["card"],
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: depositAmount,
+              product_data: {
+                name: `Security Deposit — ${trailerLabel}`,
+                description: `2-month refundable security deposit for trailer rental. Monthly rate: $${(rental.monthlyRate / 100).toFixed(2)}/mo`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: { rentalId, type: "deposit" },
+        success_url: `${baseUrl}/dashboard?payment=success&rentalId=${rentalId}`,
+        cancel_url: `${baseUrl}/dashboard?payment=cancelled`,
+      });
+
+      return res.json({ url: session.url, sessionId: session.id });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error("Stripe deposit session error:", err);
+      return res.status(500).json({ message: err.message || "Failed to create payment session" });
+    }
+  });
+
+  // Create monthly subscription checkout session
+  app.post("/api/stripe/create-subscription-session", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (!rental.depositPaid) {
+        return res.status(400).json({ message: "Deposit must be paid first" });
+      }
+
+      const trailer = await storage.getTrailer(rental.trailerId);
+      const company = await storage.getCompany(rental.companyId);
+      const stripe = await getUncachableStripeClient();
+
+      let customerId = rental.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.username,
+          name: company?.name ?? user.firstName + " " + user.lastName,
+          metadata: { rentalId, companyId: rental.companyId, userId: user.id },
+        });
+        customerId = customer.id;
+        await storage.updateRental(rentalId, { stripeCustomerId: customerId } as any);
+      }
+
+      const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+      // Create a recurring price on-the-fly
+      const price = await stripe.prices.create({
+        currency: "usd",
+        unit_amount: rental.monthlyRate,
+        recurring: { interval: "month" },
+        product_data: {
+          name: `Monthly Rental — ${trailerLabel}`,
+          metadata: { rentalId },
+        },
+      });
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        payment_method_types: ["card"],
+        mode: "subscription",
+        line_items: [{ price: price.id, quantity: 1 }],
+        metadata: { rentalId, type: "subscription" },
+        success_url: `${baseUrl}/dashboard?subscription=success&rentalId=${rentalId}`,
+        cancel_url: `${baseUrl}/dashboard?subscription=cancelled`,
+      });
+
+      return res.json({ url: session.url, sessionId: session.id });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error("Stripe subscription session error:", err);
+      return res.status(500).json({ message: err.message || "Failed to create subscription session" });
+    }
+  });
+
+  // Mark deposit as paid (called after Stripe webhook or manual admin override)
+  app.post("/api/stripe/confirm-deposit", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const updated = await storage.updateRental(rentalId, { depositPaid: true, status: "active" } as any);
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "deposit_confirmed",
+        entityType: "rental",
+        entityId: rentalId,
+        description: `Deposit manually confirmed by admin for rental ${rentalId}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json(updated);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get payment status for a rental (renter-facing)
+  app.get("/api/rentals/:id/payment-status", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      return res.json({
+        rentalId: rental.id,
+        status: rental.status,
+        depositPaid: rental.depositPaid,
+        stripeCustomerId: rental.stripeCustomerId,
+        stripeSubscriptionId: rental.stripeSubscriptionId,
+        monthlyRate: rental.monthlyRate,
+      });
+    } catch (err: any) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }

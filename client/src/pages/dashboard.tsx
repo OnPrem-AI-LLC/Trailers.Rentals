@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
-  Building2, Phone, Mail, Hash
+  Building2, Phone, Mail, Hash, Loader2
 } from "lucide-react";
 import type { Rental, Document, Company } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -53,6 +53,38 @@ export default function Dashboard() {
   const qc = useQueryClient();
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const [payingRentalId, setPayingRentalId] = useState<string | null>(null);
+
+  // Check for payment return from Stripe
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") === "success") {
+      toast({ title: "Payment received!", description: "Your security deposit has been processed. Your rental is now active." });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      window.history.replaceState({}, "", "/dashboard");
+    } else if (params.get("payment") === "cancelled") {
+      toast({ title: "Payment cancelled", description: "Your payment was not completed.", variant: "destructive" });
+      window.history.replaceState({}, "", "/dashboard");
+    } else if (params.get("subscription") === "success") {
+      toast({ title: "Subscription active!", description: "Your monthly rental subscription has been set up." });
+      qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, []);
+
+  const depositMut = useMutation({
+    mutationFn: async (rentalId: string) => {
+      const res = await apiRequest("POST", "/api/stripe/create-deposit-session", { rentalId });
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: (data) => {
+      window.location.href = data.url;
+    },
+    onError: (err: any) => {
+      toast({ title: "Payment failed", description: err?.message ?? "Could not start checkout. Please try again.", variant: "destructive" });
+      setPayingRentalId(null);
+    },
+  });
 
   useEffect(() => {
     if (authLoading) return;
@@ -255,9 +287,39 @@ export default function Dashboard() {
                               <FileText className="w-4 h-4" /> Sign Agreement
                             </Button>
                           )}
-                          {rental.status === "pending_payment" && (
-                            <Button size="sm" className="bg-primary hover:bg-primary/90 text-white gap-2">
-                              <CircleDollarSign className="w-4 h-4" /> Make Payment
+                          {rental.status === "pending_payment" && !rental.depositPaid && (
+                            <Button
+                              size="sm"
+                              className="bg-primary hover:bg-primary/90 text-white gap-2"
+                              disabled={depositMut.isPending && payingRentalId === rental.id}
+                              onClick={() => {
+                                setPayingRentalId(rental.id);
+                                depositMut.mutate(rental.id);
+                              }}
+                            >
+                              {depositMut.isPending && payingRentalId === rental.id ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
+                              ) : (
+                                <><CircleDollarSign className="w-4 h-4" /> Pay Security Deposit</>
+                              )}
+                            </Button>
+                          )}
+                          {rental.depositPaid && rental.status !== "completed" && rental.status !== "cancelled" && !rental.stripeSubscriptionId && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-2 border-green-700 text-green-400"
+                              onClick={async () => {
+                                try {
+                                  const res = await apiRequest("POST", "/api/stripe/create-subscription-session", { rentalId: rental.id });
+                                  const data = await res.json() as { url: string };
+                                  window.location.href = data.url;
+                                } catch {
+                                  toast({ title: "Error", description: "Could not start subscription setup.", variant: "destructive" });
+                                }
+                              }}
+                            >
+                              <CreditCard className="w-4 h-4" /> Set Up Monthly Billing
                             </Button>
                           )}
                           {(rental.status === "active" || rental.status === "active_in_use") && (
