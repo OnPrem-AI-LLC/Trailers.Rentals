@@ -494,6 +494,53 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
   });
 }
 
+// ── 8a. Admin notification when deposit received ──────────────────────────────
+export async function sendDepositReceivedAdminEmail(data: {
+  rentalId: string;
+  companyName: string;
+  trailerVin: string;
+  trailerType: string;
+  monthlyRate: number;
+  paymentIntentId?: string;
+}): Promise<void> {
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
+
+  if (!isConfigured()) {
+    console.log("[email] SendGrid not configured — skipping admin deposit notification");
+    return;
+  }
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #22c55e; margin: 0; font-size: 18px;">💰 Security Deposit Received</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics — Admin Notification</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>A security deposit has been paid and the rental has been automatically activated.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${esc(data.trailerType)} — VIN: ${esc(data.trailerVin)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0; color: #16a34a; font-weight: bold;">${monthlyStr}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Deposit Paid</td><td style="padding: 5px 0; color: #16a34a;">$${((data.monthlyRate * 2) / 100).toLocaleString()} ✓</td></tr>
+      ${data.paymentIntentId ? `<tr><td style="padding: 5px 0; color: #64748b;">Stripe PI</td><td style="padding: 5px 0; font-family: monospace; font-size: 12px;">${esc(data.paymentIntentId)}</td></tr>` : ""}
+    </table>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
+      View Rental →
+    </a>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    subject: `[Deposit Paid] ${data.companyName} — ${data.trailerType} rental now active`,
+    html,
+    text: `Security deposit received.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}\nDeposit: $${((data.monthlyRate * 2) / 100).toLocaleString()}\n\nView: ${adminUrl}`,
+  });
+}
+
 // ── 8. Deposit confirmed / rental activated email ─────────────────────────────
 export interface DepositConfirmedData {
   rentalId: string;

@@ -1513,6 +1513,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin: create one-off invoice for a rental customer
+  app.post("/api/admin/rentals/:id/create-invoice", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { amount, description } = z.object({
+        amount: z.number().int().min(100, "Minimum $1.00"),
+        description: z.string().min(3).max(200),
+      }).parse(req.body);
+
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (!rental.stripeCustomerId) {
+        return res.status(400).json({ message: "No Stripe customer on file for this rental" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+
+      // Create an invoice item then invoice, and finalize+send
+      await stripe.invoiceItems.create({
+        customer: rental.stripeCustomerId,
+        amount,
+        currency: "usd",
+        description,
+        metadata: { rentalId: rental.id, type: "admin_invoice" },
+      });
+
+      const invoice = await stripe.invoices.create({
+        customer: rental.stripeCustomerId,
+        collection_method: "send_invoice",
+        days_until_due: 7,
+        metadata: { rentalId: rental.id },
+      });
+
+      await stripe.invoices.finalizeInvoice(invoice.id);
+      await stripe.invoices.sendInvoice(invoice.id);
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "admin_invoice_created",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Admin created one-off invoice $${(amount / 100).toFixed(2)} — "${description}" (Stripe invoice: ${invoice.id})`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true, invoiceId: invoice.id });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error("Admin create-invoice error:", err);
+      return res.status(500).json({ message: err.message || "Failed to create invoice" });
+    }
+  });
+
+  // Admin: cancel subscription for a rental
+  app.post("/api/admin/rentals/:id/cancel-subscription", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (!rental.stripeSubscriptionId) {
+        return res.status(400).json({ message: "No active subscription for this rental" });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
+
+      await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "subscription_cancelled",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Admin cancelled Stripe subscription ${rental.stripeSubscriptionId}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("Cancel subscription error:", err);
+      return res.status(500).json({ message: err.message || "Failed to cancel subscription" });
+    }
+  });
+
   // ── Stripe Payment Routes ────────────────────────────────────────────
 
   // Get Stripe publishable key (for frontend)
@@ -1609,6 +1693,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Payment intent does not match this rental" });
       }
 
+      // Idempotency: if webhook already activated this rental, just return success
+      if (rental.depositPaid) {
+        return res.json({ success: true, status: "active", note: "already_activated" });
+      }
+
       // Activate rental + mark trailer as rented
       await storage.updateRental(rentalId, {
         depositPaid: true,
@@ -1621,29 +1710,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.createAuditLog({
         userId: user.id,
-        actionType: "deposit_paid",
+        actionType: "deposit_paid_client",
         entityType: "rental",
         entityId: rentalId,
-        description: `Security deposit paid via Stripe (PI: ${paymentIntentId}) — rental activated, trailer marked rented`,
+        description: `Security deposit paid via Stripe Elements (PI: ${paymentIntentId}) — rental activated, trailer marked rented`,
         isAdminEntry: false,
         ipAddress: req.ip,
       });
 
-      // Send activation email
+      // Send renter activation email + admin notification
       try {
         const company = await storage.getCompany(rental.companyId);
         const trailer = await storage.getTrailer(rental.trailerId);
         if (company && trailer) {
-          const { sendDepositConfirmedEmail } = await import("./email-service");
-          await sendDepositConfirmedEmail({
-            rentalId,
-            companyName: company.name,
-            renterEmail: company.email,
-            renterName: company.ownerName,
-            trailerVin: trailer.vin,
-            trailerType: trailer.type,
-            monthlyRate: rental.monthlyRate,
-          });
+          const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import("./email-service");
+          await Promise.allSettled([
+            sendDepositConfirmedEmail({
+              rentalId,
+              companyName: company.name,
+              renterEmail: company.email,
+              renterName: company.ownerName,
+              trailerVin: trailer.vin,
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+            }),
+            sendDepositReceivedAdminEmail({
+              rentalId,
+              companyName: company.name,
+              trailerVin: trailer.vin,
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+              paymentIntentId,
+            }),
+          ]);
         }
       } catch (emailErr) {
         console.error("Failed to send activation email:", emailErr);
@@ -1820,21 +1919,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ipAddress: req.ip,
       });
 
-      // Send activation email to renter
+      // Send renter activation email + admin notification
       try {
         const company = await storage.getCompany(rental.companyId);
         const trailer = await storage.getTrailer(rental.trailerId);
         if (company && trailer) {
-          const { sendDepositConfirmedEmail } = await import("./email-service");
-          await sendDepositConfirmedEmail({
-            rentalId,
-            companyName: company.name,
-            renterEmail: company.email,
-            renterName: company.ownerName,
-            trailerVin: trailer.vin,
-            trailerType: trailer.type,
-            monthlyRate: rental.monthlyRate,
-          });
+          const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import("./email-service");
+          await Promise.allSettled([
+            sendDepositConfirmedEmail({
+              rentalId,
+              companyName: company.name,
+              renterEmail: company.email,
+              renterName: company.ownerName,
+              trailerVin: trailer.vin,
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+            }),
+            sendDepositReceivedAdminEmail({
+              rentalId,
+              companyName: company.name,
+              trailerVin: trailer.vin,
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+            }),
+          ]);
         }
       } catch (emailErr) {
         console.error("Failed to send deposit confirmation email:", emailErr);

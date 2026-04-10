@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Input } from "@/components/ui/input";
 import {
   Truck, Building2, ChevronLeft, FileText, ExternalLink, CheckCircle,
   CreditCard, Calendar, Clock, AlertTriangle, Receipt, Download,
-  Activity, DollarSign, User, Hash, Mail, Phone
+  Activity, DollarSign, User, Hash, Mail, Phone, PlusCircle, XCircle,
 } from "lucide-react";
 import type { Rental, Document, AuditLog, Company } from "@shared/schema";
 
@@ -65,6 +66,10 @@ export default function AdminRentalDetail() {
   const qc = useQueryClient();
 
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [invoiceAmount, setInvoiceAmount] = useState("");
+  const [invoiceDesc, setInvoiceDesc] = useState("");
+  const [cancelSubConfirm, setCancelSubConfirm] = useState(false);
 
   const { data, isLoading } = useQuery<RentalDetailData>({
     queryKey: ["/api/admin/rentals", rentalId],
@@ -119,6 +124,43 @@ export default function AdminRentalDetail() {
       toast({ title: "Deposit confirmed", description: "Rental is now active." });
     },
     onError: (err: Error) => toast({ title: "Failed to confirm deposit", description: err.message, variant: "destructive" }),
+  });
+
+  const createInvoiceMut = useMutation({
+    mutationFn: async ({ amount, description }: { amount: number; description: string }) => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/create-invoice`, { amount, description });
+      if (!res.ok) {
+        const err = await res.json() as { message: string };
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "invoices"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/rentals", rentalId] });
+      setShowInvoiceForm(false);
+      setInvoiceAmount("");
+      setInvoiceDesc("");
+      toast({ title: "Invoice sent!", description: "The customer has been emailed a Stripe invoice." });
+    },
+    onError: (err: Error) => toast({ title: "Invoice failed", description: err.message, variant: "destructive" }),
+  });
+
+  const cancelSubMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/rentals/${rentalId}/cancel-subscription`, {});
+      if (!res.ok) {
+        const err = await res.json() as { message: string };
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/rentals", rentalId] });
+      setCancelSubConfirm(false);
+      toast({ title: "Subscription cancelled" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to cancel subscription", description: err.message, variant: "destructive" }),
   });
 
   if (authLoading || !user) {
@@ -452,13 +494,120 @@ export default function AdminRentalDetail() {
                   )}
 
                   {rental.stripeCustomerId && (
-                    <div className="pt-2 border-t border-border">
-                      <div className="text-xs text-muted-foreground mb-1">Stripe Customer</div>
-                      <div className="font-mono text-xs text-muted-foreground truncate">{rental.stripeCustomerId}</div>
+                    <div className="pt-2 border-t border-border space-y-2">
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-0.5">Stripe Customer</div>
+                        <div className="font-mono text-xs text-muted-foreground truncate">{rental.stripeCustomerId}</div>
+                      </div>
+                      {rental.stripeSubscriptionId && (
+                        <div>
+                          <div className="text-xs text-muted-foreground mb-0.5">Monthly Subscription</div>
+                          <div className="font-mono text-xs text-green-400 truncate">{rental.stripeSubscriptionId}</div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Admin Billing Actions */}
+              {rental.stripeCustomerId && (
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <h2 className="font-bold text-sm uppercase tracking-wider mb-4">Billing Actions</h2>
+                  <div className="space-y-3">
+
+                    {/* One-off invoice */}
+                    {!showInvoiceForm ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full gap-2 border-border"
+                        onClick={() => setShowInvoiceForm(true)}
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                        Create One-Off Invoice
+                      </Button>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">Enter amount and description. The customer will receive an emailed Stripe invoice due in 7 days.</p>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-muted-foreground">$</span>
+                          <Input
+                            type="number"
+                            min="1"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={invoiceAmount}
+                            onChange={e => setInvoiceAmount(e.target.value)}
+                            className="h-8 text-sm w-28"
+                          />
+                        </div>
+                        <Input
+                          placeholder="Description (e.g. Damage fee)"
+                          value={invoiceDesc}
+                          onChange={e => setInvoiceDesc(e.target.value)}
+                          className="h-8 text-sm"
+                          maxLength={200}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="flex-1 bg-primary hover:bg-primary/90 text-white"
+                            disabled={createInvoiceMut.isPending || !invoiceAmount || !invoiceDesc}
+                            onClick={() => {
+                              const cents = Math.round(parseFloat(invoiceAmount) * 100);
+                              if (isNaN(cents) || cents < 100) {
+                                toast({ title: "Invalid amount", description: "Minimum $1.00", variant: "destructive" });
+                                return;
+                              }
+                              createInvoiceMut.mutate({ amount: cents, description: invoiceDesc });
+                            }}
+                          >
+                            {createInvoiceMut.isPending ? "Sending…" : "Send Invoice"}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setShowInvoiceForm(false); setInvoiceAmount(""); setInvoiceDesc(""); }}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cancel subscription */}
+                    {rental.stripeSubscriptionId && (
+                      <div className="pt-2 border-t border-border">
+                        {!cancelSubConfirm ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full gap-2 text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                            onClick={() => setCancelSubConfirm(true)}
+                          >
+                            <XCircle className="w-4 h-4" />
+                            Cancel Monthly Subscription
+                          </Button>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-xs text-orange-300">This immediately cancels the subscription and stops future billing. Confirm?</p>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                className="flex-1 bg-red-800 hover:bg-red-700 text-white"
+                                disabled={cancelSubMut.isPending}
+                                onClick={() => cancelSubMut.mutate()}
+                              >
+                                {cancelSubMut.isPending ? "Cancelling…" : "Yes, Cancel"}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setCancelSubConfirm(false)}>
+                                Keep
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Quick links */}
               <div className="bg-card border border-border rounded-xl p-5">
