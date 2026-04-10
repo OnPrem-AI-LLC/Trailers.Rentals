@@ -49,7 +49,7 @@ const EMPTY_FORM: ApplicationForm = {
 };
 
 export default function Apply() {
-  const { id: trailerId } = useParams();
+  const { trailerId } = useParams();
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [form, setForm] = useState<ApplicationForm>(EMPTY_FORM);

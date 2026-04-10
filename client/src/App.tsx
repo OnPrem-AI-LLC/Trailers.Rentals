@@ -34,7 +34,7 @@ function Router() {
       <Route path="/trailers/:id" component={TrailerDetail} />
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />
-      <Route path="/apply/:id" component={Apply} />
+      <Route path="/apply/:trailerId" component={Apply} />
       <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
       <Route component={NotFound} />
     </Switch>

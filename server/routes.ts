@@ -22,7 +22,7 @@ import {
   sendCOIRequest,
   sendMoreInfoRequest,
 } from "./email-service";
-import { lookupByDot } from "./safer";
+import { lookupByDot, lookupByMc } from "./safer";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
@@ -390,7 +390,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Auto-trigger SAFER lookup on first visit (same behaviour as session-based endpoint)
       if (!application.saferData && application.dotNumber) {
         try {
-          const saferResult = await lookupByDot(application.dotNumber);
+          let saferResult = await lookupByDot(application.dotNumber);
+          // MC fallback: if DOT lookup failed and an MC number is on file, try by MC
+          if (!saferResult.success && application.mcNumber) {
+            const mcResult = await lookupByMc(application.mcNumber);
+            if (mcResult.success) saferResult = mcResult;
+          }
           const updated = await storage.updateRentalApplication(application.id, {
             saferData: JSON.stringify(saferResult),
           });
@@ -503,10 +508,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const application = await storage.getRentalApplication(req.params.id);
       if (!application) return res.status(404).json({ message: "Application not found" });
 
-      // Auto-run SAFER if not cached
+      // Auto-run SAFER if not cached (DOT first, MC fallback)
       if (!application.saferData && application.dotNumber) {
         try {
-          const safer = await lookupByDot(application.dotNumber);
+          let safer = await lookupByDot(application.dotNumber);
+          if (!safer.success && application.mcNumber) {
+            const mcResult = await lookupByMc(application.mcNumber);
+            if (mcResult.success) safer = mcResult;
+          }
           const saferJson = JSON.stringify(safer);
           await storage.updateRentalApplication(application.id, { saferData: saferJson });
           return res.json({ ...application, saferData: saferJson });
@@ -715,7 +724,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!application) return res.status(404).json({ message: "Application not found" });
       if (!application.dotNumber) return res.status(400).json({ message: "No DOT number on application" });
 
-      const safer = await lookupByDot(application.dotNumber);
+      let safer = await lookupByDot(application.dotNumber);
+      // MC fallback: if DOT lookup failed and an MC number is on file, try by MC
+      if (!safer.success && application.mcNumber) {
+        const mcResult = await lookupByMc(application.mcNumber);
+        if (mcResult.success) safer = mcResult;
+      }
       const saferJson = JSON.stringify(safer);
       await storage.updateRentalApplication(application.id, { saferData: saferJson });
       return res.json({ saferData: saferJson, parsed: safer });
