@@ -228,9 +228,11 @@ export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: st
   const safeQuestions = esc(questions);
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping more-info email"); return; }
 
-  const responseUrl = rawApp.renterToken
-    ? `${domain()}/applications/respond/${app.renterToken}`
-    : `${domain()}/applications/${app.id}/respond`;
+  if (!rawApp.renterToken) {
+    console.warn("[email] sendMoreInfoRequest: renterToken missing — skipping email to avoid broken response link");
+    return;
+  }
+  const responseUrl = `${domain()}/applications/respond/${rawApp.renterToken}`;
 
   const html = `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

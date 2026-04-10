@@ -366,6 +366,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mcNumber: application.mcNumber,
         intendedUse: application.intendedUse,
         intendedUseDetails: application.intendedUseDetails,
+        authorizedUser: application.authorizedUser,
         trailerVin,
         trailerType,
         priceMonthly,
