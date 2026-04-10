@@ -1141,7 +1141,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Admin: upload document for company ──────────────────────────────
   app.post("/api/admin/companies/:id/documents", requireAdmin, upload.single("file"), async (req: Request, res: Response) => {
     try {
-      const typeSchema = z.object({ type: z.enum(["coi", "certificate_of_authority", "drivers_license", "registration", "agreement"]), isAdminOnly: z.string().optional() });
+      // Note: "registration" is trailer-bound (trailers.registrationUrl), not a company document type
+      const typeSchema = z.object({ type: z.enum(["coi", "certificate_of_authority", "drivers_license", "agreement"]), isAdminOnly: z.string().optional() });
       const { type, isAdminOnly } = typeSchema.parse(req.body);
       if (!req.file) return res.status(400).json({ message: "No file provided" });
 

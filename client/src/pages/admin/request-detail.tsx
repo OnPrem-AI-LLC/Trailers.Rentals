@@ -707,7 +707,11 @@ export default function AdminRequestDetail() {
                           <div key={doc.id} className="flex items-center gap-3 text-sm bg-muted/40 rounded-lg px-3 py-2">
                             <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                              <span className="text-xs text-muted-foreground block">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</span>
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-xs text-muted-foreground">{DOC_TYPE_LABELS[doc.type] ?? doc.type}</span>
+                                <span className="text-[10px] text-muted-foreground/60">·</span>
+                                <span className="text-[10px] text-muted-foreground/60">{formatDate(doc.createdAt)}</span>
+                              </div>
                               <a href={doc.url} target="_blank" rel="noreferrer" className="text-primary hover:underline flex items-center gap-1 truncate">
                                 <ExternalLink className="w-3 h-3 flex-shrink-0" />
                                 <span className="truncate">{doc.fileName}</span>
