@@ -1969,7 +1969,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let nextBillingDate: string | null = null;
       if (rental.stripeSubscriptionId) {
         try {
-          const sub = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
+          const sub = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId) as unknown as { current_period_end?: number };
           if (sub.current_period_end) {
             nextBillingDate = new Date(sub.current_period_end * 1000).toISOString();
           }
