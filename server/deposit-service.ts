@@ -51,12 +51,8 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       ...(customerId && !rental.stripeCustomerId ? { stripeCustomerId: customerId } : {}),
     });
 
-    // Mark trailer as rented
-    try {
-      await storage.updateTrailer(rental.trailerId, { status: 'rented' });
-    } catch (err) {
-      console.error(`[deposit] Could not mark trailer ${rental.trailerId} as rented:`, err);
-    }
+    // Mark trailer as rented — allow any error to propagate so finalization fails and retries safely
+    await storage.updateTrailer(rental.trailerId, { status: 'rented' });
   } else if (customerId && !rental.stripeCustomerId) {
     // Rental already active but missing customer ID — patch it
     await storage.updateRental(rentalId, { stripeCustomerId: customerId });

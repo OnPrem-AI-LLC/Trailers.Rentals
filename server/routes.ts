@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import QRCode from "qrcode";
 import { storage, type UpdateRental } from "./storage";
+import type Stripe from 'stripe';
 import { getUncachableStripeClient, getStripePublishableKey, getStripeSecretKey } from "./stripeClient";
 import {
   insertRentalApplicationSchema,
@@ -1564,10 +1565,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ success: true, invoiceId: invoice.id });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error("Admin create-invoice error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create invoice" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create invoice" });
     }
   });
 
@@ -1635,9 +1636,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ success: true, subscriptionId: subscription.id });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Admin create-subscription error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create subscription" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create subscription" });
     }
   });
 
@@ -1666,9 +1667,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ success: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Cancel subscription error:", err);
-      return res.status(500).json({ message: err.message || "Failed to cancel subscription" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to cancel subscription" });
     }
   });
 
@@ -1679,7 +1680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const publishableKey = await getStripePublishableKey();
       return res.json({ publishableKey });
-    } catch (err: any) {
+    } catch (err: unknown) {
       return res.status(503).json({ message: "Stripe not configured" });
     }
   });
@@ -1725,9 +1726,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let paymentIntent: Awaited<ReturnType<typeof stripe.paymentIntents.create>>;
       if (rental.stripeDepositIntentId) {
         try {
-          const existing = await stripe.paymentIntents.retrieve(rental.stripeDepositIntentId) as unknown as { status: string; client_secret: string; id: string };
+          // Retrieve and cast to Stripe.PaymentIntent (single narrowing cast from Response<PaymentIntent>)
+          const existing = await stripe.paymentIntents.retrieve(rental.stripeDepositIntentId) as Stripe.PaymentIntent;
           if (REUSABLE_STATUSES.includes(existing.status)) {
-            paymentIntent = existing as unknown as typeof paymentIntent;
+            paymentIntent = existing as typeof paymentIntent;
           } else {
             throw new Error(`PI status ${existing.status} not reusable`);
           }
@@ -1764,10 +1766,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trailerLabel,
         monthlyRate: rental.monthlyRate,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error("PaymentIntent error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create payment intent" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create payment intent" });
     }
   });
 
@@ -1810,7 +1812,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ success: true, status: "active", ...result });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error("Payment succeeded handler error:", err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1880,10 +1882,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ url: session.url, sessionId: session.id });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error("Stripe deposit session error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create payment session" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create payment session" });
     }
   });
 
@@ -1942,10 +1944,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ url: session.url, sessionId: session.id });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error("Stripe subscription session error:", err);
-      return res.status(500).json({ message: err.message || "Failed to create subscription session" });
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create subscription session" });
     }
   });
 
@@ -1966,7 +1968,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       return res.json({ ...result, rentalId });
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1990,7 +1992,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stripeSubscriptionId: rental.stripeSubscriptionId,
         monthlyRate: rental.monthlyRate,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
@@ -2010,24 +2012,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ charges: [], invoices: [], nextBillingDate: null, stripeCustomerUrl: null, stripeSubscriptionUrl: null });
       }
       const stripe = await getUncachableStripeClient();
-      // Fetch charges and invoices; we filter client-side by rentalId/subscriptionId
-      // to prevent mixing charges across multiple rentals on the same Stripe customer.
-      const [chargesResult, invoicesResult] = await Promise.all([
+      // Fetch charges and invoices in parallel.
+      // Subscription invoices are fetched by subscription ID (no `subscription` field
+      // access needed — avoids Stripe SDK version type divergence).
+      const [chargesResult, invoicesResult, subInvoicesResult] = await Promise.all([
         stripe.charges.list({ customer: rental.stripeCustomerId, limit: 50 }),
         stripe.invoices.list({ customer: rental.stripeCustomerId, limit: 50 }),
+        rental.stripeSubscriptionId
+          ? stripe.invoices.list({ subscription: rental.stripeSubscriptionId, limit: 50 })
+          : Promise.resolve({ data: [] as Stripe.Invoice[] }),
       ]);
 
-      // Fetch next billing date from subscription if available
+      // Compute next billing date from rental start date (monthly cycle).
+      // Avoids an extra Stripe API call and sidesteps SDK version type divergence.
       let nextBillingDate: string | null = null;
-      if (rental.stripeSubscriptionId) {
-        try {
-          const sub = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId) as unknown as { current_period_end?: number };
-          if (sub.current_period_end) {
-            nextBillingDate = new Date(sub.current_period_end * 1000).toISOString();
-          }
-        } catch (e) {
-          console.warn('[invoices] Could not fetch subscription for next billing date:', e);
-        }
+      if (rental.stripeSubscriptionId && rental.startDate) {
+        const startMs = new Date(rental.startDate).getTime();
+        const now = Date.now();
+        // Average month ≈ 30.44 days; find how many complete months have elapsed
+        const avgMonthMs = 30.44 * 24 * 60 * 60 * 1000;
+        const monthsElapsed = Math.max(0, Math.floor((now - startMs) / avgMonthMs));
+        const nextBilling = new Date(rental.startDate);
+        nextBilling.setMonth(nextBilling.getMonth() + monthsElapsed + 1);
+        nextBillingDate = nextBilling.toISOString();
       }
 
       // Stripe dashboard links — admin-only to prevent leaking internal Stripe IDs to renters
@@ -2045,20 +2052,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : null;
       }
 
-      // Filter charges to those linked to this rental by metadata (deposit) or
-      // subscription invoices that generated a charge.
-      const rentalCharges = chargesResult.data.filter((c) => {
-        const meta = (c as unknown as { metadata?: Record<string, string> }).metadata ?? {};
-        return meta.rentalId === rental.id;
+      // Filter charges to those linked to this rental by metadata.
+      // Cast list items to Stripe.Charge for proper metadata typing.
+      const rentalCharges = (chargesResult.data as Stripe.Charge[]).filter((c) => {
+        return (c.metadata ?? {})['rentalId'] === rental.id;
       });
 
-      // Filter invoices to those linked to this rental's subscription or
-      // one-off invoices that have rentalId metadata.
-      const rentalInvoices = invoicesResult.data.filter((inv) => {
-        const raw = inv as unknown as { subscription?: string | null; metadata?: Record<string, string> };
-        if (rental.stripeSubscriptionId && raw.subscription === rental.stripeSubscriptionId) return true;
-        return (raw.metadata ?? {}).rentalId === rental.id;
-      });
+      // Merge subscription invoices + one-off invoices tagged with rentalId metadata;
+      // deduplicate by invoice ID in case of overlap.
+      const metadataInvoices = (invoicesResult.data as Stripe.Invoice[]).filter(
+        (inv) => (inv.metadata ?? {})['rentalId'] === rental.id,
+      );
+      const subscriptionInvoices = subInvoicesResult.data as Stripe.Invoice[];
+      const seenIds = new Set<string>();
+      const rentalInvoices: Stripe.Invoice[] = [];
+      for (const inv of [...metadataInvoices, ...subscriptionInvoices]) {
+        if (!seenIds.has(inv.id)) { seenIds.add(inv.id); rentalInvoices.push(inv); }
+      }
 
       return res.json({
         nextBillingDate,
