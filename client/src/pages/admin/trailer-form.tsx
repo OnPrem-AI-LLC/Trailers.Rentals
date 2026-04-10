@@ -255,6 +255,15 @@ export default function TrailerForm() {
         });
       }
 
+      // Persist primary/order changes for already-saved photos
+      const savedPhotos = photos.filter(p => !!p.id);
+      for (const p of savedPhotos) {
+        await apiRequest("PATCH", `/api/admin/photos/${p.id}`, {
+          isPrimary: p.isPrimary,
+          displayOrder: p.displayOrder,
+        });
+      }
+
       queryClient.invalidateQueries({ queryKey: ["/api/admin/trailers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trailers"] });
 

@@ -110,7 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/trailers/:id", async (req: Request, res: Response) => {
     try {
       const trailer = await storage.getTrailer(req.params.id);
-      if (!trailer) return res.status(404).json({ message: "Trailer not found" });
+      if (!trailer || trailer.status === "inactive") return res.status(404).json({ message: "Trailer not found" });
       return res.json(trailer);
     } catch (error) {
       console.error(error);
@@ -228,8 +228,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/admin/photos/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const updateSchema = z.object({
+        isPrimary: z.boolean().optional(),
+        displayOrder: z.number().int().optional(),
+      });
+      const data = updateSchema.parse(req.body);
+      const photo = await storage.updateTrailerPhoto(req.params.id, data);
+      if (!photo) return res.status(404).json({ message: "Photo not found" });
+      return res.json(photo);
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.delete("/api/admin/photos/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
+      const photo = await storage.getTrailerPhoto(req.params.id);
+      if (photo?.url) {
+        // Best-effort: remove from Cloudinary (non-fatal if it fails)
+        const { deleteFromCloudinary } = await import("./cloudinary");
+        await deleteFromCloudinary(photo.url);
+      }
       await storage.deleteTrailerPhoto(req.params.id);
       return res.json({ success: true });
     } catch (error) {

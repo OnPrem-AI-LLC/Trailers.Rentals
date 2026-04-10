@@ -50,6 +50,8 @@ export interface IStorage {
 
   // Trailer Photos
   addTrailerPhoto(photo: InsertTrailerPhoto): Promise<TrailerPhoto>;
+  updateTrailerPhoto(id: string, data: Partial<Pick<TrailerPhoto, "isPrimary" | "displayOrder">>): Promise<TrailerPhoto | undefined>;
+  getTrailerPhoto(id: string): Promise<TrailerPhoto | undefined>;
   deleteTrailerPhoto(id: string): Promise<void>;
 
   // Companies
@@ -151,6 +153,19 @@ export class DatabaseStorage implements IStorage {
   async addTrailerPhoto(photo: InsertTrailerPhoto): Promise<TrailerPhoto> {
     const [row] = await db.insert(trailerPhotos).values(photo).returning();
     return row;
+  }
+
+  async updateTrailerPhoto(
+    id: string,
+    data: Partial<Pick<TrailerPhoto, "isPrimary" | "displayOrder">>
+  ): Promise<TrailerPhoto | undefined> {
+    const [row] = await db.update(trailerPhotos).set(data).where(eq(trailerPhotos.id, id)).returning();
+    return row ?? undefined;
+  }
+
+  async getTrailerPhoto(id: string): Promise<TrailerPhoto | undefined> {
+    const [row] = await db.select().from(trailerPhotos).where(eq(trailerPhotos.id, id));
+    return row ?? undefined;
   }
 
   async deleteTrailerPhoto(id: string): Promise<void> {
