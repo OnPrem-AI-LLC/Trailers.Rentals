@@ -1,0 +1,73 @@
+Deluxe Logistics Equipment Rental
+
+Website content
+1. Trailer rentals - display inventory with price
+    * (7-8) Reefer - $1500/mo + engine hours
+        * Smart trailers with downloadable temp logs 
+        * Thermoking Precedent reefers
+    * (4) dry vans - $1000
+2. Hiring drivers
+3. Setup the ability for the admin to add/update inventory - admin can add or remove items from inventory
+    1. Once the item is rented, it should get removed from the list of available inventory
+    2. Admin should be allowed to add existing item back to inventory once returned and cleaned
+    3. Admin to have ability to add new items to inventory 
+    * Upload picture(s) of item
+    * Add details
+    * Add price
+    * Add VIN - identifier
+    * Add registration for item - visible to admin only, stored on the backend
+4. Setup payment system
+5. Setup admin/owner access
+    * Deluxe team members can click a link from request email to be taken to the website to approve/reject/follow up from the site itself - ensure the entire process is done from the website with only emails being the external aspect
+6. Ability for admin to send request for COI/Certificate of Authority directly from the website
+7. Ability to calculate the number of engine hours and bill accordingly from the site itself
+    * Deluxe admin can send a request for engine hours to renter for them to enter
+    * Deluxe admin can manually enter from their end
+8. Add user accounts - companies will need to setup an account
+    * Automated billing and invoicing
+    * Email 
+    * Company info
+    * Upload documents (COI, Certificate of Authority, Drivers license)
+9. Add audit logging across the application to keep track of admin actions
+10. Admin should be able to manually enter info for renter - this should be logged for auditing
+11. System should be able to handle email correspondence where needed. Automated system emails should be setup for sending reminders for returning the equipment, account creation, password reset, rejection, approval, need more info
+
+Process flow - Requesting and Approval:
+RENTER
+1. Pick trailer - select trailer to rent
+2. Fill in info into an application form
+    * Application to rent
+        * Company info
+            * Owner, authorized user for company(manager etc)
+            * Email address
+            * MC, DOT, Phone number
+        * Details on what the trailer will be used for
+            * Can be a drop down
+ADMIN
+1. Review and Approval - checking MC and DOT of the company
+    * Renter request is sent to the admin over email with the details renter provided and the inventory being requested. 
+2. From the email, there is a link to take them to the admin portal to approve or decline the request
+    * On this screen, admin should have the following ability:
+        * Check MC/DOT (ideally checks it through SAFER upon email link click and by the time admin lands on portal, they have the SAFER info)
+        * Approve/Reject buttons
+        * Send agreement button
+        * Collect Payment button
+        * Request for COI
+        * Need more info - opens form for admin to enter any questions
+3. Approve button = send them a request to create an account, which prompts to sign the agreement and make payment. 
+4. Account creation from the link will prompt
+    * Payment information - Collect payment - Security deposit - 2 months of rent, covers 1st month pay and deposit (1 month rent)
+    * Drivers license number
+    * COI with Deluxe Logistics as the holder - add email to send COI from insurance provider/upload COI which can then be added to their account info
+            * 818 Corning Way, Martinsburg, WV
+    * Certificate of Authority on a per needed basis
+5. Renter should be able to sign agreement electronically. When renter signs the agreement, they need to also be able to provide a pickup time and date, this way we can have the trailer ready by that time
+6. Once agreement is signed, should create a record that keeps track of all things related to this request such as documents, audit logs, customer communications, correspondence, admin entries.
+7. Once the item is rented out, the inventory should get updated automatically.
+
+PICKUP
+1. Create a hands free process flow for renter
+    1. Scan QR code that opens up a login prompt to sign in to the account they created
+    2. Based on QR code which is specific to the item that was rented on their account, prompts the renter to check-in by confirming some details
+        1. Take pics of the trailer for pre-inspection for renters security - provides a blanket of liability in the event theres any damage
+    3. Once check-in is complete, renter is sent an email with the electronic registration for the items
