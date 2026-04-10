@@ -21,7 +21,8 @@ import { getUncachableStripeClient } from './stripeClient';
 export interface FinalizeDepositOptions {
   rentalId: string;
   paymentIntentId?: string;
-  stripeCustomerId?: string; // if provided, will be persisted if not already set
+  stripeCustomerId?: string;   // if provided, will be persisted if not already set
+  paymentMethodId?: string;    // from payment_intent.succeeded; saved as customer default PM for recurring billing
   triggeredBy: 'webhook' | 'client_callback' | 'admin_manual';
   userId?: string; // for audit log; nullable for webhook path
   ipAddress?: string | null;
@@ -70,6 +71,18 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     try {
       const stripe = await getUncachableStripeClient();
 
+      // Save payment method as customer default so off-session recurring billing works
+      if (opts.paymentMethodId) {
+        try {
+          await stripe.customers.update(effectiveCustomerId, {
+            invoice_settings: { default_payment_method: opts.paymentMethodId },
+          });
+          console.log(`[deposit] Set default payment method ${opts.paymentMethodId} for customer ${effectiveCustomerId}`);
+        } catch (pmErr) {
+          console.warn('[deposit] Could not set default payment method:', pmErr);
+        }
+      }
+
       const price = await stripe.prices.create({
         unit_amount: rental.monthlyRate,
         currency: 'usd',
@@ -80,13 +93,21 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
         metadata: { rentalId },
       });
 
+      // trial_end = 30 days from now: the deposit covers the first month,
+      // so recurring billing should not start until the next billing cycle.
+      const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+
       const subscription = await stripe.subscriptions.create({
         customer: effectiveCustomerId,
         items: [{ price: price.id }],
         metadata: { rentalId, type: 'monthly_rental' },
-        payment_settings: { payment_method_types: ['card'] },
+        payment_settings: {
+          payment_method_types: ['card'],
+          save_default_payment_method: 'on_subscription',
+        },
         proration_behavior: 'none',
-      });
+        trial_end: trialEnd, // first month already covered by deposit
+      } as Parameters<typeof stripe.subscriptions.create>[0]);
 
       await storage.updateRental(rentalId, { stripeSubscriptionId: subscription.id });
       console.log(`[deposit] Monthly subscription ${subscription.id} created for rental ${rentalId}`);

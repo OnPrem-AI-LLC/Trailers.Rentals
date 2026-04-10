@@ -1594,13 +1594,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         metadata: { rentalId: rental.id },
       });
 
+      // Calculate trial_end based on rental start date: first month is already covered by deposit.
+      // If rental started more than 30 days ago, begin billing immediately (no trial).
+      const startedAt = rental.startDate ? new Date(rental.startDate).getTime() : Date.now();
+      const daysSinceStart = (Date.now() - startedAt) / (1000 * 60 * 60 * 24);
+      const remainingTrialDays = Math.max(0, 30 - Math.floor(daysSinceStart));
+      const trialEnd = remainingTrialDays > 0
+        ? Math.floor(Date.now() / 1000) + remainingTrialDays * 24 * 60 * 60
+        : undefined;
+
       const subscription = await stripe.subscriptions.create({
         customer: rental.stripeCustomerId,
         items: [{ price: price.id }],
         metadata: { rentalId: rental.id, type: "monthly_rental" },
-        payment_settings: { payment_method_types: ["card"] },
+        payment_settings: {
+          payment_method_types: ["card"],
+          save_default_payment_method: "on_subscription",
+        },
         proration_behavior: "none",
-      });
+        ...(trialEnd ? { trial_end: trialEnd } : {}),
+      } as Parameters<typeof stripe.subscriptions.create>[0]);
 
       await storage.updateRental(rental.id, { stripeSubscriptionId: subscription.id });
 
@@ -1706,6 +1719,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customer: customerId,
         description: `2-month security deposit — ${trailerLabel} (${rental.monthlyRate / 100 * 2 / 100} × 2 mo)`,
         metadata: { rentalId, type: "deposit", companyId: rental.companyId },
+        // Save payment method for off-session recurring billing (monthly subscription)
+        setup_future_usage: "off_session",
         automatic_payment_methods: { enabled: true },
       });
 

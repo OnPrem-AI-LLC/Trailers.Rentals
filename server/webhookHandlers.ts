@@ -32,6 +32,7 @@ export class WebhookHandlers {
         const pi = event.data.object as {
           id: string;
           customer: string | null;
+          payment_method: string | null;
           metadata: Record<string, string>;
         };
         if (pi.metadata?.type === 'deposit' && pi.metadata?.rentalId) {
@@ -39,6 +40,7 @@ export class WebhookHandlers {
             rentalId: pi.metadata.rentalId,
             paymentIntentId: pi.id,
             stripeCustomerId: pi.customer ?? undefined,
+            paymentMethodId: pi.payment_method ?? undefined,
             triggeredBy: 'webhook',
           });
           console.log(
