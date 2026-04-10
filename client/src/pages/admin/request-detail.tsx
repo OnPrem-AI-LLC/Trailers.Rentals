@@ -478,7 +478,7 @@ export default function AdminRequestDetail() {
                 Share this link with the renter to let them respond through the site:
               </p>
               <code className="text-xs bg-muted px-2 py-1 rounded break-all block">
-                {window.location.origin}/applications/{app.id}/respond
+                {window.location.origin}/applications/respond/{app.renterToken ?? app.id}
               </code>
             </div>
           )}

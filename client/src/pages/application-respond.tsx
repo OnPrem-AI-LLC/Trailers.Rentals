@@ -16,37 +16,37 @@ import {
   ArrowLeft,
   HelpCircle,
 } from "lucide-react";
-import type { RentalApplication, AdminNote } from "@shared/schema";
+import type { RentalApplication } from "@shared/schema";
 
 export default function ApplicationRespond() {
-  const { id } = useParams();
+  const { renterToken } = useParams();
   const { toast } = useToast();
   const [response, setResponse] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const { data: app, isLoading, isError } = useQuery<Pick<RentalApplication, "id" | "companyName" | "ownerName" | "status">>({
-    queryKey: ["/api/applications", id, "public"],
+    queryKey: ["/api/applications/respond", renterToken, "info"],
     queryFn: async () => {
-      const res = await fetch(`/api/applications/${id}/public`);
+      const res = await fetch(`/api/applications/respond/${renterToken}/info`);
       if (!res.ok) throw new Error("Application not found");
       return res.json();
     },
-    enabled: !!id,
+    enabled: !!renterToken,
   });
 
   const { data: questions } = useQuery<{ body: string; createdAt: string | Date }[]>({
-    queryKey: ["/api/applications", id, "questions"],
+    queryKey: ["/api/applications/respond", renterToken, "questions"],
     queryFn: async () => {
-      const res = await fetch(`/api/applications/${id}/questions`);
+      const res = await fetch(`/api/applications/respond/${renterToken}/questions`);
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!id && app?.status === "needs_info",
+    enabled: !!renterToken && app?.status === "needs_info",
   });
 
   const mutation = useMutation({
     mutationFn: async (text: string) => {
-      const res = await apiRequest("POST", `/api/applications/${id}/respond`, { response: text });
+      const res = await apiRequest("POST", `/api/applications/respond/${renterToken}`, { response: text });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Failed to submit" }));
         throw new Error((err as { message: string }).message);
@@ -83,7 +83,7 @@ export default function ApplicationRespond() {
           <div className="text-center space-y-4">
             <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
             <h2 className="text-xl font-bold">Application not found</h2>
-            <p className="text-muted-foreground text-sm">This link may have expired or the application ID is invalid.</p>
+            <p className="text-muted-foreground text-sm">This link may have expired or is invalid.</p>
             <Link href="/">
               <Button variant="outline">Go to homepage</Button>
             </Link>
@@ -167,7 +167,6 @@ export default function ApplicationRespond() {
           </p>
         </div>
 
-        {/* Questions from admin */}
         {latestQuestion && (
           <div className="bg-blue-950/30 border border-blue-800 rounded-xl p-5 mb-6">
             <div className="text-xs font-bold text-blue-400 mb-2 uppercase tracking-wider">Questions from our team</div>
@@ -175,7 +174,6 @@ export default function ApplicationRespond() {
           </div>
         )}
 
-        {/* Response form */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <MessageSquare className="w-4 h-4 text-primary" />

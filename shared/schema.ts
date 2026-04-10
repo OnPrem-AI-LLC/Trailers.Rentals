@@ -75,7 +75,8 @@ export const rentalApplications = pgTable("rental_applications", {
   status: text("status").notNull().default("pending"), // "pending" | "approved" | "rejected" | "needs_info"
   adminNotes: text("admin_notes"),
   saferData: text("safer_data"), // JSON string from FMCSA
-  adminToken: varchar("admin_token").unique(), // one-time email link token
+  adminToken: varchar("admin_token").unique(), // one-time admin email link token
+  renterToken: varchar("renter_token").unique(), // token used for renter response page
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

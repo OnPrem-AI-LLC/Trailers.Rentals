@@ -8,6 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ArrowLeft, Truck, Thermometer, CheckCircle, AlertCircle } from "lucide-react";
@@ -326,14 +333,25 @@ export default function Apply() {
 
             <div className="space-y-1.5">
               <Label htmlFor="intendedUse">Primary Use *</Label>
-              <Input
-                id="intendedUse"
+              <Select
                 value={form.intendedUse}
-                onChange={handleChange("intendedUse")}
-                placeholder="e.g., Regional dry freight, produce hauling, spot loads"
-                className="bg-background border-border"
-                required
-              />
+                onValueChange={(val) => setForm((prev) => ({ ...prev, intendedUse: val }))}
+              >
+                <SelectTrigger className="bg-background border-border">
+                  <SelectValue placeholder="Select primary use..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Regional dry freight">Regional dry freight</SelectItem>
+                  <SelectItem value="Produce / perishable hauling">Produce / perishable hauling</SelectItem>
+                  <SelectItem value="Refrigerated / cold chain">Refrigerated / cold chain</SelectItem>
+                  <SelectItem value="Spot loads / brokered freight">Spot loads / brokered freight</SelectItem>
+                  <SelectItem value="Retail distribution">Retail distribution</SelectItem>
+                  <SelectItem value="Construction / building materials">Construction / building materials</SelectItem>
+                  <SelectItem value="Flatbed / heavy haul">Flatbed / heavy haul</SelectItem>
+                  <SelectItem value="Intermodal / port operations">Intermodal / port operations</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">

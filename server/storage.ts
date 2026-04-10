@@ -63,6 +63,7 @@ export interface IStorage {
   createRentalApplication(app: InsertRentalApplication): Promise<RentalApplication>;
   getRentalApplication(id: string): Promise<RentalApplication | undefined>;
   getRentalApplicationByToken(token: string): Promise<RentalApplication | undefined>;
+  getRentalApplicationByRenterToken(renterToken: string): Promise<RentalApplication | undefined>;
   listRentalApplications(status?: string): Promise<RentalApplication[]>;
   updateRentalApplication(id: string, data: UpdateRentalApplication): Promise<RentalApplication | undefined>;
 
@@ -204,6 +205,14 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(rentalApplications)
       .where(eq(rentalApplications.adminToken, token));
+    return row ?? undefined;
+  }
+
+  async getRentalApplicationByRenterToken(renterToken: string): Promise<RentalApplication | undefined> {
+    const [row] = await db
+      .select()
+      .from(rentalApplications)
+      .where(eq(rentalApplications.renterToken, renterToken));
     return row ?? undefined;
   }
 

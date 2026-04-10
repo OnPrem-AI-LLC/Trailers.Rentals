@@ -14,6 +14,8 @@ init();
 
 interface ApplicationData {
   id: string;
+  adminToken?: string | null;
+  renterToken?: string | null;
   companyName: string;
   ownerName: string;
   email: string;
@@ -36,7 +38,9 @@ function domain(): string {
 export async function sendAdminApplicationAlert(app: ApplicationData): Promise<void> {
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin alert"); return; }
 
-  const reviewUrl = `${domain()}/admin/requests/${app.id}`;
+  const reviewUrl = app.adminToken
+    ? `${domain()}/admin/requests/${app.id}?tk=${app.adminToken}`
+    : `${domain()}/admin/requests/${app.id}`;
   const price = app.priceMonthly ? `$${(app.priceMonthly / 100).toLocaleString()}/month` : "N/A";
 
   const html = `
@@ -188,7 +192,9 @@ export async function sendCOIRequest(app: ApplicationData): Promise<void> {
 export async function sendMoreInfoRequest(app: ApplicationData, questions: string): Promise<void> {
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping more-info email"); return; }
 
-  const responseUrl = `${domain()}/applications/${app.id}/respond`;
+  const responseUrl = app.renterToken
+    ? `${domain()}/applications/respond/${app.renterToken}`
+    : `${domain()}/applications/${app.id}/respond`;
 
   const html = `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

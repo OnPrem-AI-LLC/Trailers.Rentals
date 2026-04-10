@@ -15,6 +15,7 @@ import {
   HelpCircle,
   Search,
   ChevronRight,
+  ArrowUpDown,
 } from "lucide-react";
 import type { RentalApplication } from "@shared/schema";
 
@@ -55,6 +56,7 @@ export default function AdminRequests() {
   const [, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   // Always call hooks first — redirect in effect
   useEffect(() => {
@@ -89,17 +91,23 @@ export default function AdminRequests() {
     rejected: allApps?.filter(a => a.status === "rejected").length ?? 0,
   };
 
-  const filtered = (allApps ?? []).filter((a) => {
-    const matchTab = activeTab === "all" || a.status === activeTab;
-    const q = search.toLowerCase();
-    const matchSearch =
-      !q ||
-      a.companyName.toLowerCase().includes(q) ||
-      a.dotNumber.toLowerCase().includes(q) ||
-      a.email.toLowerCase().includes(q) ||
-      (a.mcNumber ?? "").toLowerCase().includes(q);
-    return matchTab && matchSearch;
-  });
+  const filtered = (allApps ?? [])
+    .filter((a) => {
+      const matchTab = activeTab === "all" || a.status === activeTab;
+      const q = search.toLowerCase();
+      const matchSearch =
+        !q ||
+        a.companyName.toLowerCase().includes(q) ||
+        a.dotNumber.toLowerCase().includes(q) ||
+        a.email.toLowerCase().includes(q) ||
+        (a.mcNumber ?? "").toLowerCase().includes(q);
+      return matchTab && matchSearch;
+    })
+    .sort((a, b) => {
+      const tA = new Date(a.createdAt).getTime();
+      const tB = new Date(b.createdAt).getTime();
+      return sortOrder === "newest" ? tB - tA : tA - tB;
+    });
 
   return (
     <div className="min-h-screen bg-background">
@@ -147,15 +155,26 @@ export default function AdminRequests() {
           })}
         </div>
 
-        {/* Search */}
-        <div className="relative mb-6">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by company, DOT, email, or MC number..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-card border-border"
-          />
+        {/* Search + Sort */}
+        <div className="flex gap-3 mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by company, DOT, email, or MC number..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 bg-card border-border"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSortOrder((o) => (o === "newest" ? "oldest" : "newest"))}
+            className="flex-shrink-0 gap-2 border-border text-muted-foreground hover:text-foreground"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+            {sortOrder === "newest" ? "Newest first" : "Oldest first"}
+          </Button>
         </div>
 
         {/* Table */}

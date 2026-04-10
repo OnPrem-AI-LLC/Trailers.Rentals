@@ -327,7 +327,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertRentalApplicationSchema.parse(req.body);
       const adminToken = randomBytes(32).toString("hex");
-      const application = await storage.createRentalApplication({ ...data, adminToken, status: "pending" });
+      const renterToken = randomBytes(32).toString("hex");
+      const application = await storage.createRentalApplication({ ...data, adminToken, renterToken, status: "pending" });
 
       // Fetch trailer for email context
       let trailerVin: string | undefined;
@@ -342,6 +343,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const appData = {
         id: application.id,
+        adminToken: application.adminToken,
+        renterToken: application.renterToken,
         companyName: application.companyName,
         ownerName: application.ownerName,
         email: application.email,
@@ -370,7 +373,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isAdminEntry: false,
       });
 
-      return res.json({ success: true, id: application.id });
+      return res.json({ success: true, id: application.id, renterToken: application.renterToken });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
@@ -378,10 +381,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Public: get application info (limited fields for renter response page) ──
-  app.get("/api/applications/:id/public", async (req: Request, res: Response) => {
+  // ── Public: renter response info (keyed by renterToken, not bare ID) ──
+  app.get("/api/applications/respond/:renterToken/info", async (req: Request, res: Response) => {
     try {
-      const application = await storage.getRentalApplication(req.params.id);
+      const application = await storage.getRentalApplicationByRenterToken(req.params.renterToken);
       if (!application) return res.status(404).json({ message: "Application not found" });
       return res.json({
         id: application.id,
@@ -395,14 +398,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Public: get questions for renter response page ───────────────────
-  app.get("/api/applications/:id/questions", async (req: Request, res: Response) => {
+  // ── Public: get questions for renter response page (keyed by renterToken) ──
+  app.get("/api/applications/respond/:renterToken/questions", async (req: Request, res: Response) => {
     try {
-      const application = await storage.getRentalApplication(req.params.id);
+      const application = await storage.getRentalApplicationByRenterToken(req.params.renterToken);
       if (!application || application.status !== "needs_info") {
         return res.json([]);
       }
-      const notes = await storage.getAdminNotes("rental_application", req.params.id);
+      const notes = await storage.getAdminNotes("rental_application", application.id);
       const questions = notes
         .filter((n) => n.body.startsWith("[More Info Request]"))
         .map((n) => ({ body: n.body, createdAt: n.createdAt }));
@@ -413,21 +416,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Public: renter submits response to more-info request ─────────────
+  // ── Public: renter submits response (keyed by renterToken) ──────────
   const renterResponseSchema = z.object({ response: z.string().min(1, "Response required") });
 
-  app.post("/api/applications/:id/respond", async (req: Request, res: Response) => {
+  app.post("/api/applications/respond/:renterToken", async (req: Request, res: Response) => {
     try {
       const { response } = renterResponseSchema.parse(req.body);
-      const application = await storage.getRentalApplication(req.params.id);
+      const application = await storage.getRentalApplicationByRenterToken(req.params.renterToken);
       if (!application) return res.status(404).json({ message: "Application not found" });
       if (application.status !== "needs_info") {
         return res.status(400).json({ message: "No additional information is currently required for this application." });
       }
 
-      // Find a system/admin user to attribute note to (use null userId)
       await storage.createAdminNote({
-        authorId: application.id, // use application ID as placeholder (no user auth on renter side)
+        authorId: "renter", // explicit external-responder marker (no portal user on renter side)
         entityType: "rental_application",
         entityId: application.id,
         body: `[Renter Reply] ${response}`,
@@ -614,6 +616,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await sendMoreInfoRequest({
         id: application.id,
+        renterToken: application.renterToken,
         companyName: application.companyName,
         ownerName: application.ownerName,
         email: application.email,

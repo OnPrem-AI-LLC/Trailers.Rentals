@@ -35,7 +35,7 @@ function Router() {
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />
       <Route path="/apply/:id" component={Apply} />
-      <Route path="/applications/:id/respond" component={ApplicationRespond} />
+      <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
       <Route component={NotFound} />
     </Switch>
   );
