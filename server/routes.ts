@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import QRCode from "qrcode";
-import { storage } from "./storage";
+import { storage, type UpdateRental } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
   insertRentalApplicationSchema,
@@ -332,6 +332,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await storage.deleteAdminNote(req.params.id);
       return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Renter/Admin Message Thread (admin notes scoped to rental) ───────
+  // Renters can view messages on their own rentals; admin can post from admin UI
+
+  app.get("/api/rentals/:id/messages", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      // Admins can see any rental; renters can only see their own
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const notes = await storage.getAdminNotes("rental", req.params.id);
+      return res.json(notes);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/rentals/:id/messages", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const bodySchema = z.object({ body: z.string().min(1, "Message cannot be empty").max(1000) });
+      const { body } = bodySchema.parse(req.body);
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      // Renters can only post on their own rentals
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const note = await storage.createAdminNote({
+        authorId: user.id,
+        entityType: "rental",
+        entityId: req.params.id,
+        body,
+        isPinned: false,
+      });
+      await storage.createAuditLog({
+        userId: user.id,
+        actionType: "rental_message_sent",
+        entityType: "rental",
+        entityId: req.params.id,
+        description: `${user.role === "admin" ? "Admin" : "Renter"} sent message on rental ${req.params.id}`,
+        isAdminEntry: user.role === "admin",
+        ipAddress: req.ip,
+      });
+      return res.status(201).json(note);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Also expose note authors (so we can show names in thread) via admin notes author lookup
+  app.get("/api/admin/notes/author/:userId", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.params.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      return res.json({ id: user.id, firstName: user.firstName, lastName: user.lastName, role: user.role });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1289,7 +1358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           metadata: { rentalId, companyId: rental.companyId, userId: user.id },
         });
         customerId = customer.id;
-        await storage.updateRental(rentalId, { stripeCustomerId: customerId } as any);
+        await storage.updateRental(rentalId, { stripeCustomerId: customerId });
       }
 
       const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
@@ -1353,7 +1422,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           metadata: { rentalId, companyId: rental.companyId, userId: user.id },
         });
         customerId = customer.id;
-        await storage.updateRental(rentalId, { stripeCustomerId: customerId } as any);
+        await storage.updateRental(rentalId, { stripeCustomerId: customerId });
       }
 
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
@@ -1394,7 +1463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
       const rental = await storage.getRental(rentalId);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
-      const updated = await storage.updateRental(rentalId, { depositPaid: true, status: "active" } as any);
+      const updated = await storage.updateRental(rentalId, { depositPaid: true, status: "active" });
       await storage.createAuditLog({
         userId: req.session.userId!,
         actionType: "deposit_confirmed",

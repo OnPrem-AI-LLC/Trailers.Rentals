@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
-  Building2, Phone, Mail, Hash, Loader2
+  Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send
 } from "lucide-react";
-import type { Rental, Document, Company } from "@shared/schema";
+import type { Rental, Document, Company, AdminNote } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 
 interface DashboardData {
@@ -33,7 +34,6 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   coi: "Certificate of Insurance",
   certificate_of_authority: "Certificate of Authority",
   drivers_license: "Driver's License",
-  registration: "Vehicle Registration",
   agreement: "Rental Agreement",
 };
 
@@ -45,6 +45,106 @@ const RENTAL_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   completed: { label: "Completed", color: "text-muted-foreground bg-muted border-border" },
   cancelled: { label: "Cancelled", color: "text-red-400 bg-red-950 border-red-800" },
 };
+
+function RentalMessageThread({ rentalId, currentUserId }: { rentalId: string; currentUserId: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [newMsg, setNewMsg] = useState("");
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const { data: messages, isLoading } = useQuery<AdminNote[]>({
+    queryKey: ["/api/rentals", rentalId, "messages"],
+    queryFn: async () => {
+      const res = await fetch(`/api/rentals/${rentalId}/messages`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load messages");
+      return res.json() as Promise<AdminNote[]>;
+    },
+    enabled: expanded,
+    refetchInterval: expanded ? 30000 : false,
+  });
+
+  const sendMut = useMutation({
+    mutationFn: async (body: string) => {
+      const res = await apiRequest("POST", `/api/rentals/${rentalId}/messages`, { body });
+      if (!res.ok) throw new Error("Failed to send message");
+      return res.json();
+    },
+    onSuccess: () => {
+      setNewMsg("");
+      qc.invalidateQueries({ queryKey: ["/api/rentals", rentalId, "messages"] });
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    },
+    onError: () => toast({ title: "Failed to send message", variant: "destructive" }),
+  });
+
+  const unreadCount = messages?.filter(m => m.authorId !== currentUserId && !m.isPinned).length ?? 0;
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <button
+        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <MessageSquare className="w-4 h-4" />
+        <span>Messages{messages && messages.length > 0 ? ` (${messages.length})` : ""}</span>
+        {!expanded && unreadCount > 0 && (
+          <Badge className="text-xs bg-primary/20 text-primary border-primary/30 ml-1">{unreadCount} new</Badge>
+        )}
+        {expanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          {isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : !messages || messages.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No messages yet. Use this thread to communicate with Deluxe Logistics.</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {[...messages].reverse().map(msg => {
+                const isMe = msg.authorId === currentUserId;
+                return (
+                  <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div className={`rounded-lg px-3 py-2 text-xs max-w-[80%] ${isMe ? "bg-primary/20 text-primary-foreground border border-primary/30" : "bg-secondary text-foreground border border-border"}`}>
+                      <p className={`text-[10px] mb-1 ${isMe ? "text-primary/70" : "text-muted-foreground"}`}>
+                        {isMe ? "You" : "Deluxe Logistics"} · {new Date(msg.createdAt).toLocaleDateString()}
+                      </p>
+                      <p className="leading-snug whitespace-pre-wrap">{msg.body}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={bottomRef} />
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Textarea
+              className="text-xs min-h-0 h-16 resize-none"
+              placeholder="Type a message to Deluxe Logistics…"
+              value={newMsg}
+              onChange={e => setNewMsg(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey && newMsg.trim()) {
+                  e.preventDefault();
+                  sendMut.mutate(newMsg.trim());
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              className="self-end"
+              disabled={!newMsg.trim() || sendMut.isPending}
+              onClick={() => newMsg.trim() && sendMut.mutate(newMsg.trim())}
+            >
+              {sendMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { user, isLoading: authLoading, logout } = useAuth();
@@ -80,8 +180,8 @@ export default function Dashboard() {
     onSuccess: (data) => {
       window.location.href = data.url;
     },
-    onError: (err: any) => {
-      toast({ title: "Payment failed", description: err?.message ?? "Could not start checkout. Please try again.", variant: "destructive" });
+    onError: (err: Error) => {
+      toast({ title: "Payment failed", description: err.message ?? "Could not start checkout. Please try again.", variant: "destructive" });
       setPayingRentalId(null);
     },
   });
@@ -328,6 +428,8 @@ export default function Dashboard() {
                             </Button>
                           )}
                         </div>
+                        {/* Message thread for each rental */}
+                        <RentalMessageThread rentalId={rental.id} currentUserId={user.id} />
                       </div>
                     );
                   })}

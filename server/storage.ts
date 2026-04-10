@@ -33,15 +33,17 @@ import { eq, desc, and, ne } from "drizzle-orm";
 type InsertRentalApplication = typeof rentalApplications.$inferInsert;
 type UpdateRentalApplication = Partial<Omit<InsertRentalApplication, "id" | "createdAt">>;
 type InsertRental = Omit<typeof rentals.$inferInsert, "id" | "createdAt">;
-type UpdateRental = Partial<Omit<typeof rentals.$inferInsert, "id" | "createdAt">>;
+export type UpdateRental = Partial<Omit<typeof rentals.$inferInsert, "id" | "createdAt">>;
+// Full Drizzle insert type for users (includes inviteToken / inviteExpiry)
+type InsertUserFull = typeof users.$inferInsert;
 
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByInviteToken(token: string): Promise<User | undefined>;
-  createUser(user: InsertUser & { inviteToken?: string | null; inviteExpiry?: Date | null }): Promise<User>;
-  updateUser(id: string, data: Partial<User>): Promise<User | undefined>;
+  createUser(user: typeof users.$inferInsert): Promise<User>;
+  updateUser(id: string, data: Partial<typeof users.$inferInsert>): Promise<User | undefined>;
 
   // Trailers
   getTrailers(status?: string, excludeInactive?: boolean): Promise<TrailerWithPhotos[]>;
@@ -107,15 +109,13 @@ export class DatabaseStorage implements IStorage {
     return user ?? undefined;
   }
 
-  async createUser(insertUser: InsertUser & { inviteToken?: string | null; inviteExpiry?: Date | null }): Promise<User> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [user] = await db.insert(users).values(insertUser as any).returning();
+  async createUser(insertUser: InsertUserFull): Promise<User> {
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
-  async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [user] = await db.update(users).set(data as any).where(eq(users.id, id)).returning();
+  async updateUser(id: string, data: Partial<InsertUserFull>): Promise<User | undefined> {
+    const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
     return user ?? undefined;
   }
 
