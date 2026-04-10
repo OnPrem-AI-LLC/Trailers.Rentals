@@ -930,7 +930,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({
         user: { id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role, companyId: user.companyId },
         rentals: userRentals,
-        documents: userDocs,
+        documents: userDocs.filter(d => !d.isAdminOnly), // Never expose admin-only docs to renters
         company: company ?? null,
       });
     } catch (err: unknown) {
@@ -985,8 +985,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         firstName,
         lastName,
         isActive: true,
-        inviteToken: null as unknown as string,
-        inviteExpiry: null as unknown as Date,
+        inviteToken: null,
+        inviteExpiry: null,
       });
       if (!updatedUser) return res.status(500).json({ message: "Failed to activate account" });
 
