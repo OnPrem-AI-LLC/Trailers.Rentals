@@ -1684,6 +1684,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Admin Rentals Management ─────────────────────────────────────────
+
+  // List all rentals enriched with company + trailer info
+  app.get("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rentalList = await storage.listRentals();
+      const enriched = await Promise.all(
+        rentalList.map(async (rental) => {
+          const [company, trailer] = await Promise.all([
+            storage.getCompany(rental.companyId).catch(() => null),
+            storage.getTrailer(rental.trailerId).catch(() => null),
+          ]);
+          return {
+            ...rental,
+            companyName: company?.name ?? "Unknown",
+            companyEmail: company?.email ?? "",
+            trailerVin: trailer?.vin ?? "Unknown",
+            trailerType: trailer?.type ?? "Unknown",
+            trailerMake: trailer?.make ?? null,
+            trailerYear: trailer?.year ?? null,
+          };
+        })
+      );
+      return res.json(enriched);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get single rental with full detail for admin
+  app.get("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const [company, trailer, docs, logs] = await Promise.all([
+        storage.getCompany(rental.companyId).catch(() => null),
+        storage.getTrailer(rental.trailerId).catch(() => null),
+        storage.getDocuments(undefined, rental.id).catch(() => []),
+        storage.getAuditLogs("rental", rental.id).catch(() => []),
+      ]);
+      return res.json({ rental, company, trailer, docs, auditLogs: logs });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Admin update rental (status, payment fields, dates)
+  app.patch("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const updateSchema = z.object({
+        status: z.enum(["pending_agreement", "pending_payment", "active", "active_in_use", "completed", "cancelled"]).optional(),
+        depositPaid: z.boolean().optional(),
+        startDate: z.string().nullable().optional(),
+        endDate: z.string().nullable().optional(),
+        stripeSubscriptionId: z.string().nullable().optional(),
+      });
+      const body = updateSchema.parse(req.body);
+      const payload: UpdateRental = { ...body };
+      if (body.startDate !== undefined) payload.startDate = body.startDate ? new Date(body.startDate) : null;
+      if (body.endDate !== undefined) payload.endDate = body.endDate ? new Date(body.endDate) : null;
+      const rental = await storage.updateRental(req.params.id, payload);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "rental_updated",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Admin updated rental fields: ${Object.keys(body).join(", ")}`,
+        metadata: JSON.stringify(body),
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json(rental);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get Stripe charges + invoices for a rental (renter or admin)
+  app.get("/api/rentals/:id/invoices", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (!rental.stripeCustomerId) {
+        return res.json({ charges: [], invoices: [] });
+      }
+      const stripe = await getUncachableStripeClient();
+      const [chargesResult, invoicesResult] = await Promise.all([
+        stripe.charges.list({ customer: rental.stripeCustomerId, limit: 20 }),
+        stripe.invoices.list({ customer: rental.stripeCustomerId, limit: 20 }),
+      ]);
+      return res.json({
+        charges: chargesResult.data.map((c) => ({
+          id: c.id,
+          amount: c.amount,
+          currency: c.currency,
+          status: c.status,
+          description: c.description,
+          createdAt: new Date(c.created * 1000).toISOString(),
+          receiptUrl: c.receipt_url,
+        })),
+        invoices: invoicesResult.data.map((inv) => ({
+          id: inv.id,
+          amount: inv.amount_paid,
+          currency: inv.currency,
+          status: inv.status,
+          description: inv.lines?.data?.[0]?.description ?? "Monthly rental",
+          createdAt: new Date(inv.created * 1000).toISOString(),
+          invoiceUrl: inv.hosted_invoice_url,
+          pdfUrl: inv.invoice_pdf,
+        })),
+      });
+    } catch (err: unknown) {
+      console.error("Invoice fetch error:", err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

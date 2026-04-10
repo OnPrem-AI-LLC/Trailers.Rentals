@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
-  Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send
+  Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send,
+  Receipt, Download
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -140,6 +141,80 @@ function RentalMessageThread({ rentalId, currentUserId }: { rentalId: string; cu
               {sendMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface InvoiceEntry {
+  id: string; amount: number; description: string | null;
+  createdAt: string; receiptUrl?: string | null; invoiceUrl?: string | null; pdfUrl?: string | null;
+}
+
+interface InvoiceData {
+  charges: (InvoiceEntry & { status: string | null })[];
+  invoices: (InvoiceEntry & { status: string | null })[];
+}
+
+function RentalInvoiceHistory({ rentalId }: { rentalId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data, isLoading } = useQuery<InvoiceData>({
+    queryKey: ["/api/rentals", rentalId, "invoices"],
+    queryFn: async () => {
+      const res = await fetch(`/api/rentals/${rentalId}/invoices`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<InvoiceData>;
+    },
+    enabled: expanded,
+  });
+
+  const totalEntries = (data?.charges.length ?? 0) + (data?.invoices.length ?? 0);
+
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <button
+        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <Receipt className="w-4 h-4" />
+        <span>Payment History{totalEntries > 0 ? ` (${totalEntries})` : ""}</span>
+        {expanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+      </button>
+      {expanded && (
+        <div className="mt-3">
+          {isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : !data || totalEntries === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No payment records found yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {[...data.charges, ...data.invoices].sort((a, b) =>
+                new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              ).map(entry => (
+                <div key={entry.id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/40 last:border-0">
+                  <div>
+                    <div className="font-medium text-foreground">{entry.description ?? "Payment"}</div>
+                    <div className="text-muted-foreground">{new Date(entry.createdAt).toLocaleDateString()}</div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-3">
+                    <span className="font-semibold text-green-400">${(entry.amount / 100).toLocaleString()}</span>
+                    {(entry.receiptUrl ?? entry.invoiceUrl ?? entry.pdfUrl) && (
+                      <a
+                        href={(entry.receiptUrl ?? entry.invoiceUrl ?? entry.pdfUrl)!}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted-foreground hover:text-primary"
+                        title="View receipt"
+                      >
+                        <Download className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -430,6 +505,10 @@ export default function Dashboard() {
                         </div>
                         {/* Message thread for each rental */}
                         <RentalMessageThread rentalId={rental.id} currentUserId={user.id} />
+                        {/* Payment history (only if stripe customer exists) */}
+                        {rental.stripeCustomerId && (
+                          <RentalInvoiceHistory rentalId={rental.id} />
+                        )}
                       </div>
                     );
                   })}

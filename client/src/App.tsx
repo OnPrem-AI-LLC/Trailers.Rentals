@@ -20,6 +20,8 @@ import Apply from "@/pages/apply";
 import ApplicationRespond from "@/pages/application-respond";
 import Register from "@/pages/register";
 import AgreementPage from "@/pages/agreement";
+import AdminRentals from "@/pages/admin/rentals";
+import AdminRentalDetail from "@/pages/admin/rental-detail";
 
 function Router() {
   return (
@@ -33,6 +35,8 @@ function Router() {
       <Route path="/admin/inventory/:id" component={TrailerFormPage} />
       <Route path="/admin/requests" component={AdminRequests} />
       <Route path="/admin/requests/:id" component={AdminRequestDetail} />
+      <Route path="/admin/rentals" component={AdminRentals} />
+      <Route path="/admin/rentals/:id" component={AdminRentalDetail} />
       <Route path="/trailers/:id" component={TrailerDetail} />
       <Route path="/jobs" component={Jobs} />
       <Route path="/signup" component={Signup} />

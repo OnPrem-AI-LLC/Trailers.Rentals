@@ -6,7 +6,7 @@ import Footer from "@/components/footer";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Truck, ClipboardList, BarChart3, Plus, Settings, LogOut } from "lucide-react";
+import { Truck, ClipboardList, BarChart3, Plus, Settings, LogOut, FileSignature, CreditCard } from "lucide-react";
 
 interface DashboardSummary {
   totalTrailers: number;
@@ -164,22 +164,38 @@ export default function AdminPortal() {
           </div>
         </div>
 
-        {/* More admin sections (coming soon placeholders) */}
+        {/* Additional admin sections */}
         <div className="mt-6 grid md:grid-cols-3 gap-4">
-          {[
-            { label: "Rentals & Agreements", desc: "Active contracts, signatures, pickup codes" },
-            { label: "Payments & Billing", desc: "Stripe subscriptions, deposits, invoices" },
-            { label: "Engine Hour Logs", desc: "Submit and review reefer engine hours" },
-          ].map(({ label, desc }) => (
-            <div
-              key={label}
-              className="bg-card border border-border border-dashed rounded-xl p-5 opacity-60"
-            >
-              <h3 className="font-semibold text-sm mb-1">{label}</h3>
-              <p className="text-xs text-muted-foreground">{desc}</p>
-              <div className="mt-3 text-xs text-muted-foreground/60 font-mono">Coming soon</div>
+          {/* Rentals & Payments */}
+          <div className="bg-card border border-border rounded-xl p-5 md:col-span-2">
+            <div className="flex items-center gap-2 mb-3">
+              <FileSignature className="w-5 h-5 text-primary" />
+              <h3 className="font-bold">Rentals &amp; Payments</h3>
+              {summary && summary.activeRentals > 0 && (
+                <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                  {summary.activeRentals} active
+                </span>
+              )}
             </div>
-          ))}
+            <p className="text-sm text-muted-foreground mb-4">
+              View all rental contracts, confirm deposits, manage billing, and review Stripe payment history.
+            </p>
+            <Link href="/admin/rentals">
+              <Button variant="outline" size="sm" className="w-full gap-2">
+                <CreditCard className="w-4 h-4" /> Manage Rentals &amp; Payments
+              </Button>
+            </Link>
+          </div>
+
+          {/* Engine Hours (coming soon) */}
+          <div className="bg-card border border-border border-dashed rounded-xl p-5 opacity-60">
+            <div className="flex items-center gap-2 mb-1">
+              <BarChart3 className="w-4 h-4 text-muted-foreground" />
+              <h3 className="font-semibold text-sm">Engine Hour Logs</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">Submit and review reefer engine hours for billing.</p>
+            <div className="mt-3 text-xs text-muted-foreground/60 font-mono">Coming soon</div>
+          </div>
         </div>
       </div>
 
