@@ -393,7 +393,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const saferResult = await lookupByDot(application.dotNumber);
           const updated = await storage.updateRentalApplication(application.id, {
             saferData: JSON.stringify(saferResult),
-            saferLookedUpAt: new Date(),
           });
           if (updated) application = updated;
         } catch { /* non-fatal */ }
