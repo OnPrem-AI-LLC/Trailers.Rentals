@@ -1,125 +1,238 @@
 import {
   type User,
   type InsertUser,
-  type ContactRequest,
-  type InsertContactRequest,
-  type Location,
-  type InsertLocation,
-  type Benefit,
-  type InsertBenefit,
-  type Feature,
-  type InsertFeature,
-  type Testimonial,
-  type InsertTestimonial,
+  type Trailer,
+  type InsertTrailer,
+  type TrailerPhoto,
+  type InsertTrailerPhoto,
+  type TrailerWithPhotos,
+  type Company,
+  type InsertCompany,
+  type RentalApplication,
+  type InsertRentalApplication,
+  type Rental,
+  type Document,
+  type InsertDocument,
+  type AuditLog,
+  type InsertAuditLog,
   users,
-  contactRequests,
-  locations,
-  benefits,
-  features,
-  testimonials,
+  trailers,
+  trailerPhotos,
+  companies,
+  rentalApplications,
+  rentals,
+  documents,
+  auditLogs,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
-import { randomUUID } from "crypto";
+import { eq, desc, and } from "drizzle-orm";
 
 export interface IStorage {
+  // Users
   getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  createContactRequest(request: InsertContactRequest): Promise<ContactRequest>;
-  getContactRequests(): Promise<ContactRequest[]>;
-  getLocations(): Promise<Location[]>;
-  getBenefits(): Promise<Benefit[]>;
-  getFeatures(): Promise<Feature[]>;
-  getTestimonials(): Promise<Testimonial[]>;
-  createLocation(location: InsertLocation): Promise<Location>;
-  createBenefit(benefit: InsertBenefit): Promise<Benefit>;
-  createFeature(feature: InsertFeature): Promise<Feature>;
-  createTestimonial(testimonial: InsertTestimonial): Promise<Testimonial>;
+  updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined>;
+
+  // Trailers
+  getTrailers(status?: string): Promise<TrailerWithPhotos[]>;
+  getTrailer(id: string): Promise<TrailerWithPhotos | undefined>;
+  createTrailer(trailer: InsertTrailer): Promise<Trailer>;
+  updateTrailer(id: string, data: Partial<InsertTrailer>): Promise<Trailer | undefined>;
+
+  // Trailer Photos
+  addTrailerPhoto(photo: InsertTrailerPhoto): Promise<TrailerPhoto>;
+  deleteTrailerPhoto(id: string): Promise<void>;
+
+  // Companies
+  getCompany(id: string): Promise<Company | undefined>;
+  createCompany(company: InsertCompany): Promise<Company>;
+  updateCompany(id: string, data: Partial<InsertCompany>): Promise<Company | undefined>;
+
+  // Rental Applications
+  createRentalApplication(app: InsertRentalApplication): Promise<RentalApplication>;
+  getRentalApplication(id: string): Promise<RentalApplication | undefined>;
+  getRentalApplicationByToken(token: string): Promise<RentalApplication | undefined>;
+  listRentalApplications(status?: string): Promise<RentalApplication[]>;
+  updateRentalApplication(id: string, data: Partial<RentalApplication>): Promise<RentalApplication | undefined>;
+
+  // Rentals
+  getRental(id: string): Promise<Rental | undefined>;
+  listRentals(companyId?: string): Promise<Rental[]>;
+  createRental(rental: Omit<Rental, "id" | "createdAt">): Promise<Rental>;
+  updateRental(id: string, data: Partial<Rental>): Promise<Rental | undefined>;
+
+  // Documents
+  createDocument(doc: InsertDocument): Promise<Document>;
+  getDocuments(companyId?: string, rentalId?: string): Promise<Document[]>;
+
+  // Audit Logs
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>;
 }
 
-// Remove MemStorage - using DatabaseStorage instead
-
 export class DatabaseStorage implements IStorage {
+  // ── Users ──────────────────────────────────────────────────────────
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user || undefined;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, email));
     return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(insertUser)
-      .returning();
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
-  async createContactRequest(insertRequest: InsertContactRequest): Promise<ContactRequest> {
-    const [request] = await db
-      .insert(contactRequests)
-      .values({
-        ...insertRequest,
-        newsletter: insertRequest.newsletter ?? "false",
-      })
-      .returning();
-    return request;
+  async updateUser(id: string, data: Partial<InsertUser>): Promise<User | undefined> {
+    const [user] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return user || undefined;
   }
 
-  async getContactRequests(): Promise<ContactRequest[]> {
-    return await db.select().from(contactRequests);
+  // ── Trailers ───────────────────────────────────────────────────────
+  async getTrailers(status?: string): Promise<TrailerWithPhotos[]> {
+    const rows = status
+      ? await db.select().from(trailers).where(eq(trailers.status, status)).orderBy(desc(trailers.createdAt))
+      : await db.select().from(trailers).orderBy(desc(trailers.createdAt));
+
+    const photos = await db.select().from(trailerPhotos);
+    return rows.map((t) => ({
+      ...t,
+      photos: photos.filter((p) => p.trailerId === t.id).sort((a, b) => a.displayOrder - b.displayOrder),
+    }));
   }
 
-  async getLocations(): Promise<Location[]> {
-    return await db.select().from(locations);
+  async getTrailer(id: string): Promise<TrailerWithPhotos | undefined> {
+    const [trailer] = await db.select().from(trailers).where(eq(trailers.id, id));
+    if (!trailer) return undefined;
+    const photos = await db.select().from(trailerPhotos)
+      .where(eq(trailerPhotos.trailerId, id))
+      .orderBy(trailerPhotos.displayOrder);
+    return { ...trailer, photos };
   }
 
-  async getBenefits(): Promise<Benefit[]> {
-    return await db.select().from(benefits);
+  async createTrailer(insertTrailer: InsertTrailer): Promise<Trailer> {
+    const [trailer] = await db.insert(trailers).values(insertTrailer).returning();
+    return trailer;
   }
 
-  async getFeatures(): Promise<Feature[]> {
-    return await db.select().from(features);
+  async updateTrailer(id: string, data: Partial<InsertTrailer>): Promise<Trailer | undefined> {
+    const [trailer] = await db.update(trailers).set(data).where(eq(trailers.id, id)).returning();
+    return trailer || undefined;
   }
 
-  async getTestimonials(): Promise<Testimonial[]> {
-    return await db.select().from(testimonials);
+  // ── Trailer Photos ─────────────────────────────────────────────────
+  async addTrailerPhoto(photo: InsertTrailerPhoto): Promise<TrailerPhoto> {
+    const [row] = await db.insert(trailerPhotos).values(photo).returning();
+    return row;
   }
 
-  async createLocation(insertLocation: InsertLocation): Promise<Location> {
-    const [location] = await db
-      .insert(locations)
-      .values(insertLocation)
-      .returning();
-    return location;
+  async deleteTrailerPhoto(id: string): Promise<void> {
+    await db.delete(trailerPhotos).where(eq(trailerPhotos.id, id));
   }
 
-  async createBenefit(insertBenefit: InsertBenefit): Promise<Benefit> {
-    const [benefit] = await db
-      .insert(benefits)
-      .values(insertBenefit)
-      .returning();
-    return benefit;
+  // ── Companies ──────────────────────────────────────────────────────
+  async getCompany(id: string): Promise<Company | undefined> {
+    const [company] = await db.select().from(companies).where(eq(companies.id, id));
+    return company || undefined;
   }
 
-  async createFeature(insertFeature: InsertFeature): Promise<Feature> {
-    const [feature] = await db
-      .insert(features)
-      .values(insertFeature)
-      .returning();
-    return feature;
+  async createCompany(insertCompany: InsertCompany): Promise<Company> {
+    const [company] = await db.insert(companies).values(insertCompany).returning();
+    return company;
   }
 
-  async createTestimonial(insertTestimonial: InsertTestimonial): Promise<Testimonial> {
-    const [testimonial] = await db
-      .insert(testimonials)
-      .values(insertTestimonial)
-      .returning();
-    return testimonial;
+  async updateCompany(id: string, data: Partial<InsertCompany>): Promise<Company | undefined> {
+    const [company] = await db.update(companies).set(data).where(eq(companies.id, id)).returning();
+    return company || undefined;
+  }
+
+  // ── Rental Applications ────────────────────────────────────────────
+  async createRentalApplication(app: InsertRentalApplication): Promise<RentalApplication> {
+    const [row] = await db.insert(rentalApplications).values(app).returning();
+    return row;
+  }
+
+  async getRentalApplication(id: string): Promise<RentalApplication | undefined> {
+    const [row] = await db.select().from(rentalApplications).where(eq(rentalApplications.id, id));
+    return row || undefined;
+  }
+
+  async getRentalApplicationByToken(token: string): Promise<RentalApplication | undefined> {
+    const [row] = await db.select().from(rentalApplications).where(eq(rentalApplications.adminToken, token));
+    return row || undefined;
+  }
+
+  async listRentalApplications(status?: string): Promise<RentalApplication[]> {
+    if (status) {
+      return db.select().from(rentalApplications)
+        .where(eq(rentalApplications.status, status))
+        .orderBy(desc(rentalApplications.createdAt));
+    }
+    return db.select().from(rentalApplications).orderBy(desc(rentalApplications.createdAt));
+  }
+
+  async updateRentalApplication(id: string, data: Partial<RentalApplication>): Promise<RentalApplication | undefined> {
+    const [row] = await db.update(rentalApplications).set(data as any).where(eq(rentalApplications.id, id)).returning();
+    return row || undefined;
+  }
+
+  // ── Rentals ────────────────────────────────────────────────────────
+  async getRental(id: string): Promise<Rental | undefined> {
+    const [row] = await db.select().from(rentals).where(eq(rentals.id, id));
+    return row || undefined;
+  }
+
+  async listRentals(companyId?: string): Promise<Rental[]> {
+    if (companyId) {
+      return db.select().from(rentals).where(eq(rentals.companyId, companyId)).orderBy(desc(rentals.createdAt));
+    }
+    return db.select().from(rentals).orderBy(desc(rentals.createdAt));
+  }
+
+  async createRental(rental: Omit<Rental, "id" | "createdAt">): Promise<Rental> {
+    const [row] = await db.insert(rentals).values(rental as any).returning();
+    return row;
+  }
+
+  async updateRental(id: string, data: Partial<Rental>): Promise<Rental | undefined> {
+    const [row] = await db.update(rentals).set(data as any).where(eq(rentals.id, id)).returning();
+    return row || undefined;
+  }
+
+  // ── Documents ──────────────────────────────────────────────────────
+  async createDocument(doc: InsertDocument): Promise<Document> {
+    const [row] = await db.insert(documents).values(doc).returning();
+    return row;
+  }
+
+  async getDocuments(companyId?: string, rentalId?: string): Promise<Document[]> {
+    if (companyId) {
+      return db.select().from(documents).where(eq(documents.companyId, companyId)).orderBy(desc(documents.createdAt));
+    }
+    if (rentalId) {
+      return db.select().from(documents).where(eq(documents.rentalId, rentalId)).orderBy(desc(documents.createdAt));
+    }
+    return db.select().from(documents).orderBy(desc(documents.createdAt));
+  }
+
+  // ── Audit Logs ─────────────────────────────────────────────────────
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [row] = await db.insert(auditLogs).values(log).returning();
+    return row;
+  }
+
+  async getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]> {
+    if (entityType && entityId) {
+      return db.select().from(auditLogs)
+        .where(and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)))
+        .orderBy(desc(auditLogs.createdAt));
+    }
+    return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
   }
 }
 

@@ -3,74 +3,43 @@
 @tailwind utilities;
 
 :root {
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(0 0% 0%);
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(0 0% 0%);
-  --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(0 0% 0%);
-  --primary: hsl(352 70% 25%);
+  --background: hsl(240 10% 5%);
+  --foreground: hsl(0 0% 95%);
+  --card: hsl(240 8% 9%);
+  --card-foreground: hsl(0 0% 93%);
+  --popover: hsl(240 8% 9%);
+  --popover-foreground: hsl(0 0% 93%);
+  --primary: hsl(352 65% 32%);
   --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(0 0% 100%);
-  --secondary-foreground: hsl(0 0% 0%);
-  --muted: hsl(0 0% 96%);
-  --muted-foreground: hsl(0 0% 45%);
-  --accent: hsl(352 30% 90%);
-  --accent-foreground: hsl(352 70% 25%);
-  --destructive: hsl(0 84% 60%);
+  --secondary: hsl(240 6% 15%);
+  --secondary-foreground: hsl(0 0% 90%);
+  --muted: hsl(240 6% 13%);
+  --muted-foreground: hsl(240 5% 55%);
+  --accent: hsl(352 65% 25%);
+  --accent-foreground: hsl(0 0% 100%);
+  --destructive: hsl(0 72% 51%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(0 0% 90%);
-  --input: hsl(0 0% 100%);
-  --ring: hsl(352 70% 25%);
-  --chart-1: hsl(352 70% 25%);
-  --chart-2: hsl(159.7826 100% 36.0784%);
-  --chart-3: hsl(42.0290 92.8251% 56.2745%);
-  --chart-4: hsl(147.1429 78.5047% 41.9608%);
-  --chart-5: hsl(341.4894 75.2000% 50.9804%);
-  --sidebar: hsl(0 0% 100%);
-  --sidebar-foreground: hsl(0 0% 0%);
-  --sidebar-primary: hsl(352 70% 25%);
+  --border: hsl(240 6% 17%);
+  --input: hsl(240 6% 15%);
+  --ring: hsl(352 65% 40%);
+  --chart-1: hsl(352 65% 32%);
+  --chart-2: hsl(200 72% 42%);
+  --chart-3: hsl(43 90% 52%);
+  --chart-4: hsl(147 72% 38%);
+  --chart-5: hsl(280 65% 50%);
+  --sidebar-background: hsl(240 8% 7%);
+  --sidebar: hsl(240 8% 7%);
+  --sidebar-foreground: hsl(0 0% 90%);
+  --sidebar-primary: hsl(352 65% 32%);
   --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(352 30% 90%);
-  --sidebar-accent-foreground: hsl(352 70% 25%);
-  --sidebar-border: hsl(0 0% 90%);
-  --sidebar-ring: hsl(352 70% 25%);
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --sidebar-accent: hsl(240 6% 13%);
+  --sidebar-accent-foreground: hsl(0 0% 90%);
+  --sidebar-border: hsl(240 6% 17%);
+  --sidebar-ring: hsl(352 65% 40%);
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
   --radius: 0.5rem;
-  --shadow-2xs: 0px 2px 0px 0px hsl(352 70% 25% / 0.00);
-  --shadow-xs: 0px 2px 0px 0px hsl(352 70% 25% / 0.00);
-  --shadow-sm: 0px 2px 0px 0px hsl(352 70% 25% / 0.00), 0px 1px 2px -1px hsl(352 70% 25% / 0.00);
-  --shadow: 0px 2px 0px 0px hsl(352 70% 25% / 0.00), 0px 1px 2px -1px hsl(352 70% 25% / 0.00);
-  --shadow-md: 0px 2px 0px 0px hsl(352 70% 25% / 0.00), 0px 2px 4px -1px hsl(352 70% 25% / 0.00);
-  --shadow-lg: 0px 2px 0px 0px hsl(352 70% 25% / 0.00), 0px 4px 6px -1px hsl(352 70% 25% / 0.00);
-  --shadow-xl: 0px 2px 0px 0px hsl(352 70% 25% / 0.00), 0px 8px 10px -1px hsl(352 70% 25% / 0.00);
-  --shadow-2xl: 0px 2px 0px 0px hsl(352 70% 25% / 0.00);
-  --tracking-normal: 0em;
-  --spacing: 0.25rem;
-}
-
-.dark {
-  --background: hsl(0 0% 0%);
-  --foreground: hsl(0 0% 100%);
-  --card: hsl(352 20% 10%);
-  --card-foreground: hsl(0 0% 95%);
-  --popover: hsl(0 0% 0%);
-  --popover-foreground: hsl(0 0% 100%);
-  --primary: hsl(352 70% 35%);
-  --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(352 20% 15%);
-  --secondary-foreground: hsl(0 0% 100%);
-  --muted: hsl(0 0% 15%);
-  --muted-foreground: hsl(0 0% 60%);
-  --accent: hsl(352 30% 15%);
-  --accent-foreground: hsl(352 70% 70%);
-  --destructive: hsl(0 84% 60%);
-  --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(352 20% 20%);
-  --input: hsl(352 20% 15%);
-  --ring: hsl(352 70% 35%);
 }
 
 @layer base {
@@ -80,20 +49,92 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    background-color: hsl(240 10% 5%);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
   }
 }
 
-.hero-bg {
-  background: linear-gradient(135deg, hsl(352 70% 25%) 0%, hsl(352 70% 35%) 100%);
-}
-
-.feature-card:hover {
-  transform: translateY(-2px);
-  transition: transform 0.2s ease-in-out;
-}
+/* ── Custom Utilities ─────────────────────────────────────────────── */
 
 .logo-eagle {
-  width: 60px;
-  height: 60px;
+  width: 52px;
+  height: 52px;
   object-fit: contain;
+}
+
+/* Trailer card hover */
+.trailer-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.trailer-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(139, 26, 40, 0.15);
+  border-color: hsl(352 65% 42%);
+}
+
+/* Value prop pill */
+.value-pill {
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold;
+  background: hsl(240 6% 13%);
+  border: 1px solid hsl(240 6% 20%);
+  color: hsl(0 0% 85%);
+}
+
+/* Status badges */
+.badge-available {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold;
+  background: hsl(147 72% 12%);
+  color: hsl(147 72% 60%);
+  border: 1px solid hsl(147 72% 22%);
+}
+
+.badge-rented {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold;
+  background: hsl(43 90% 12%);
+  color: hsl(43 90% 62%);
+  border: 1px solid hsl(43 90% 22%);
+}
+
+.badge-maintenance {
+  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold;
+  background: hsl(240 6% 13%);
+  color: hsl(240 5% 55%);
+  border: 1px solid hsl(240 6% 20%);
+}
+
+/* Trailer type badge */
+.type-badge-reefer {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider;
+  background: hsl(200 72% 15%);
+  color: hsl(200 72% 65%);
+}
+
+.type-badge-dry_van {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider;
+  background: hsl(352 65% 15%);
+  color: hsl(352 65% 65%);
+}
+
+.type-badge-flatbed {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider;
+  background: hsl(280 65% 15%);
+  color: hsl(280 65% 65%);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(240 8% 9%);
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(240 6% 25%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(352 65% 40%);
 }

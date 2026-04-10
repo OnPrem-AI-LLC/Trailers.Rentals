@@ -1,62 +1,108 @@
-# Deluxe Logistics Inc. - Trailer Rental Website
+# Deluxe Logistics Inc. — Trailer Rental Management Platform
 
-## Overview
+## Project Overview
 
-This is a full-stack web application for Deluxe Logistics Inc., a logistics company offering trailer rental and leasing services. The application serves as a marketing website with a contact form that allows potential customers to submit rental inquiries. The system captures detailed customer information including company details, fleet requirements, and service interests.
+Full-stack trailer rental management platform for Deluxe Logistics Inc. Rebuilt from a static marketing page into a complete operations platform.
 
-The application is built as a modern single-page application with a React frontend and Express.js backend, designed to showcase the company's extensive fleet of 65,000+ trailers across 40+ nationwide locations.
+**Design ethos:** Inventory front and center, dark/bold non-cookie-cutter aesthetic.  
+**Value props:** NO BS FEES · No mileage fees · Simple / fast / transparent
 
-## User Preferences
+## Stack
 
-Preferred communication style: Simple, everyday language.
+- **Frontend:** React + Vite + Wouter + TanStack Query + Tailwind CSS + shadcn/ui
+- **Backend:** Express.js + TypeScript
+- **Database:** PostgreSQL via Drizzle ORM
+- **Auth:** express-session + connect-pg-simple + bcrypt
+- **Payments (planned):** Stripe
+- **File storage (planned):** Cloudinary
+- **Email (planned):** SendGrid
+- **E-sig (planned):** draw/type built-in + DocuSign scaffold
 
-## System Architecture
+## Architecture
 
-### Frontend Architecture
-- **Framework**: React 18 with TypeScript using Vite as the build tool
-- **UI Library**: Shadcn/ui components built on Radix UI primitives for accessible, customizable components
-- **Styling**: TailwindCSS with custom CSS variables for theming and responsive design
-- **State Management**: TanStack Query for server state management and data fetching
-- **Routing**: Wouter for lightweight client-side routing
-- **Form Handling**: React Hook Form with Zod for validation and type safety
+```
+client/src/
+  pages/
+    home.tsx              # Dark homepage with trailer inventory grid
+    login.tsx             # Login page (session auth)
+    dashboard.tsx         # Renter portal
+    trailer-detail.tsx    # Single trailer view + apply CTA
+    jobs.tsx              # Driver hiring page
+    admin/
+      index.tsx           # Admin portal dashboard
+  components/
+    header.tsx            # Sticky nav with auth-aware links
+    footer.tsx            # Minimal footer
+    trailer-card.tsx      # Trailer inventory card component
+  hooks/
+    use-auth.tsx          # Auth context provider + useAuth hook
 
-### Backend Architecture
-- **Runtime**: Node.js with Express.js framework
-- **Language**: TypeScript with ES modules
-- **API Design**: RESTful API endpoints for contact form submission and data retrieval
-- **Validation**: Zod schemas for runtime type checking and data validation
-- **Storage**: In-memory storage implementation with interface for future database integration
+server/
+  index.ts                # Express app entry, session middleware
+  routes.ts               # All API routes
+  storage.ts              # DatabaseStorage class (all CRUD)
+  auth.ts                 # requireAuth / requireAdmin middleware
+  seed-admin.ts           # Seeds initial admin account on startup
+  db.ts                   # Drizzle DB connection
 
-### Data Storage Solutions
-- **Current**: In-memory storage using JavaScript Maps for development/demo purposes
-- **Database Ready**: Drizzle ORM configured with PostgreSQL schema definitions
-- **Schema**: Dedicated tables for users and contact requests with proper relationships
-- **Connection**: Neon Database serverless PostgreSQL integration configured
+shared/
+  schema.ts               # Drizzle schema + Zod schemas + TypeScript types
+```
 
-### Authentication and Authorization
-- **Current State**: No authentication implemented (public contact form)
-- **Prepared Infrastructure**: User schema and storage methods ready for future implementation
-- **Session Management**: Connect-pg-simple configured for PostgreSQL session storage
+## Database Schema
 
-### External Dependencies
-- **Database**: Neon Database (PostgreSQL) via `@neondatabase/serverless`
-- **ORM**: Drizzle ORM with PostgreSQL dialect for type-safe database operations
-- **Development**: Replit-specific plugins for error handling and development banner
-- **UI Components**: Extensive Radix UI component library for accessibility
-- **Validation**: Zod for schema validation across frontend and backend
-- **Fonts**: Google Fonts integration (DM Sans, Fira Code, Geist Mono, Architects Daughter)
-- **Images**: Unsplash integration for stock photography
-- **Build Tools**: Vite for frontend bundling, ESBuild for backend compilation
+Tables: `users`, `companies`, `trailers`, `trailer_photos`, `rental_applications`, `rentals`, `documents`, `audit_logs`
 
-### Development Environment
-- **Hot Reload**: Vite development server with HMR
-- **Type Safety**: Strict TypeScript configuration across all layers
-- **Path Mapping**: Absolute imports configured for clean code organization
-- **Error Handling**: Comprehensive error boundaries and runtime error overlays
-- **Logging**: Custom request/response logging middleware for API monitoring
+Note: `users.username` stores the email address (original field repurposed).
 
-### Deployment Architecture
-- **Build Process**: Separate frontend (Vite) and backend (ESBuild) compilation
-- **Static Assets**: Frontend builds to `dist/public` for static file serving
-- **Production**: Node.js server serves both API and static files
-- **Environment**: Environment-based configuration for development vs production
+## Admin Account
+
+The admin account is seeded automatically on first startup.
+
+- **Default email:** `admin@deluxelogistics.com` (override with `ADMIN_EMAIL` env var)
+- **Default password:** `DeluxeAdmin2024!` (override with `ADMIN_PASSWORD` env var)
+
+## Color System (Dark Theme)
+
+- Background: `hsl(240 10% 5%)` — very dark charcoal
+- Card: `hsl(240 8% 9%)`
+- Primary: `hsl(352 65% 32%)` — burgundy red
+- Border: `hsl(240 6% 17%)`
+- All custom CSS in `client/src/index.css`
+
+## Current Progress (Task Tracker)
+
+### Completed
+- [x] Task 1: Foundation & Homepage Rebuild
+  - Database schema (all 8 tables created via raw SQL)
+  - Auth middleware (session-based)
+  - All API routes (trailers, auth, applications, admin, dashboard)
+  - Dark homepage with hero + inventory grid + how-it-works
+  - Login page
+  - Admin portal stub
+  - Renter dashboard stub
+  - Trailer detail page
+  - Jobs/hiring page
+  - Header + Footer
+  - Admin seeded on startup
+
+### Pending
+- [ ] Task 2: Trailer Inventory Management (admin CRUD, Cloudinary upload)
+- [ ] Task 3: Rental Application Flow (multi-step form, FMCSA SAFER lookup)
+- [ ] Task 4: Renter Accounts & Company Profiles (invite flow)
+- [ ] Task 5: Rental Agreements & E-Signature
+- [ ] Task 6: Payments (Stripe deposits + monthly subscriptions)
+- [ ] Task 7: Engine Hour Tracking (reefer units)
+- [ ] Task 8: QR Code Pickup System
+- [ ] Task 9: Admin Tools (audit logs, FMCSA, document management)
+- [ ] Task 10: Email Automation (SendGrid)
+- [ ] Task 11: Driver Hiring (full application form)
+
+## Key Notes
+
+- Prices stored in **cents** (integer) in the database
+- Features stored as JSON string in `trailers.features`
+- `adminToken` on rental applications is a 32-byte hex token for one-time admin review links
+- Engine hour rate only applies to reefer trailers
+- Security deposit = 2 months rent (first month + deposit)
+- Old marketing tables (`contact_requests`, `locations`, `benefits`, `features`, `testimonials`) remain in DB as orphaned

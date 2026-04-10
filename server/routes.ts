@@ -1,99 +1,236 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertContactRequestSchema } from "@shared/schema";
-import { sendContactNotification, sendCustomerConfirmation } from "./email-service";
+import { insertRentalApplicationSchema, insertTrailerSchema, loginSchema } from "@shared/schema";
+import { requireAuth, requireAdmin } from "./auth";
+import bcrypt from "bcrypt";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.post("/api/contact", async (req, res) => {
+  // ── Auth ────────────────────────────────────────────────────────────
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const validatedData = insertContactRequestSchema.parse(req.body);
-      const contactRequest = await storage.createContactRequest(validatedData);
-      
-      // Send email notifications asynchronously (don't block response)
-      Promise.all([
-        sendContactNotification(contactRequest),
-        sendCustomerConfirmation(contactRequest)
-      ]).catch(error => {
-        console.error('Email notification error:', error);
-        // Don't fail the request if email fails
+      const { username, password } = loginSchema.parse(req.body);
+      const user = await storage.getUserByEmail(username);
+      if (!user || !user.isActive) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      req.session.userId = user.id;
+      req.session.userRole = user.role;
+      return res.json({
+        id: user.id,
+        email: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
       });
-      
-      res.json({ success: true, id: contactRequest.id });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ 
-          success: false, 
-          message: "Validation failed", 
-          errors: error.errors 
-        });
-      } else {
-        res.status(500).json({ 
-          success: false, 
-          message: "Internal server error" 
-        });
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
       }
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.get("/api/contact-requests", async (req, res) => {
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const user = await storage.getUser(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ message: "User not found" });
+    }
+    return res.json({
+      id: user.id,
+      email: user.username,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      companyId: user.companyId,
+    });
+  });
+
+  // ── Trailers (public) ───────────────────────────────────────────────
+  app.get("/api/trailers", async (req: Request, res: Response) => {
     try {
-      const requests = await storage.getContactRequests();
-      res.json(requests);
+      const status = req.query.status as string | undefined;
+      const trailers = await storage.getTrailers(status);
+      return res.json(trailers);
     } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        message: "Internal server error" 
-      });
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.get("/api/locations", async (req, res) => {
+  app.get("/api/trailers/:id", async (req: Request, res: Response) => {
     try {
-      const locations = await storage.getLocations();
-      res.json(locations);
+      const trailer = await storage.getTrailer(req.params.id);
+      if (!trailer) return res.status(404).json({ message: "Trailer not found" });
+      return res.json(trailer);
     } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        message: "Internal server error" 
-      });
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.get("/api/benefits", async (req, res) => {
+  // ── Trailers (admin) ────────────────────────────────────────────────
+  app.post("/api/admin/trailers", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const benefits = await storage.getBenefits();
-      res.json(benefits);
-    } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        message: "Internal server error" 
+      const data = insertTrailerSchema.parse(req.body);
+      const trailer = await storage.createTrailer(data);
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "create_trailer",
+        entityType: "trailer",
+        entityId: trailer.id,
+        description: `Created trailer: ${trailer.vin} (${trailer.type})`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
       });
+
+      return res.json(trailer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.get("/api/features", async (req, res) => {
+  app.patch("/api/admin/trailers/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const features = await storage.getFeatures();
-      res.json(features);
-    } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        message: "Internal server error" 
+      const trailer = await storage.updateTrailer(req.params.id, req.body);
+      if (!trailer) return res.status(404).json({ message: "Trailer not found" });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "update_trailer",
+        entityType: "trailer",
+        entityId: trailer.id,
+        description: `Updated trailer: ${trailer.vin}`,
+        metadata: JSON.stringify(req.body),
+        isAdminEntry: true,
+        ipAddress: req.ip,
       });
+
+      return res.json(trailer);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  app.get("/api/testimonials", async (req, res) => {
+  // ── Rental Applications ─────────────────────────────────────────────
+  app.post("/api/applications", async (req: Request, res: Response) => {
     try {
-      const testimonials = await storage.getTestimonials();
-      res.json(testimonials);
+      const data = insertRentalApplicationSchema.parse(req.body);
+      const adminToken = randomBytes(32).toString("hex");
+      const application = await storage.createRentalApplication({
+        ...data,
+        adminToken,
+      } as any);
+
+      // TODO: send admin notification email with adminToken link
+      return res.json({ success: true, id: application.id });
     } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        message: "Internal server error" 
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid input", errors: error.errors });
+      }
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/applications", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const applications = await storage.listRentalApplications(status);
+      return res.json(applications);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/applications/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const application = await storage.getRentalApplication(req.params.id);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+      return res.json(application);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/applications/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const application = await storage.updateRentalApplication(req.params.id, req.body);
+      if (!application) return res.status(404).json({ message: "Application not found" });
+
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: `application_${req.body.status || "updated"}`,
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `Application status changed to: ${req.body.status || "updated"}`,
+        metadata: JSON.stringify(req.body),
+        isAdminEntry: true,
+        ipAddress: req.ip,
       });
+
+      return res.json(application);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin dashboard summary ─────────────────────────────────────────
+  app.get("/api/admin/dashboard", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const allTrailers = await storage.getTrailers();
+      const pendingApps = await storage.listRentalApplications("pending");
+      const allRentals = await storage.listRentals();
+
+      return res.json({
+        totalTrailers: allTrailers.length,
+        availableTrailers: allTrailers.filter((t) => t.status === "available").length,
+        rentedTrailers: allTrailers.filter((t) => t.status === "rented").length,
+        pendingApplications: pendingApps.length,
+        activeRentals: allRentals.filter((r) => r.status === "active" || r.status === "active_in_use").length,
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Renter dashboard ────────────────────────────────────────────────
+  app.get("/api/dashboard", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const rentals = user.companyId ? await storage.listRentals(user.companyId) : [];
+      return res.json({ user, rentals });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
