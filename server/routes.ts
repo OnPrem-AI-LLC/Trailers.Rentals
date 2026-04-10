@@ -1584,15 +1584,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const stripe = await getUncachableStripeClient();
-      const price = await stripe.prices.create({
-        unit_amount: rental.monthlyRate,
-        currency: "usd",
-        recurring: { interval: "month" },
-        product_data: {
-          name: `Trailer Rental — monthly (rental ${rental.id.slice(-8).toUpperCase()})`,
+      // Idempotency keys prevent duplicate price/subscription on concurrent admin retries
+      const price = await stripe.prices.create(
+        {
+          unit_amount: rental.monthlyRate,
+          currency: "usd",
+          recurring: { interval: "month" },
+          product_data: {
+            name: `Trailer Rental — monthly (rental ${rental.id.slice(-8).toUpperCase()})`,
+          },
+          metadata: { rentalId: rental.id },
         },
-        metadata: { rentalId: rental.id },
-      });
+        { idempotencyKey: `price_rental_${rental.id}` },
+      );
 
       // Calculate trial_end based on rental start date: first month is already covered by deposit.
       // If rental started more than 30 days ago, begin billing immediately (no trial).
@@ -1603,17 +1607,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? Math.floor(Date.now() / 1000) + remainingTrialDays * 24 * 60 * 60
         : undefined;
 
-      const subscription = await stripe.subscriptions.create({
-        customer: rental.stripeCustomerId,
-        items: [{ price: price.id }],
-        metadata: { rentalId: rental.id, type: "monthly_rental" },
-        payment_settings: {
-          payment_method_types: ["card"],
-          save_default_payment_method: "on_subscription",
-        },
-        proration_behavior: "none",
-        ...(trialEnd ? { trial_end: trialEnd } : {}),
-      } as Parameters<typeof stripe.subscriptions.create>[0]);
+      const subscription = await stripe.subscriptions.create(
+        {
+          customer: rental.stripeCustomerId,
+          items: [{ price: price.id }],
+          metadata: { rentalId: rental.id, type: "monthly_rental" },
+          payment_settings: {
+            payment_method_types: ["card"],
+            save_default_payment_method: "on_subscription",
+          },
+          proration_behavior: "none",
+          ...(trialEnd ? { trial_end: trialEnd } : {}),
+        } as Parameters<typeof stripe.subscriptions.create>[0],
+        { idempotencyKey: `sub_create_rental_${rental.id}` },
+      );
 
       await storage.updateRental(rental.id, { stripeSubscriptionId: subscription.id });
 
@@ -2023,16 +2030,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Build Stripe dashboard links using connector key to detect test vs live mode
-      const stripeKey = await getStripeSecretKey();
-      const isTestMode = !stripeKey.startsWith('sk_live_');
-      const stripeDash = `https://dashboard.stripe.com${isTestMode ? '/test' : ''}`;
-      const stripeCustomerUrl = rental.stripeCustomerId
-        ? `${stripeDash}/customers/${rental.stripeCustomerId}`
-        : null;
-      const stripeSubscriptionUrl = rental.stripeSubscriptionId
-        ? `${stripeDash}/subscriptions/${rental.stripeSubscriptionId}`
-        : null;
+      // Stripe dashboard links — admin-only to prevent leaking internal Stripe IDs to renters
+      let stripeCustomerUrl: string | null = null;
+      let stripeSubscriptionUrl: string | null = null;
+      if (user.role === "admin") {
+        const stripeKey = await getStripeSecretKey();
+        const isTestMode = !stripeKey.startsWith('sk_live_');
+        const stripeDash = `https://dashboard.stripe.com${isTestMode ? '/test' : ''}`;
+        stripeCustomerUrl = rental.stripeCustomerId
+          ? `${stripeDash}/customers/${rental.stripeCustomerId}`
+          : null;
+        stripeSubscriptionUrl = rental.stripeSubscriptionId
+          ? `${stripeDash}/subscriptions/${rental.stripeSubscriptionId}`
+          : null;
+      }
 
       // Filter charges to those linked to this rental by metadata (deposit) or
       // subscription invoices that generated a charge.
