@@ -666,11 +666,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create or update stub user for renter invite
-      const inviteToken = randomBytes(32).toString("hex");
+      // Guard: if user is already active (registered), do not deactivate or re-send invite
+      let renterUser = await storage.getUserByEmail(application.email);
+      let inviteToken: string;
       const inviteExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
 
-      let renterUser = await storage.getUserByEmail(application.email);
       if (!renterUser) {
+        inviteToken = randomBytes(32).toString("hex");
         renterUser = await storage.createUser({
           username: application.email,
           password: "", // placeholder until registration complete
@@ -682,13 +684,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           inviteToken,
           inviteExpiry,
         });
-      } else {
+      } else if (!renterUser.isActive) {
+        // User exists but hasn't completed registration — re-issue invite token safely
+        inviteToken = randomBytes(32).toString("hex");
         renterUser = await storage.updateUser(renterUser.id, {
           companyId: company.id,
           isActive: false,
           inviteToken,
           inviteExpiry,
         }) ?? renterUser;
+      } else {
+        // User is already active — do not deactivate or overwrite their token
+        // Just ensure company linkage is correct
+        inviteToken = renterUser.inviteToken ?? randomBytes(32).toString("hex");
+        if (renterUser.companyId !== company.id) {
+          await storage.updateUser(renterUser.id, { companyId: company.id });
+        }
       }
 
       // Update application status and link company
