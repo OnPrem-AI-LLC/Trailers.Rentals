@@ -1251,6 +1251,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const monthlyRateStr = `$${(rental.monthlyRate / 100).toLocaleString()}`;
       const depositStr = `$${((rental.monthlyRate * 2) / 100).toLocaleString()}`;
 
+      // HTML escape helper — prevents injection when interpolating user-controlled values into agreement document
+      const he = (s: string | null | undefined) =>
+        String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
       // Generate signed agreement HTML document and upload — propagates on failure to prevent status advancement
       let agreementUrl: string | undefined;
       if (isCloudinaryConfigured()) {
@@ -1278,26 +1282,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 <h2>Rental Details</h2>
 <table>
-  <tr><td>Agreement ID</td><td>${req.params.rentalId}</td></tr>
-  <tr><td>Date Signed</td><td>${signedAtStr}</td></tr>
-  <tr><td>Equipment Type</td><td>${trailer?.type ?? "Trailer"}</td></tr>
-  <tr><td>VIN</td><td>${trailer?.vin ?? "N/A"}</td></tr>
-  ${trailer?.make ? `<tr><td>Make / Model / Year</td><td>${trailer.make}${trailer.model ? " " + trailer.model : ""}${trailer.year ? " (" + trailer.year + ")" : ""}</td></tr>` : ""}
-  <tr><td>Monthly Rental Rate</td><td>${monthlyRateStr}/month</td></tr>
-  <tr><td>Security Deposit</td><td>${depositStr} (2 months — fully refundable)</td></tr>
+  <tr><td>Agreement ID</td><td>${he(req.params.rentalId)}</td></tr>
+  <tr><td>Date Signed</td><td>${he(signedAtStr)}</td></tr>
+  <tr><td>Equipment Type</td><td>${he(trailer?.type ?? "Trailer")}</td></tr>
+  <tr><td>VIN</td><td>${he(trailer?.vin ?? "N/A")}</td></tr>
+  ${trailer?.make ? `<tr><td>Make / Model / Year</td><td>${he(trailer.make)}${trailer.model ? " " + he(trailer.model) : ""}${trailer.year ? " (" + he(trailer.year) + ")" : ""}</td></tr>` : ""}
+  <tr><td>Monthly Rental Rate</td><td>${he(monthlyRateStr)}/month</td></tr>
+  <tr><td>Security Deposit</td><td>${he(depositStr)} (2 months — fully refundable)</td></tr>
   <tr><td>Mileage</td><td>UNLIMITED — No mileage fees</td></tr>
-  <tr><td>Requested Pickup Date &amp; Time</td><td>${new Date(pickupDate).toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td></tr>
+  <tr><td>Requested Pickup Date &amp; Time</td><td>${he(new Date(pickupDate).toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</td></tr>
 </table>
 
 <h2>Renter Information</h2>
 <table>
-  <tr><td>Company Name</td><td>${company?.name ?? "N/A"}</td></tr>
-  <tr><td>Owner / Contact</td><td>${company?.ownerName ?? "N/A"}</td></tr>
-  <tr><td>DOT Number</td><td>${company?.dotNumber ?? "N/A"}</td></tr>
-  ${company?.mcNumber ? `<tr><td>MC Number</td><td>${company.mcNumber}</td></tr>` : ""}
-  <tr><td>Address</td><td>${company?.address ?? "N/A"}</td></tr>
-  <tr><td>Phone</td><td>${company?.phone ?? "N/A"}</td></tr>
-  <tr><td>Email</td><td>${user!.username}</td></tr>
+  <tr><td>Company Name</td><td>${he(company?.name ?? "N/A")}</td></tr>
+  <tr><td>Owner / Contact</td><td>${he(company?.ownerName ?? "N/A")}</td></tr>
+  <tr><td>DOT Number</td><td>${he(company?.dotNumber ?? "N/A")}</td></tr>
+  ${company?.mcNumber ? `<tr><td>MC Number</td><td>${he(company.mcNumber)}</td></tr>` : ""}
+  <tr><td>Address</td><td>${he(company?.address ?? "N/A")}</td></tr>
+  <tr><td>Phone</td><td>${he(company?.phone ?? "N/A")}</td></tr>
+  <tr><td>Email</td><td>${he(user!.username)}</td></tr>
 </table>
 
 <h2>Terms &amp; Conditions Summary</h2>
@@ -1317,12 +1321,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 <div class="sig-block">
   <p style="margin:0 0 8px;font-size:14px;"><strong>Electronic Signature</strong></p>
-  <p style="margin:0 0 4px;font-size:13px;">Signed by: <strong>${signedByName}</strong></p>
-  <p style="margin:0 0 8px;font-size:13px;">Date: ${signedAtStr}</p>
-  ${signatureUrl ? `<img src="${signatureUrl}" alt="Signature" class="sig-img" />` : `<p style="font-style:italic;color:#666;font-size:12px;">Signature captured electronically (typed)</p>`}
+  <p style="margin:0 0 4px;font-size:13px;">Signed by: <strong>${he(signedByName)}</strong></p>
+  <p style="margin:0 0 8px;font-size:13px;">Date: ${he(signedAtStr)}</p>
+  ${signatureUrl ? `<img src="${he(signatureUrl)}" alt="Signature" class="sig-img" />` : `<p style="font-style:italic;color:#666;font-size:12px;">Signature captured electronically (typed)</p>`}
   <p style="margin:8px 0 0;font-size:12px;color:#555;">
     By signing this agreement electronically, the renter confirms they have read, understand, and agree to all terms and conditions set forth herein.
-    IP Address: ${req.ip ?? "recorded"} · Timestamp: ${signedAt.toISOString()}
+    IP Address: ${he(req.ip ?? "recorded")} · Timestamp: ${he(signedAt.toISOString())}
   </p>
 </div>
 
