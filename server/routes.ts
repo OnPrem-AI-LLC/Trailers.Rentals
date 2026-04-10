@@ -304,6 +304,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertAdminNoteSchema.parse({ ...req.body, authorId: req.session.userId });
       const note = await storage.createAdminNote(data);
+
+      // Audit log for note creation on rental applications
+      if (data.entityType === "rental_application") {
+        await storage.createAuditLog({
+          actionType: "note_added",
+          entityType: "rental_application",
+          entityId: data.entityId,
+          description: `Admin added an internal note`,
+          isAdminEntry: true,
+          ipAddress: req.ip,
+        }).catch(() => { /* non-fatal */ });
+      }
+
       return res.json(note);
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
@@ -732,6 +745,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const saferJson = JSON.stringify(safer);
       await storage.updateRentalApplication(application.id, { saferData: saferJson });
+
+      await storage.createAuditLog({
+        actionType: "safer_refreshed",
+        entityType: "rental_application",
+        entityId: application.id,
+        description: `Admin manually refreshed FMCSA SAFER data (${safer.success ? "success" : "failed"})`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      }).catch(() => { /* non-fatal */ });
+
       return res.json({ saferData: saferJson, parsed: safer });
     } catch (err: unknown) {
       console.error(err);

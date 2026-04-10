@@ -34,8 +34,35 @@ function domain(): string {
   return "https://deluxelogistics.com";
 }
 
+function esc(str: string | null | undefined): string {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function escApp(app: ApplicationData): ApplicationData {
+  return {
+    ...app,
+    companyName: esc(app.companyName),
+    ownerName: esc(app.ownerName),
+    email: esc(app.email),
+    phone: esc(app.phone),
+    dotNumber: esc(app.dotNumber),
+    mcNumber: app.mcNumber ? esc(app.mcNumber) : app.mcNumber,
+    intendedUse: esc(app.intendedUse),
+    intendedUseDetails: app.intendedUseDetails ? esc(app.intendedUseDetails) : app.intendedUseDetails,
+    trailerVin: app.trailerVin ? esc(app.trailerVin) : app.trailerVin,
+    trailerType: app.trailerType ? esc(app.trailerType) : app.trailerType,
+  };
+}
+
 // ── 1. Admin notification on new application ────────────────────────────────
-export async function sendAdminApplicationAlert(app: ApplicationData): Promise<void> {
+export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promise<void> {
+  const app = escApp(rawApp);
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin alert"); return; }
 
   const reviewUrl = app.adminToken
@@ -78,7 +105,8 @@ export async function sendAdminApplicationAlert(app: ApplicationData): Promise<v
 }
 
 // ── 2. Renter acknowledgment ────────────────────────────────────────────────
-export async function sendRenterAcknowledgment(app: ApplicationData): Promise<void> {
+export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise<void> {
+  const app = escApp(rawApp);
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping renter ack"); return; }
 
   const html = `
@@ -116,7 +144,9 @@ export async function sendRenterAcknowledgment(app: ApplicationData): Promise<vo
 }
 
 // ── 3. Rejection email ──────────────────────────────────────────────────────
-export async function sendRejectionEmail(app: ApplicationData, reason?: string): Promise<void> {
+export async function sendRejectionEmail(rawApp: ApplicationData, reason?: string): Promise<void> {
+  const app = escApp(rawApp);
+  const safeReason = reason ? esc(reason) : undefined;
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping rejection email"); return; }
 
   const html = `
@@ -128,7 +158,7 @@ export async function sendRejectionEmail(app: ApplicationData, reason?: string):
   <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
     <p>Hi ${app.ownerName},</p>
     <p>Thank you for your interest in renting from Deluxe Logistics. After reviewing your application, we are unable to proceed at this time.</p>
-    ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
+    ${safeReason ? `<p><strong>Reason:</strong> ${safeReason}</p>` : ""}
     <p>You are welcome to reapply in the future. If you have questions, please don't hesitate to reach out.</p>
     <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
     <p style="color: #64748b; font-size: 13px;">
@@ -149,7 +179,8 @@ export async function sendRejectionEmail(app: ApplicationData, reason?: string):
 }
 
 // ── 4. COI Request email ────────────────────────────────────────────────────
-export async function sendCOIRequest(app: ApplicationData): Promise<void> {
+export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
+  const app = escApp(rawApp);
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping COI request"); return; }
 
   const html = `
@@ -189,10 +220,12 @@ export async function sendCOIRequest(app: ApplicationData): Promise<void> {
 }
 
 // ── 5. More info request email ──────────────────────────────────────────────
-export async function sendMoreInfoRequest(app: ApplicationData, questions: string): Promise<void> {
+export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: string): Promise<void> {
+  const app = escApp(rawApp);
+  const safeQuestions = esc(questions);
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping more-info email"); return; }
 
-  const responseUrl = app.renterToken
+  const responseUrl = rawApp.renterToken
     ? `${domain()}/applications/respond/${app.renterToken}`
     : `${domain()}/applications/${app.id}/respond`;
 
@@ -206,7 +239,7 @@ export async function sendMoreInfoRequest(app: ApplicationData, questions: strin
     <p>Hi ${app.ownerName},</p>
     <p>Thank you for your rental application. We have a few follow-up questions:</p>
     <div style="background: #f8fafc; border-left: 4px solid #e63946; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
-      <p style="margin: 0; white-space: pre-line;">${questions}</p>
+      <p style="margin: 0; white-space: pre-line;">${safeQuestions}</p>
     </div>
     <p>You can respond directly through our site or by replying to this email:</p>
     <a href="${responseUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
