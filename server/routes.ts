@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import multer from "multer";
 import QRCode from "qrcode";
 import { storage, type UpdateRental } from "./storage";
-import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
+import { getUncachableStripeClient, getStripePublishableKey, getStripeSecretKey } from "./stripeClient";
 import {
   insertRentalApplicationSchema,
   insertTrailerSchema,
@@ -1994,8 +1994,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Build Stripe dashboard links (test mode if not live key)
-      const isTestMode = !process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_');
+      // Build Stripe dashboard links using connector key to detect test vs live mode
+      const stripeKey = await getStripeSecretKey();
+      const isTestMode = !stripeKey.startsWith('sk_live_');
       const stripeDash = `https://dashboard.stripe.com${isTestMode ? '/test' : ''}`;
       const stripeCustomerUrl = rental.stripeCustomerId
         ? `${stripeDash}/customers/${rental.stripeCustomerId}`

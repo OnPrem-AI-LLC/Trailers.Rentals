@@ -120,6 +120,46 @@ export class WebhookHandlers {
           console.warn(`[webhook] invoice.paid: no rental found for subscription ${inv.subscription}`);
         }
 
+      // ── Invoice finalized (due notice — fires before auto-charge for subscriptions) ──
+      } else if (event.type === 'invoice.finalized') {
+        const inv = event.data.object as {
+          id: string;
+          subscription: string | null;
+          amount_due: number;
+          hosted_invoice_url: string | null;
+          invoice_pdf: string | null;
+          period_end?: number;
+          customer: string | null;
+        };
+        if (inv.subscription) {
+          const rental = await storage.getRentalBySubscriptionId(inv.subscription);
+          if (rental) {
+            const periodEnd = inv.period_end ? new Date(inv.period_end * 1000) : new Date();
+            const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            try {
+              const user = rental.userId ? await storage.getUser(rental.userId) : null;
+              const trailer = await storage.getTrailer(rental.trailerId);
+              const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+              if (user && trailer) {
+                const displayName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username;
+                await sendMonthlyInvoiceEmail({
+                  renterEmail: user.username,
+                  renterName: displayName,
+                  companyName: company?.name ?? displayName,
+                  trailerType: trailer.type,
+                  trailerVin: trailer.vin,
+                  amount: inv.amount_due,
+                  invoiceUrl: inv.hosted_invoice_url,
+                  pdfUrl: inv.invoice_pdf,
+                  billingPeriod,
+                });
+              }
+            } catch (emailErr) {
+              console.error('[webhook] Failed to send invoice finalized email:', emailErr);
+            }
+          }
+        }
+
       // ── Invoice payment failed ───────────────────────────────────────────────
       } else if (event.type === 'invoice.payment_failed') {
         const inv = event.data.object as {
