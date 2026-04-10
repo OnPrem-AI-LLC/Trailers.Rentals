@@ -1214,8 +1214,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const signAgreementSchema = z.object({
     signedByName: z.string().min(2, "Please enter your full legal name"),
     agreed: z.boolean().refine(v => v === true, "You must agree to the terms"),
-    signatureImage: z.string().optional(), // base64 PNG data URL from canvas
-    pickupDate: z.string().datetime().optional(), // ISO datetime string
+    signatureImage: z.string().min(1, "A signature is required"), // base64 PNG data URL — required
+    pickupDate: z.string().datetime("Please select a valid pickup date and time"), // ISO datetime — required
   });
 
   app.post("/api/agreements/:rentalId/sign", requireRenter, async (req: Request, res: Response) => {
@@ -1234,16 +1234,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(rental.trailerId).catch(() => null);
       const company = rental.companyId ? await storage.getCompany(rental.companyId).catch(() => null) : null;
 
-      // Upload signature image to Cloudinary if provided
+      // Upload signature image — required artifact; fail the transaction if Cloudinary is configured but upload fails
       let signatureUrl: string | undefined;
-      if (signatureImage && isCloudinaryConfigured()) {
-        try {
-          const base64Data = signatureImage.replace(/^data:image\/\w+;base64,/, "");
-          const imageBuffer = Buffer.from(base64Data, "base64");
-          signatureUrl = await uploadToCloudinary(imageBuffer, `signatures/${req.params.rentalId}`);
-        } catch (e) {
-          console.warn("[signature] Cloudinary upload failed — storing without signature URL:", e);
-        }
+      if (isCloudinaryConfigured()) {
+        const base64Data = signatureImage.replace(/^data:image\/\w+;base64,/, "");
+        const imageBuffer = Buffer.from(base64Data, "base64");
+        signatureUrl = await uploadToCloudinary(imageBuffer, `signatures/${req.params.rentalId}`);
+        // ↑ Throws on failure — intentionally propagates to catch block, preventing status advancement
+      } else {
+        // Cloudinary not configured (dev/test mode) — log warning but continue without persisted URL
+        console.warn("[signature] Cloudinary not configured — signature not persisted to storage");
       }
 
       const signedAt = new Date();
@@ -1251,10 +1251,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const monthlyRateStr = `$${(rental.monthlyRate / 100).toLocaleString()}`;
       const depositStr = `$${((rental.monthlyRate * 2) / 100).toLocaleString()}`;
 
-      // Generate signed agreement HTML document
+      // Generate signed agreement HTML document and upload — propagates on failure to prevent status advancement
       let agreementUrl: string | undefined;
       if (isCloudinaryConfigured()) {
-        try {
           const agreementHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1287,7 +1286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <tr><td>Monthly Rental Rate</td><td>${monthlyRateStr}/month</td></tr>
   <tr><td>Security Deposit</td><td>${depositStr} (2 months — fully refundable)</td></tr>
   <tr><td>Mileage</td><td>UNLIMITED — No mileage fees</td></tr>
-  ${pickupDate ? `<tr><td>Requested Pickup Date</td><td>${new Date(pickupDate).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</td></tr>` : ""}
+  <tr><td>Requested Pickup Date &amp; Time</td><td>${new Date(pickupDate).toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td></tr>
 </table>
 
 <h2>Renter Information</h2>
@@ -1338,9 +1337,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "agreements",
             `agreement_${req.params.rentalId}`
           );
-        } catch (e) {
-          console.warn("[agreement] Cloudinary document upload failed:", e);
-        }
+          // ↑ Throws on failure — intentionally propagates, preventing status advancement without stored artifact
+      } else {
+        console.warn("[agreement] Cloudinary not configured — agreement document not persisted");
       }
 
       const updatePayload: UpdateRental = {
@@ -1358,8 +1357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "agreement_signed",
         entityType: "rental",
         entityId: req.params.rentalId,
-        description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId}${pickupDate ? ` — pickup: ${new Date(pickupDate).toLocaleDateString()}` : ""}`,
-        metadata: JSON.stringify({ signatureUrl: signatureUrl ?? null, pickupDate: pickupDate ?? null }),
+        description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId} — pickup: ${new Date(pickupDate).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+        metadata: JSON.stringify({ signatureUrl: signatureUrl ?? null, agreementUrl: agreementUrl ?? null, pickupDate }),
         isAdminEntry: false,
         ipAddress: req.ip,
       });
@@ -1375,7 +1374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyRate: rental.monthlyRate,
         signedAt,
         signedByName,
-        pickupDate: pickupDate ? new Date(pickupDate) : undefined,
+        pickupDate: new Date(pickupDate),
       }).catch(e => console.error("[email] agreement signed email failed:", e));
 
       return res.json({ success: true, rental: updated });
