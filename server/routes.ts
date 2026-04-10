@@ -2315,6 +2315,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!company?.email) return res.status(400).json({ message: "Company email not on file" });
 
       const trailer = await storage.getTrailer(rental.trailerId);
+      if (!trailer?.engineHourRate || trailer.engineHourRate <= 0) {
+        return res.status(400).json({ message: "Engine hour tracking is not enabled for this trailer. Set an engine hour rate first." });
+      }
+
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
 
       const { sendEngineHoursRequest } = await import("./email-service");
