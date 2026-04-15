@@ -30,6 +30,7 @@ import AdminFMCSAPage from "@/pages/admin/fmcsa";
 import AdminDriverApplications from "@/pages/admin/driver-applications";
 import AdminAuditPage from "@/pages/admin/audit";
 import AdminUsersPage from "@/pages/admin/users";
+import RegisterAdmin from "@/pages/register-admin";
 
 function Router() {
   return (
@@ -50,6 +51,7 @@ function Router() {
       <Route path="/signup" component={Signup} />
       <Route path="/apply/:trailerId" component={Apply} />
       <Route path="/applications/respond/:renterToken" component={ApplicationRespond} />
+      <Route path="/register/admin/:inviteToken" component={RegisterAdmin} />
       <Route path="/register/:inviteToken" component={Register} />
       <Route path="/dashboard/sign-agreement/:rentalId" component={AgreementPage} />
       <Route path="/dashboard/payment/:rentalId" component={PaymentPage} />

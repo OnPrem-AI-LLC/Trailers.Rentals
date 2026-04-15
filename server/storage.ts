@@ -33,7 +33,7 @@ import {
   checkinPhotos,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, ne } from "drizzle-orm";
+import { eq, desc, and, ne, gte, lte, sql } from "drizzle-orm";
 
 // Inferred insert types from Drizzle (include all columns, auto-gen fields are optional)
 type InsertRentalApplication = typeof rentalApplications.$inferInsert;
@@ -100,6 +100,7 @@ export interface IStorage {
   // Audit Logs
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>;
+  getAuditLogsFiltered(opts: { entityType?: string; entityId?: string; actionType?: string; userId?: string; from?: Date; to?: Date; limit?: number; offset?: number }): Promise<{ logs: AuditLog[]; total: number }>;
 
   // Engine Hour Entries
   createEngineHourEntry(entry: typeof engineHourEntries.$inferInsert): Promise<EngineHourEntry>;
@@ -397,6 +398,45 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(auditLogs.createdAt));
     }
     return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  }
+
+  async getAuditLogsFiltered(opts: {
+    entityType?: string;
+    entityId?: string;
+    actionType?: string;
+    userId?: string;
+    from?: Date;
+    to?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ logs: AuditLog[]; total: number }> {
+    // Build conditions dynamically; cast to any[] to satisfy Drizzle's overloaded and() signature
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conditions: any[] = [];
+    if (opts.entityType) conditions.push(eq(auditLogs.entityType, opts.entityType));
+    if (opts.entityId) conditions.push(eq(auditLogs.entityId, opts.entityId));
+    if (opts.actionType) conditions.push(eq(auditLogs.actionType, opts.actionType));
+    if (opts.userId) conditions.push(eq(auditLogs.userId, opts.userId));
+    if (opts.from) conditions.push(gte(auditLogs.createdAt, opts.from));
+    if (opts.to) conditions.push(lte(auditLogs.createdAt, opts.to));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [countResult, rows] = await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(auditLogs)
+        .where(whereClause),
+      db
+        .select()
+        .from(auditLogs)
+        .where(whereClause)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(opts.limit ?? 100)
+        .offset(opts.offset ?? 0),
+    ]);
+
+    return { logs: rows, total: countResult[0]?.count ?? 0 };
   }
 
   // ── Engine Hour Entries ────────────────────────────────────────────

@@ -1007,7 +1007,7 @@ export async function sendAdminSetupEmail(data: {
   inviteToken: string;
 }): Promise<void> {
   if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin setup email"); return; }
-  const setupUrl = `${domain()}/register/${data.inviteToken}`;
+  const setupUrl = `${domain()}/register/admin/${data.inviteToken}`;
   const safeName = esc(data.firstName);
 
   const html = `

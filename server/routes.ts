@@ -145,14 +145,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertTrailerSchema.parse(req.body);
       const trailer = await storage.createTrailer(data);
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "create_trailer",
         entityType: "trailer",
         entityId: trailer.id,
         description: `Created trailer: ${trailer.vin} (${trailer.type})`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(trailer);
     } catch (err: unknown) {
@@ -167,15 +167,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allowed = insertTrailerSchema.partial().parse(req.body);
       const trailer = await storage.updateTrailer(req.params.id, allowed);
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "update_trailer",
         entityType: "trailer",
         entityId: trailer.id,
         description: `Updated trailer: ${trailer.vin}`,
-        metadata: JSON.stringify(allowed),
+        metadata: allowed as Record<string, unknown>,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(trailer);
     } catch (err: unknown) {
@@ -189,14 +189,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const trailer = await storage.updateTrailer(req.params.id, { status: "inactive" });
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "retire_trailer",
         entityType: "trailer",
         entityId: trailer.id,
         description: `Retired trailer: ${trailer.vin}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json({ success: true });
     } catch (err: unknown) {
@@ -209,14 +209,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const trailer = await storage.updateTrailer(req.params.id, { status: "available" });
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "restore_trailer",
         entityType: "trailer",
         entityId: trailer.id,
         description: `Restored trailer: ${trailer.vin}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(trailer);
     } catch (err: unknown) {
@@ -355,14 +355,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Audit log for note creation on rental applications
       if (data.entityType === "rental_application") {
-        await storage.createAuditLog({
+        await logAuditEvent({
+          req,
+          userId: req.session.userId!,
           actionType: "note_added",
           entityType: "rental_application",
           entityId: data.entityId,
           description: `Admin added an internal note`,
           isAdminEntry: true,
-          ipAddress: req.ip,
-        }).catch(() => { /* non-fatal */ });
+        });
       }
 
       return res.json(note);
@@ -423,14 +424,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         body,
         isPinned: false,
       });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: user.id,
         actionType: "rental_message_sent",
         entityType: "rental",
         entityId: req.params.id,
         description: `${user.role === "admin" ? "Admin" : "Renter"} sent message on rental ${req.params.id}`,
         isAdminEntry: user.role === "admin",
-        ipAddress: req.ip,
       });
       return res.status(201).json(note);
     } catch (err: unknown) {
@@ -495,12 +496,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sendRenterAcknowledgment(appData),
       ]);
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         actionType: "application_submitted",
         entityType: "rental_application",
         entityId: application.id,
         description: `New rental application from ${application.companyName} (DOT: ${application.dotNumber})`,
-        ipAddress: req.ip,
         isAdminEntry: false,
       });
 
@@ -604,13 +605,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isPinned: false,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         actionType: "renter_replied",
         entityType: "rental_application",
         entityId: application.id,
         description: `Renter (${application.companyName}) submitted a response to more-info request`,
         isAdminEntry: false,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true });
@@ -672,15 +673,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = applicationUpdateSchema.parse(req.body);
       const application = await storage.updateRentalApplication(req.params.id, updates);
       if (!application) return res.status(404).json({ message: "Application not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: `application_${updates.status ?? "updated"}`,
         entityType: "rental_application",
         entityId: application.id,
         description: `Application ${updates.status ? `status → ${updates.status}` : "updated"}`,
-        metadata: JSON.stringify(updates),
+        metadata: updates as Record<string, unknown>,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(application);
     } catch (err: unknown) {
@@ -753,15 +754,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         companyId: company.id,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "application_approved",
         entityType: "rental_application",
         entityId: application.id,
         description: `Application approved for ${application.companyName} — invite sent to ${application.email}`,
-        metadata: JSON.stringify({ companyId: company.id, userId: renterUser.id }),
+        metadata: { companyId: company.id, userId: renterUser.id },
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       // Send invite email (non-fatal)
@@ -789,14 +790,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adminNotes: reason || application.adminNotes,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "application_rejected",
         entityType: "rental_application",
         entityId: application.id,
         description: `Application rejected for ${application.companyName}${reason ? `: ${reason}` : ""}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       await sendRejectionEmail({
@@ -838,15 +839,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isPinned: false,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "application_needs_info",
         entityType: "rental_application",
         entityId: application.id,
         description: `More info requested from ${application.companyName}`,
-        metadata: JSON.stringify({ message }),
+        metadata: { message },
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       await sendMoreInfoRequest({
@@ -883,14 +884,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isPinned: false,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "application_coi_requested",
         entityType: "rental_application",
         entityId: application.id,
         description: `COI request sent to ${application.companyName}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       await sendCOIRequest({
@@ -927,14 +928,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const saferJson = JSON.stringify(safer);
       await storage.updateRentalApplication(application.id, { saferData: saferJson });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
+        userId: req.session.userId,
         actionType: "safer_refreshed",
         entityType: "rental_application",
         entityId: application.id,
         description: `Admin manually refreshed FMCSA SAFER data (${safer.success ? "success" : "failed"})`,
         isAdminEntry: true,
-        ipAddress: req.ip,
-      }).catch(() => { /* non-fatal */ });
+      });
 
       return res.json({ saferData: saferJson, parsed: safer });
     } catch (err: unknown) {
@@ -943,42 +945,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Admin: global audit log (paginated + filtered + enriched) ────────
+  // ── Admin: global audit log — server-side filtered + paginated + enriched ──
   app.get("/api/admin/audit", requireAdmin, async (req: Request, res: Response) => {
     try {
       const { entityType, entityId, actionType, userId, from, to, limit, offset } = req.query as Record<string, string | undefined>;
-      const logs = await storage.getAuditLogs(entityType, entityId);
 
-      // Build a userId → display name map from all users (non-fatal)
-      const allUsers = await storage.listUsers().catch(() => []);
+      const pageSize = Math.min(parseInt(limit ?? "50", 10), 500);
+      const pageOffset = parseInt(offset ?? "0", 10);
+
+      const fromDate = from ? new Date(from) : undefined;
+      const toDate = to ? (() => { const d = new Date(to); d.setHours(23, 59, 59, 999); return d; })() : undefined;
+
+      const [{ logs, total }, allUsers] = await Promise.all([
+        storage.getAuditLogsFiltered({
+          entityType,
+          entityId,
+          actionType,
+          userId,
+          from: fromDate,
+          to: toDate,
+          limit: pageSize,
+          offset: pageOffset,
+        }),
+        storage.listUsers().catch(() => []),
+      ]);
+
       const userMap = new Map<string, string>(
         allUsers.map(u => [u.id, `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username])
       );
 
-      let filtered = logs;
-      if (actionType) filtered = filtered.filter(l => l.actionType === actionType);
-      if (userId) filtered = filtered.filter(l => l.userId === userId);
-      if (from) {
-        const fromDate = new Date(from);
-        filtered = filtered.filter(l => new Date(l.createdAt) >= fromDate);
-      }
-      if (to) {
-        const toDate = new Date(to);
-        toDate.setHours(23, 59, 59, 999);
-        filtered = filtered.filter(l => new Date(l.createdAt) <= toDate);
-      }
-
-      const pageSize = Math.min(parseInt(limit ?? "100", 10), 500);
-      const pageOffset = parseInt(offset ?? "0", 10);
-      const page = filtered.slice(pageOffset, pageOffset + pageSize);
-
-      // Enrich with actor name
-      const enriched = page.map(l => ({
+      const enriched = logs.map(l => ({
         ...l,
         actorName: l.userId ? (userMap.get(l.userId) ?? "Unknown User") : "System",
       }));
 
-      return res.json({ logs: enriched, total: filtered.length });
+      return res.json({ logs: enriched, total });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1156,6 +1157,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Admin invite token lookup (public) ─────────────────────────────
+  app.get("/api/admin-invite/:token", async (req: Request, res: Response) => {
+    try {
+      const user = await storage.getUserByInviteToken(req.params.token);
+      if (!user) return res.status(404).json({ message: "Invalid or expired invite link" });
+      if (user.inviteExpiry && user.inviteExpiry < new Date()) {
+        return res.status(410).json({ message: "This invite link has expired. Contact the admin for a new one." });
+      }
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "This link is not for an admin invite." });
+      }
+      return res.json({ email: user.username, firstName: user.firstName, lastName: user.lastName });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Activate admin account via invite (public) ───────────────────────
+  const adminActivateSchema = z.object({
+    inviteToken: z.string().min(1),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+  });
+
+  app.post("/api/auth/admin-activate", async (req: Request, res: Response) => {
+    try {
+      const { inviteToken, password, firstName, lastName } = adminActivateSchema.parse(req.body);
+      const user = await storage.getUserByInviteToken(inviteToken);
+      if (!user) return res.status(404).json({ message: "Invalid or expired invite link" });
+      if (user.inviteExpiry && user.inviteExpiry < new Date()) {
+        return res.status(410).json({ message: "This invite link has expired." });
+      }
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "This link is not for an admin invite." });
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      const updated = await storage.updateUser(user.id, {
+        password: hashed,
+        firstName,
+        lastName,
+        isActive: true,
+        inviteToken: null,
+        inviteExpiry: null,
+      });
+      if (!updated) return res.status(500).json({ message: "Failed to activate account" });
+
+      await logAuditEvent({
+        req,
+        userId: updated.id,
+        actionType: "admin_account_activated",
+        entityType: "user",
+        entityId: updated.id,
+        description: `Admin account activated for ${updated.username}`,
+        isAdminEntry: true,
+      });
+
+      req.session.userId = updated.id;
+      req.session.userRole = updated.role;
+      return res.json({ id: updated.id, email: updated.username, firstName: updated.firstName, lastName: updated.lastName, role: updated.role });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Invite validation (public) ──────────────────────────────────────
   app.get("/api/invite/:token", async (req: Request, res: Response) => {
     try {
@@ -1212,14 +1282,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateCompany(user.companyId, { driverLicenseNumber }).catch(() => { /* non-fatal */ });
       }
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: updatedUser.id,
         actionType: "account_registered",
         entityType: "user",
         entityId: updatedUser.id,
         description: `Renter account activated for ${updatedUser.username}`,
         isAdminEntry: false,
-        ipAddress: req.ip,
       });
 
       // Auto log in
@@ -1274,14 +1344,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: user.id,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: user.id,
         actionType: "document_uploaded",
         entityType: "company",
         entityId: user.companyId,
         description: `Document uploaded: ${type} (${req.file.originalname})`,
         isAdminEntry: false,
-        ipAddress: req.ip,
       });
 
       return res.json(doc);
@@ -1337,15 +1407,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = updateCompanySchema.parse(req.body);
       const company = await storage.updateCompany(req.params.id, updates);
       if (!company) return res.status(404).json({ message: "Company not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "company_edited_by_admin",
         entityType: "company",
         entityId: req.params.id,
         description: `Admin manually updated company profile for ${company.name}`,
-        metadata: JSON.stringify(updates),
+        metadata: updates as Record<string, unknown>,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(company);
     } catch (err: unknown) {
@@ -1379,14 +1449,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: req.session.userId,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "document_uploaded_by_admin",
         entityType: "company",
         entityId: req.params.id,
         description: `Admin uploaded document: ${type} (${req.file.originalname})`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json(doc);
@@ -1562,15 +1632,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const updated = await storage.updateRental(req.params.rentalId, updatePayload);
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: user!.id,
         actionType: "agreement_signed",
         entityType: "rental",
         entityId: req.params.rentalId,
         description: `Rental agreement signed by ${signedByName} for rental ${req.params.rentalId} — pickup: ${new Date(pickupDate).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
-        metadata: JSON.stringify({ signatureUrl: signatureUrl ?? null, agreementUrl: agreementUrl ?? null, pickupDate }),
+        metadata: { signatureUrl: signatureUrl ?? null, agreementUrl: agreementUrl ?? null, pickupDate },
         isAdminEntry: false,
-        ipAddress: req.ip,
       });
 
       // Send emails (non-blocking)
@@ -1618,14 +1688,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyRate: rental.monthlyRate,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "agreement_email_sent",
         entityType: "rental",
         entityId: rental.id,
         description: `Admin sent agreement signing request to ${company.email}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true });
@@ -1706,15 +1776,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const rental = await storage.updateRental(req.params.id, payload);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "rental_updated_by_admin",
         entityType: "rental",
         entityId: rental.id,
         description: `Admin updated rental fields: ${Object.keys(body).join(", ")}`,
-        metadata: JSON.stringify(body),
+        metadata: body as Record<string, unknown>,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json(rental);
     } catch (err: unknown) {
@@ -1759,14 +1829,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await stripe.invoices.finalizeInvoice(invoice.id);
       await stripe.invoices.sendInvoice(invoice.id);
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "admin_invoice_created",
         entityType: "rental",
         entityId: rental.id,
         description: `Admin created one-off invoice $${(amount / 100).toFixed(2)} — "${description}" (Stripe invoice: ${invoice.id})`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true, invoiceId: invoice.id });
@@ -1830,14 +1900,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateRental(rental.id, { stripeSubscriptionId: subscription.id });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "subscription_created_by_admin",
         entityType: "rental",
         entityId: rental.id,
         description: `Admin manually created monthly subscription ${subscription.id} (retry)`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true, subscriptionId: subscription.id });
@@ -1861,14 +1931,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateRental(rental.id, { stripeSubscriptionId: null });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "subscription_cancelled",
         entityType: "rental",
         entityId: rental.id,
         description: `Admin cancelled Stripe subscription ${rental.stripeSubscriptionId}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true });
@@ -2398,14 +2468,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Audit log
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: user.id,
         actionType: "engine_hours_submitted",
         entityType: "rental",
         entityId: req.params.id,
         description: `Renter submitted engine hour reading: ${currentReading} hrs${hoursUsed != null ? ` (${hoursUsed} hrs used)` : ""}${calculatedCharge != null ? `, $${(calculatedCharge / 100).toFixed(2)} charge` : ""}`,
         isAdminEntry: false,
-        ipAddress: req.ip,
       });
 
       // Notify admin via email
@@ -2469,14 +2539,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         notes: notes ?? null,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "engine_hours_manual_entry",
         entityType: "rental",
         entityId: req.params.id,
         description: `Admin entered engine hours manually: ${currentReading} hrs${hoursUsed != null ? ` (${hoursUsed} hrs used)` : ""}${calculatedCharge != null ? `, $${(calculatedCharge / 100).toFixed(2)} charge` : ""}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.status(201).json(entry);
@@ -2514,14 +2584,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         previousReading: prev?.currentReading ?? null,
       });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "engine_hours_requested",
         entityType: "rental",
         entityId: req.params.id,
         description: `Admin requested engine hour reading from ${company.name}`,
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true });
@@ -2573,15 +2643,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Save invoice item ID to mark as queued for billing
       await storage.updateEngineHourEntry(entry.id, { stripeInvoiceItemId: invoiceItem.id });
 
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "engine_hours_billed",
         entityType: "rental",
         entityId: req.params.rentalId,
         description: `Engine hour surcharge of $${(entry.calculatedCharge / 100).toFixed(2)} added to next invoice (item ${invoiceItem.id})`,
-        metadata: JSON.stringify({ invoiceItemId: invoiceItem.id, entryId: entry.id }),
+        metadata: { invoiceItemId: invoiceItem.id, entryId: entry.id },
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
 
       return res.json({ success: true, invoiceItemId: invoiceItem.id, queuedForNextInvoice: true });
@@ -2734,15 +2804,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "active_in_use",
         pickupDate: now,
       });
-      await storage.createAuditLog({
-        entityType: "rental",
-        entityId: rental.id,
+      await logAuditEvent({
+        req,
         userId: user.id,
         actionType: "pickup_confirmed",
-        metadata: JSON.stringify({ method: "qr_scan", photoCount: photos.length }),
-        isAdminEntry: false,
-        ipAddress: req.ip,
+        entityType: "rental",
+        entityId: rental.id,
         description: `Pickup confirmed via QR check-in with ${photos.length} pre-inspection photos`,
+        metadata: { method: "qr_scan", photoCount: photos.length },
+        isAdminEntry: false,
       });
       // Fire-and-forget: pickup emails + registration delivery
       const pickupTrailer = await storage.getTrailer(rental.trailerId);
@@ -2823,15 +2893,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         returnConfirmedAt: now,
         status: "completed",
       });
-      await storage.createAuditLog({
-        entityType: "rental",
-        entityId: rental.id,
+      await logAuditEvent({
+        req,
         userId: null,
         actionType: "return_confirmed",
-        metadata: JSON.stringify({ method: "qr_scan" }),
-        isAdminEntry: false,
-        ipAddress: req.ip,
+        entityType: "rental",
+        entityId: rental.id,
         description: "Return confirmed via QR code scan",
+        metadata: { method: "qr_scan" },
+        isAdminEntry: false,
       });
       // Send return confirmation emails (fire and forget)
       const trailer2 = await storage.getTrailer(rental.trailerId);
