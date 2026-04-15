@@ -18,7 +18,7 @@ import {
   Gauge, Send, QrCode, PackageCheck, RotateCcw, Camera,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import type { Rental, Document, AuditLog, Company, EngineHourEntry, CheckinPhoto } from "@shared/schema";
+import type { Rental, Document, AuditLog, Company, EngineHourEntry, CheckinPhoto, EmailLog } from "@shared/schema";
 
 interface TrailerInfo {
   id: string;
@@ -209,6 +209,17 @@ export default function AdminRentalDetail() {
       return res.json();
     },
     enabled: !!user && !!rentalId,
+  });
+
+  // Email Communications for this rental
+  const { data: emailLogs = [] } = useQuery<EmailLog[]>({
+    queryKey: ["/api/admin/email-logs", rentalId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/email-logs?entityType=rental&entityId=${rentalId}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user && user.role === "admin" && !!rentalId,
   });
 
   const requestHoursMut = useMutation({
@@ -1028,6 +1039,33 @@ export default function AdminRentalDetail() {
                   </div>
                 </div>
               )}
+
+              {/* Communications / Email Log */}
+              <div className="bg-card border border-border rounded-xl p-5">
+                <h2 className="font-bold text-sm uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-muted-foreground" /> Communications
+                </h2>
+                {emailLogs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No emails sent for this rental yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {emailLogs.map((log) => (
+                      <div key={log.id} className="text-xs border border-border rounded-lg p-3 space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded font-semibold ${log.status === "sent" ? "bg-green-900/40 text-green-400" : log.status === "failed" ? "bg-red-900/40 text-red-400" : "bg-yellow-900/40 text-yellow-400"}`}>
+                            {log.status}
+                          </span>
+                          <span className="text-muted-foreground text-[10px] truncate">{log.template}</span>
+                        </div>
+                        <p className="text-foreground truncate leading-snug">{log.subject}</p>
+                        <p className="text-muted-foreground truncate">To: {log.recipient}</p>
+                        <p className="text-muted-foreground text-[10px]">{new Date(log.sentAt).toLocaleString()}</p>
+                        {log.error && <p className="text-red-400 text-[10px] truncate">Error: {log.error}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Quick links */}
               <div className="bg-card border border-border rounded-xl p-5">

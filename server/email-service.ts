@@ -38,6 +38,49 @@ async function logEmail(opts: {
   }
 }
 
+// ── Reusable branded HTML template ─────────────────────────────────────────
+export function emailTemplate(title: string, body: string, accentColor = "#e63946"): string {
+  return `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: ${accentColor}; margin: 0; font-size: 20px;">${title}</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    ${body}
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;">
+      <strong>Deluxe Logistics Inc.</strong><br/>
+      818 Corning Way, Martinsburg, WV 25401<br/>
+      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+    </p>
+  </div>
+</div>`;
+}
+
+// ── Tracked send wrapper — logs every send (success/failure) ───────────────
+type MailData = Parameters<typeof sgMail.send>[0];
+async function sendTracked(
+  msg: MailData,
+  opts: { template: string; entityType?: string; entityId?: string }
+): Promise<void> {
+  const to = Array.isArray(msg.to)
+    ? (msg.to as string[]).join(", ")
+    : typeof msg.to === "string"
+    ? msg.to
+    : ADMIN_EMAIL;
+  const subject = typeof (msg as { subject?: string }).subject === "string"
+    ? (msg as { subject: string }).subject
+    : "(no subject)";
+  try {
+    await sgMail.send(msg);
+    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
+    throw err;
+  }
+}
+
 interface ApplicationData {
   id: string;
   adminToken?: string | null;
@@ -124,14 +167,13 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
     subject: `[Application] ${app.companyName} — ${app.dotNumber}`,
     html,
     text: `New rental application from ${app.companyName}.\nDOT: ${app.dotNumber}\nEmail: ${app.email}\nReview: ${reviewUrl}`,
-  });
-  logEmail({ recipient: ADMIN_EMAIL, subject: `[Application] ${app.companyName} — ${app.dotNumber}`, template: "admin_application_alert", entityType: "rental_application", entityId: rawApp.id, status: "sent" });
+  }, { template: "admin_application_alert", entityType: "rental_application", entityId: rawApp.id });
 }
 
 // ── 2. Renter acknowledgment ────────────────────────────────────────────────
@@ -164,13 +206,13 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: app.email,
     from: FROM,
     subject: "Your Deluxe Logistics rental application has been received",
     html,
     text: `Hi ${app.ownerName},\n\nWe've received your rental application. Our team will review it and contact you within 24 hours.\n\nDeluxe Logistics Inc.\n818 Corning Way, Martinsburg, WV`,
-  });
+  }, { template: "renter_acknowledgment", entityType: "rental_application", entityId: rawApp.id });
 }
 
 // ── 3. Rejection email ──────────────────────────────────────────────────────
@@ -199,13 +241,13 @@ export async function sendRejectionEmail(rawApp: ApplicationData, reason?: strin
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: app.email,
     from: FROM,
     subject: "Update on your Deluxe Logistics rental application",
     html,
     text: `Hi ${app.ownerName},\n\nThank you for your interest in renting from Deluxe Logistics. After reviewing your application, we are unable to proceed at this time.\n\n${reason ? `Reason: ${reason}\n\n` : ""}Please contact us if you have questions.\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "rejection_email", entityType: "rental_application", entityId: rawApp.id });
 }
 
 // ── 4. COI Request email ────────────────────────────────────────────────────
@@ -240,13 +282,13 @@ export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: app.email,
     from: FROM,
     subject: "Action required: Certificate of Insurance for your rental application",
     html,
     text: `Hi ${app.ownerName},\n\nTo complete your rental application review, we require a Certificate of Insurance naming:\n\nDeluxe Logistics Inc.\n818 Corning Way\nMartinsburg, WV 25401\n\nPlease reply to this email with the COI attached.\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "coi_request", entityType: "rental_application", entityId: rawApp.id });
 }
 
 // ── 5b. Invite email (after approval) ─────────────────────────────────────
@@ -287,14 +329,13 @@ export async function sendInviteEmail(email: string, ownerName: string, inviteTo
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: email,
     from: FROM,
     subject: "Your Deluxe Logistics rental application is approved — create your account",
     html,
     text: `Hi ${ownerName},\n\nYour rental application has been approved! Create your account here:\n${registerUrl}\n\nThis link expires in 48 hours.\n\nDeluxe Logistics Inc.`,
-  });
-  logEmail({ recipient: email, subject: "Your Deluxe Logistics rental application is approved — create your account", template: "invite_email", status: "sent" });
+  }, { template: "invite_email" });
 }
 
 // ── 5. More info request email ──────────────────────────────────────────────
@@ -336,13 +377,13 @@ export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: st
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: app.email,
     from: FROM,
     subject: "Follow-up questions about your Deluxe Logistics rental application",
     html,
     text: `Hi ${app.ownerName},\n\nWe have a few follow-up questions about your rental application:\n\n${questions}\n\nRespond here: ${responseUrl}\n\nOr reply to this email with your answers.\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "more_info_request", entityType: "rental_application", entityId: rawApp.id });
 }
 
 // ── 6. Agreement signed notification ──────────────────────────────────────────
@@ -446,20 +487,20 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
 </div>`;
 
   await Promise.allSettled([
-    sgMail.send({
+    sendTracked({
       to: data.renterEmail,
       from: FROM,
       subject: "Your Deluxe Logistics rental agreement is signed",
       html: renterHtml,
       text: `Hi ${data.renterName},\n\nYour rental agreement has been signed. Summary:\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nRate: ${monthlyStr}\nSigned By: ${data.signedByName}\nDate: ${signedDate}\n\nDeluxe Logistics Inc.`,
-    }),
-    sgMail.send({
+    }, { template: "agreement_signed_renter", entityType: "rental", entityId: data.rentalId }),
+    sendTracked({
       to: ADMIN_EMAIL,
       from: FROM,
       subject: `[ACTION NEEDED] Agreement signed — ${data.companyName} awaiting payment`,
       html: adminHtml,
       text: `${data.companyName} has signed their rental agreement.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nRate: ${monthlyStr}\nSigned By: ${data.signedByName}\nDate: ${signedDate}${data.pickupDate ? `\nRequested Pickup: ${data.pickupDate.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}\n\nView: ${adminUrl}`,
-    }),
+    }, { template: "agreement_signed_admin", entityType: "rental", entityId: data.rentalId }),
   ]);
 }
 
@@ -513,13 +554,13 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: `Action Required: Sign your rental agreement — ${data.trailerType} (${data.trailerVin})`,
     html,
     text: `Hi ${data.renterName},\n\nYour rental agreement for ${data.trailerType} VIN: ${data.trailerVin} is ready to sign.\n\nMonthly Rate: ${monthlyStr} — No Mileage Fees\n\nSign here: ${signUrl}\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "agreement_request", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── 8a. Admin notification when deposit received ──────────────────────────────
@@ -560,13 +601,13 @@ export async function sendDepositReceivedAdminEmail(data: {
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
     subject: `[Deposit Paid] ${data.companyName} — ${data.trailerType} rental now active`,
     html,
     text: `Security deposit received.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}\nDeposit: $${((data.monthlyRate * 2) / 100).toLocaleString()}\n\nView: ${adminUrl}`,
-  });
+  }, { template: "admin_deposit_notification", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── 8. Deposit confirmed / rental activated email ─────────────────────────────
@@ -628,13 +669,13 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: `Your Deluxe Logistics rental is now active — ${safeType} (${safeVin})`,
     html,
     text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "deposit_confirmed", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── Monthly invoice email ─────────────────────────────────────────────────────
@@ -689,13 +730,13 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: `Invoice for ${period} — ${safeType} rental (${safeVin})`,
     html,
     text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? info@deluxelogistics.com\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "monthly_invoice" });
 }
 
 // ── QR Pickup confirmed notification ──────────────────────────────────────────
@@ -762,8 +803,8 @@ export async function sendPickupConfirmedEmails(data: QREventData): Promise<void
 </div>`;
 
   await Promise.allSettled([
-    sgMail.send({ to: data.renterEmail, from: FROM, subject: `Pickup confirmed — ${data.trailerType} (${data.trailerVin})`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nPickup Time: ${dateStr}\n\nView your dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.` }),
-    sgMail.send({ to: ADMIN_EMAIL, from: FROM, subject: `[Pickup] ${data.companyName} confirmed pickup via QR`, html: adminHtml, text: `${data.companyName} confirmed pickup via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }),
+    sendTracked({ to: data.renterEmail, from: FROM, subject: `Pickup confirmed — ${data.trailerType} (${data.trailerVin})`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nPickup Time: ${dateStr}\n\nView your dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.` }, { template: "pickup_confirmed_renter", entityType: "rental", entityId: data.rentalId }),
+    sendTracked({ to: ADMIN_EMAIL, from: FROM, subject: `[Pickup] ${data.companyName} confirmed pickup via QR`, html: adminHtml, text: `${data.companyName} confirmed pickup via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }, { template: "pickup_confirmed_admin", entityType: "rental", entityId: data.rentalId }),
   ]);
 }
 
@@ -820,8 +861,8 @@ export async function sendReturnConfirmedEmails(data: QREventData): Promise<void
 </div>`;
 
   await Promise.allSettled([
-    sgMail.send({ to: data.renterEmail, from: FROM, subject: `Return confirmed — ${data.trailerType} (${data.trailerVin}) — Thank you!`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer return has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReturn Time: ${dateStr}\n\nThank you for choosing Deluxe Logistics!\n\nDeluxe Logistics Inc.` }),
-    sgMail.send({ to: ADMIN_EMAIL, from: FROM, subject: `[Return] ${data.companyName} returned trailer via QR`, html: adminHtml, text: `${data.companyName} confirmed return via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }),
+    sendTracked({ to: data.renterEmail, from: FROM, subject: `Return confirmed — ${data.trailerType} (${data.trailerVin}) — Thank you!`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer return has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReturn Time: ${dateStr}\n\nThank you for choosing Deluxe Logistics!\n\nDeluxe Logistics Inc.` }, { template: "return_confirmed_renter", entityType: "rental", entityId: data.rentalId }),
+    sendTracked({ to: ADMIN_EMAIL, from: FROM, subject: `[Return] ${data.companyName} returned trailer via QR`, html: adminHtml, text: `${data.companyName} confirmed return via QR scan at ${dateStr}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nView: ${adminUrl}` }, { template: "return_confirmed_admin", entityType: "rental", entityId: data.rentalId }),
   ]);
 }
 
@@ -873,13 +914,13 @@ export async function sendEngineHoursRequest(data: EngineHoursRequestData): Prom
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: `Engine hour reading requested — ${safeType} VIN ${safeVin}`,
     html,
     text: `Hi ${data.renterName},\n\nDeluxe Logistics is requesting your current reefer engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nLast Reading: ${prevReading} hours\n\nSubmit here: ${submitUrl}\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "engine_hours_request", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── Engine Hours: Admin notification when renter submits ───────────────────
@@ -923,13 +964,13 @@ export async function sendEngineHoursReceivedAdmin(data: EngineHoursSubmittedDat
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
     subject: `[Engine Hours] ${safeCompany} submitted reading — ${chargeStr} due`,
     html,
     text: `${data.companyName} submitted an engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReading: ${data.currentReading} hrs\nHours Used: ${data.hoursUsed ?? "N/A"}\nCharge: ${chargeStr}\n\nView: ${adminUrl}\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "engine_hours_received_admin", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── Driver Application Emails ─────────────────────────────────────────────
@@ -978,13 +1019,13 @@ export async function sendDriverApplicationConfirmation(data: DriverApplicationE
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.email,
     from: FROM,
     subject: "We received your driver application — Deluxe Logistics",
     html,
     text: `Hi ${data.fullName},\n\nThank you for applying to drive for Deluxe Logistics. We'll review your application within 2 business days.\n\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} year(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nQuestions? Email jobs@deluxelogistics.com\n\n— Deluxe Logistics Inc.`,
-  });
+  }, { template: "driver_application_confirmation", entityType: "driver_application", entityId: data.applicationId });
 }
 
 export async function sendDriverApplicationAdmin(data: DriverApplicationEmailData): Promise<void> {
@@ -1018,13 +1059,13 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
     subject: `[New Driver Application] ${data.fullName} — Class ${data.cdlClass} CDL, ${data.yearsExperience} yrs exp`,
     html,
     text: `New driver application from ${data.fullName}\n\nEmail: ${data.email}\nPhone: ${data.phone}\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} yr(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nReview: ${adminUrl}\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "driver_application_admin", entityType: "driver_application", entityId: data.applicationId });
 }
 
 // ── Admin account setup email ───────────────────────────────────────────
@@ -1061,13 +1102,13 @@ export async function sendAdminSetupEmail(data: {
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.email,
     from: FROM,
     subject: "You've been invited to join the Deluxe Logistics admin team",
     html,
     text: `Hi ${data.firstName},\n\nYou've been invited to join the Deluxe Logistics admin portal. Set up your account here:\n${setupUrl}\n\nThis link expires in 7 days.\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "admin_setup_email" });
 }
 
 // ── Registration delivery email (sent on check-in completion) ────────────
@@ -1111,13 +1152,13 @@ export async function sendRegistrationEmail(data: RegistrationEmailData): Promis
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: `Trailer registration — ${safeType} VIN ${safeVin}`,
     html,
     text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed. Here is your electronic registration:\n\n${data.registrationUrl}\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nCompany: ${data.companyName}\n\nKeep a copy in your cab at all times.\n\nDeluxe Logistics Inc.`,
-  });
+  }, { template: "registration_email" });
 }
 
 // ── Password Reset email ─────────────────────────────────────────────────────
@@ -1153,14 +1194,13 @@ export async function sendPasswordResetEmail(data: {
   </div>
 </div>`;
 
-  await sgMail.send({
+  await sendTracked({
     to: data.email,
     from: FROM,
     subject: "Reset your Deluxe Logistics password",
     html,
     text: `Hi ${data.firstName || "there"},\n\nClick here to reset your password:\n${resetUrl}\n\nThis link expires in 1 hour.\n\nIf you didn't request a reset, ignore this email.\n\nDeluxe Logistics Inc.`,
-  });
-  logEmail({ recipient: data.email, subject: "Reset your Deluxe Logistics password", template: "password_reset", status: "sent" });
+  }, { template: "password_reset" });
 }
 
 // ── Return Reminder email ─────────────────────────────────────────────────────
@@ -1211,14 +1251,13 @@ export async function sendReturnReminderEmail(data: {
 </div>`;
 
   const reminderSubject = `Reminder: Your trailer return is ${urgencyLabel === "Tomorrow" ? "tomorrow" : `in ${data.daysUntilReturn} days`} — ${safeType} VIN ${safeVin}`;
-  await sgMail.send({
+  await sendTracked({
     to: data.renterEmail,
     from: FROM,
     subject: reminderSubject,
     html,
     text: `Hi ${data.renterName},\n\nYour trailer rental ends in ${data.daysUntilReturn} day(s) on ${data.endDate.toLocaleDateString()}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nPlease coordinate return logistics with our team.\n\nView dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.`,
-  });
-  logEmail({ recipient: data.renterEmail, subject: reminderSubject, template: "return_reminder", entityType: "rental", entityId: data.rentalId, status: "sent" });
+  }, { template: "return_reminder", entityType: "rental", entityId: data.rentalId });
 }
 
 export async function sendContactFormEmail(data: {
@@ -1250,13 +1289,12 @@ export async function sendContactFormEmail(data: {
 </div>`;
 
   const contactSubject = `Contact form: ${data.subject} — from ${data.name}`;
-  await sgMail.send({
+  await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
     replyTo: data.email,
     subject: contactSubject,
     html,
     text: `New contact form submission\n\nName: ${data.name}\nEmail: ${data.email}${data.phone ? `\nPhone: ${data.phone}` : ""}\nSubject: ${data.subject}\n\nMessage:\n${data.message}`,
-  });
-  logEmail({ recipient: ADMIN_EMAIL, subject: contactSubject, template: "contact_form", status: "sent" });
+  }, { template: "contact_form" });
 }

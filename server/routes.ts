@@ -3215,7 +3215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Reset link is invalid or has expired." });
       }
       const hashed = await bcrypt.hash(password, 10);
-      await storage.updateUser(user.id, { password: hashed, passwordResetToken: null as unknown as string, passwordResetExpiry: null as unknown as Date });
+      await storage.updateUser(user.id, { password: hashed, passwordResetToken: null, passwordResetExpiry: null });
       return res.json({ message: "Password updated successfully." });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0]?.message ?? "Invalid input" });
