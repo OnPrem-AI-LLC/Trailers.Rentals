@@ -3060,6 +3060,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         desiredPosition: data.desiredPosition ?? null,
         references: data.references ?? null,
         coverLetter: data.coverLetter ?? null,
+        jobListingId: data.jobListingId ?? null,
+        jobListingTitle: data.jobListingTitle ?? null,
       });
       // Fire-and-forget emails
       const { sendDriverApplicationConfirmation, sendDriverApplicationAdmin } = await import("./email-service");
@@ -3068,6 +3070,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fullName: app2.fullName,
         email: app2.email,
         phone: app2.phone,
+        cdlNumber: app2.cdlNumber ?? undefined,
         cdlClass: app2.cdlClass,
         cdlState: app2.cdlState,
         yearsExperience: app2.yearsExperience,
@@ -3076,6 +3079,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasHazmat: app2.hasHazmat,
         hasTanker: app2.hasTanker,
         coverLetter: app2.coverLetter,
+        jobListingTitle: app2.jobListingTitle ?? undefined,
       };
       sendDriverApplicationConfirmation(emailPayload).catch(console.error);
       sendDriverApplicationAdmin(emailPayload).catch(console.error);

@@ -194,6 +194,8 @@ export const driverApplications = pgTable("driver_applications", {
   hasTwic: boolean("has_twic").notNull().default(false),
   hasHazmat: boolean("has_hazmat").notNull().default(false),
   hasTanker: boolean("has_tanker").notNull().default(false),
+  jobListingId: varchar("job_listing_id"),
+  jobListingTitle: text("job_listing_title"),
   references: text("refs"), // free-form text (column is named "refs" to avoid SQL reserved word)
   coverLetter: text("cover_letter"),
   resumeUrl: text("resume_url"),

@@ -781,6 +781,7 @@ export interface DriverApplicationEmailData {
   fullName: string;
   email: string;
   phone: string;
+  cdlNumber?: string;
   cdlClass: string;
   cdlState: string;
   yearsExperience: number;
@@ -789,6 +790,7 @@ export interface DriverApplicationEmailData {
   hasHazmat: boolean;
   hasTanker: boolean;
   coverLetter?: string | null;
+  jobListingTitle?: string | null;
 }
 
 export async function sendDriverApplicationConfirmation(data: DriverApplicationEmailData): Promise<void> {
@@ -829,16 +831,23 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
 
   const html = emailTemplate("New Driver Application", `
     <p><strong>${safeName}</strong> submitted a driver application.</p>
+    ${data.jobListingTitle ? `<p style="color: #64748b; font-size: 13px;">Applied for: <strong>${esc(data.jobListingTitle)}</strong></p>` : ""}
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 4px 0; color: #64748b; width: 40%;">Email</td><td style="padding: 4px 0;">${esc(data.email)}</td></tr>
         <tr><td style="padding: 4px 0; color: #64748b;">Phone</td><td style="padding: 4px 0;">${esc(data.phone)}</td></tr>
         <tr><td style="padding: 4px 0; color: #64748b;">CDL Class</td><td style="padding: 4px 0;">Class ${esc(data.cdlClass)} — ${esc(data.cdlState)}</td></tr>
+        ${data.cdlNumber ? `<tr><td style="padding: 4px 0; color: #64748b;">CDL Number</td><td style="padding: 4px 0; font-family: monospace;">${esc(data.cdlNumber)}</td></tr>` : ""}
         <tr><td style="padding: 4px 0; color: #64748b;">Experience</td><td style="padding: 4px 0;">${data.yearsExperience} year(s)</td></tr>
         <tr><td style="padding: 4px 0; color: #64748b;">Position</td><td style="padding: 4px 0;">${positionLabel}</td></tr>
         <tr><td style="padding: 4px 0; color: #64748b;">Endorsements</td><td style="padding: 4px 0;">${endorsements}</td></tr>
       </table>
     </div>
+    ${data.coverLetter ? `
+    <div style="background: #f8fafc; border-left: 4px solid #e63946; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0;">
+      <p style="font-size: 12px; font-weight: bold; color: #64748b; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.05em;">Applicant's Introduction</p>
+      <p style="font-size: 14px; color: #1e293b; margin: 0; white-space: pre-line;">${esc(data.coverLetter)}</p>
+    </div>` : ""}
     <a href="${esc(adminUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
       Review Application →
     </a>
@@ -849,7 +858,7 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
     from: FROM,
     subject: `[New Driver Application] ${data.fullName} — Class ${data.cdlClass} CDL, ${data.yearsExperience} yrs exp`,
     html,
-    text: `New driver application from ${data.fullName}\n\nEmail: ${data.email}\nPhone: ${data.phone}\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} yr(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nReview: ${adminUrl}\n\nDeluxe Logistics Inc.`,
+    text: `New driver application from ${data.fullName}${data.jobListingTitle ? ` (Position: ${data.jobListingTitle})` : ""}\n\nEmail: ${data.email}\nPhone: ${data.phone}\nCDL: Class ${data.cdlClass} (${data.cdlState})${data.cdlNumber ? `\nCDL Number: ${data.cdlNumber}` : ""}\nExperience: ${data.yearsExperience} yr(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}${data.coverLetter ? `\n\nIntroduction:\n${data.coverLetter}` : ""}\n\nReview: ${adminUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "driver_application_admin", entityType: "driver_application", entityId: data.applicationId });
 }
 

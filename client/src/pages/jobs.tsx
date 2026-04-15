@@ -122,7 +122,10 @@ export default function Jobs() {
   });
 
   function onSubmit(values: FormValues) {
-    submitMut.mutate(values);
+    submitMut.mutate({
+      ...values,
+      ...(selectedListing ? { jobListingId: String(selectedListing.id), jobListingTitle: selectedListing.title } : {}),
+    } as FormValues);
   }
 
   function applyNow(listing?: JobListing) {
