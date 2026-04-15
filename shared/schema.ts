@@ -165,6 +165,16 @@ export const auditLogs = pgTable("audit_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── Check-in Photos ───────────────────────────────────────────────────
+export const checkinPhotos = pgTable("checkin_photos", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rentalId: varchar("rental_id").notNull(),
+  url: text("url").notNull(),
+  label: text("label"), // e.g. "front", "rear", "left", "right"
+  uploadedBy: varchar("uploaded_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ── Driver Applications ────────────────────────────────────────────────
 export const driverApplications = pgTable("driver_applications", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -323,6 +333,7 @@ export type InsertEngineHourEntry = z.infer<typeof insertEngineHourEntrySchema>;
 export type EngineHourEntry = typeof engineHourEntries.$inferSelect;
 export type InsertDriverApplication = z.infer<typeof insertDriverApplicationSchema>;
 export type DriverApplication = typeof driverApplications.$inferSelect;
+export type CheckinPhoto = typeof checkinPhotos.$inferSelect;
 
 // Trailer with photos joined
 export type TrailerWithPhotos = Trailer & { photos: TrailerPhoto[] };

@@ -15,10 +15,10 @@ import {
   Truck, Building2, ChevronLeft, FileText, ExternalLink, CheckCircle,
   CreditCard, Calendar, Clock, AlertTriangle, Receipt, Download,
   Activity, DollarSign, User, Hash, Mail, Phone, PlusCircle, XCircle,
-  Gauge, Send, QrCode, PackageCheck, RotateCcw,
+  Gauge, Send, QrCode, PackageCheck, RotateCcw, Camera,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import type { Rental, Document, AuditLog, Company, EngineHourEntry } from "@shared/schema";
+import type { Rental, Document, AuditLog, Company, EngineHourEntry, CheckinPhoto } from "@shared/schema";
 
 interface TrailerInfo {
   id: string;
@@ -188,6 +188,16 @@ export default function AdminRentalDetail() {
       toast({ title: "Subscription created", description: "Monthly billing is now active." });
     },
     onError: (err: Error) => toast({ title: "Failed to create subscription", description: err.message, variant: "destructive" }),
+  });
+
+  const { data: checkinPhotos = [] } = useQuery<CheckinPhoto[]>({
+    queryKey: ["/api/admin/rentals", rentalId, "checkin-photos"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/rentals/${rentalId}/checkin-photos`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user && user.role === "admin" && !!rentalId,
   });
 
   // Engine Hours
@@ -612,6 +622,27 @@ export default function AdminRentalDetail() {
                   </div>
                 </div>
               </div>
+
+              {/* Pre-Inspection Photos */}
+              {checkinPhotos.length > 0 && (
+                <div className="bg-card border border-border rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Camera className="w-4 h-4 text-primary" />
+                    <h2 className="font-bold text-sm uppercase tracking-wider">Pre-Inspection Photos</h2>
+                    <span className="text-xs text-muted-foreground ml-auto">{checkinPhotos.length} photo{checkinPhotos.length !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {checkinPhotos.map(photo => (
+                      <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="group relative rounded-xl overflow-hidden border border-border bg-secondary/20 aspect-square">
+                        <img src={photo.url} alt={photo.label || "Pre-inspection"} className="w-full h-full object-cover group-hover:opacity-80 transition-opacity" />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 text-[10px] text-white">
+                          {photo.label ? photo.label.toUpperCase() : "INSPECTION"} · {new Date(photo.createdAt).toLocaleString()}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Engine Hours */}
               <div className="bg-card border border-border rounded-xl p-5">

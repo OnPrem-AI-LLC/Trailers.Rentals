@@ -18,6 +18,7 @@ import {
   type InsertAdminNote,
   type EngineHourEntry,
   type DriverApplication,
+  type CheckinPhoto,
   users,
   trailers,
   trailerPhotos,
@@ -29,6 +30,7 @@ import {
   adminNotes,
   engineHourEntries,
   driverApplications,
+  checkinPhotos,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, ne } from "drizzle-orm";
@@ -109,6 +111,10 @@ export interface IStorage {
   getDriverApplication(id: string): Promise<DriverApplication | undefined>;
   listDriverApplications(status?: string): Promise<DriverApplication[]>;
   updateDriverApplication(id: string, data: Partial<typeof driverApplications.$inferInsert>): Promise<DriverApplication | undefined>;
+
+  // Check-in Photos
+  createCheckinPhoto(data: typeof checkinPhotos.$inferInsert): Promise<CheckinPhoto>;
+  getCheckinPhotos(rentalId: string): Promise<CheckinPhoto[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -447,6 +453,20 @@ export class DatabaseStorage implements IStorage {
       .where(eq(driverApplications.id, id))
       .returning();
     return row ?? undefined;
+  }
+
+  // ── Check-in Photos ────────────────────────────────────────────────
+  async createCheckinPhoto(data: typeof checkinPhotos.$inferInsert): Promise<CheckinPhoto> {
+    const [row] = await db.insert(checkinPhotos).values(data).returning();
+    return row;
+  }
+
+  async getCheckinPhotos(rentalId: string): Promise<CheckinPhoto[]> {
+    return db
+      .select()
+      .from(checkinPhotos)
+      .where(eq(checkinPhotos.rentalId, rentalId))
+      .orderBy(checkinPhotos.createdAt);
   }
 }
 

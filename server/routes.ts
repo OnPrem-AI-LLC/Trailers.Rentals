@@ -2447,13 +2447,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET /api/pickup/:token — public
+  // GET /api/pickup/:token — returns rental info; requiresLogin flag if not authenticated
   app.get("/api/pickup/:token", async (req: Request, res: Response) => {
     try {
       const rental = await storage.getRentalByPickupToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
       const trailer = await storage.getTrailer(rental.trailerId);
       const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+      const isLoggedIn = !!req.session?.userId;
+      let isAuthorized = false;
+      if (isLoggedIn) {
+        const user = await storage.getUser(req.session.userId!);
+        if (user) {
+          isAuthorized = user.role === "admin" || user.companyId === rental.companyId;
+        }
+      }
+      let existingPhotos: { id: string; url: string; label: string | null }[] = [];
+      if (isLoggedIn && isAuthorized) {
+        const photos = await storage.getCheckinPhotos(rental.id);
+        existingPhotos = photos.map(p => ({ id: p.id, url: p.url, label: p.label }));
+      }
       return res.json({
         rentalId: rental.id,
         alreadyConfirmed: !!rental.pickupConfirmedAt,
@@ -2461,8 +2474,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trailerVin: trailer?.vin ?? "Unknown",
         trailerType: trailer?.type ?? "",
         trailerMake: trailer?.make ?? "",
+        trailerYear: trailer?.year ?? "",
         companyName: company?.name ?? "",
         startDate: rental.startDate,
+        requiresLogin: !isLoggedIn,
+        isAuthorized,
+        existingPhotos,
       });
     } catch (err: unknown) {
       console.error(err);
@@ -2470,13 +2487,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/pickup/:token/confirm — public
-  app.post("/api/pickup/:token/confirm", async (req: Request, res: Response) => {
+  // POST /api/pickup/:token/photos — upload pre-inspection photos (requires auth)
+  app.post("/api/pickup/:token/photos", requireAuth, upload.single("photo"), async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRentalByPickupToken(req.params.token);
+      if (!rental) return res.status(404).json({ message: "Invalid pickup link" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Not authenticated" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "You are not authorized for this rental" });
+      }
+      if (rental.pickupConfirmedAt) return res.status(400).json({ message: "Pickup already confirmed" });
+      if (!req.file) return res.status(400).json({ message: "No photo provided" });
+      if (!isCloudinaryConfigured()) {
+        return res.status(503).json({ message: "Image storage is not configured. Ask admin to set up Cloudinary." });
+      }
+      const url = await uploadToCloudinary(req.file.buffer, "deluxe-checkin");
+      const label = typeof req.body.label === "string" ? req.body.label : null;
+      const photo = await storage.createCheckinPhoto({
+        rentalId: rental.id,
+        url,
+        label,
+        uploadedBy: user.id,
+      });
+      return res.json({ id: photo.id, url: photo.url, label: photo.label });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Upload failed" });
+    }
+  });
+
+  // POST /api/pickup/:token/confirm — requires auth, verifies renter owns the rental
+  app.post("/api/pickup/:token/confirm", requireAuth, async (req: Request, res: Response) => {
     try {
       const rental = await storage.getRentalByPickupToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Not authenticated" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "You are not authorized for this rental" });
+      }
       if (rental.pickupConfirmedAt) {
         return res.json({ success: true, alreadyConfirmed: true, confirmedAt: rental.pickupConfirmedAt });
+      }
+      const photos = await storage.getCheckinPhotos(rental.id);
+      if (photos.length < 2) {
+        return res.status(400).json({ message: "At least 2 pre-inspection photos are required before confirming pickup" });
       }
       const now = new Date();
       await storage.updateRental(rental.id, {
@@ -2487,18 +2543,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createAuditLog({
         entityType: "rental",
         entityId: rental.id,
-        userId: null,
+        userId: user.id,
         actionType: "pickup_confirmed",
-        metadata: JSON.stringify({ method: "qr_scan" }),
+        metadata: JSON.stringify({ method: "qr_scan", photoCount: photos.length }),
         isAdminEntry: false,
         ipAddress: req.ip,
-        description: "Pickup confirmed via QR code scan",
+        description: `Pickup confirmed via QR check-in with ${photos.length} pre-inspection photos`,
       });
-      // Send pickup confirmation emails (fire and forget)
+      // Fire-and-forget: pickup emails + registration delivery
       const pickupTrailer = await storage.getTrailer(rental.trailerId);
       const pickupCompany = rental.companyId ? await storage.getCompany(rental.companyId) : null;
       if (pickupCompany) {
-        const { sendPickupConfirmedEmails } = await import("./email-service");
+        const { sendPickupConfirmedEmails, sendRegistrationEmail } = await import("./email-service");
         sendPickupConfirmedEmails({
           rentalId: rental.id,
           companyName: pickupCompany.name,
@@ -2508,8 +2564,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           trailerType: pickupTrailer?.type ?? "",
           confirmedAt: now,
         }).catch(console.error);
+        if (pickupTrailer?.registrationUrl) {
+          sendRegistrationEmail({
+            renterEmail: pickupCompany.email,
+            renterName: pickupCompany.ownerName,
+            companyName: pickupCompany.name,
+            trailerVin: pickupTrailer.vin,
+            trailerType: pickupTrailer.type,
+            registrationUrl: pickupTrailer.registrationUrl,
+          }).catch(console.error);
+        }
       }
       return res.json({ success: true, confirmedAt: now });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/rentals/:id/checkin-photos — admin view of pre-inspection photos
+  app.get("/api/admin/rentals/:id/checkin-photos", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const photos = await storage.getCheckinPhotos(req.params.id);
+      return res.json(photos);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });

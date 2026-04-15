@@ -998,3 +998,53 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
     text: `New driver application from ${data.fullName}\n\nEmail: ${data.email}\nPhone: ${data.phone}\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} yr(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nReview: ${adminUrl}\n\nDeluxe Logistics Inc.`,
   });
 }
+
+// ── Registration delivery email (sent on check-in completion) ────────────
+export interface RegistrationEmailData {
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerVin: string;
+  trailerType: string;
+  registrationUrl: string;
+}
+
+export async function sendRegistrationEmail(data: RegistrationEmailData): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping registration email"); return; }
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Trailer Registration Document</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>Your trailer pickup has been confirmed. Attached below is the electronic registration for your trailer. Please keep a copy in your cab at all times.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+      </table>
+    </div>
+    <a href="${esc(data.registrationUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Registration Document →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or copy the link: <a href="${esc(data.registrationUrl)}" style="color: #e63946;">${esc(data.registrationUrl)}</a></p>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Trailer registration — ${safeType} VIN ${safeVin}`,
+    html,
+    text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed. Here is your electronic registration:\n\n${data.registrationUrl}\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nCompany: ${data.companyName}\n\nKeep a copy in your cab at all times.\n\nDeluxe Logistics Inc.`,
+  });
+}

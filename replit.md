@@ -62,7 +62,7 @@ shared/
 
 ## Database Schema
 
-Tables: `users`, `companies`, `trailers`, `trailer_photos`, `rental_applications`, `rentals`, `documents`, `audit_logs`
+Tables: `users`, `companies`, `trailers`, `trailer_photos`, `rental_applications`, `rentals`, `documents`, `audit_logs`, `admin_notes`, `engine_hour_entries`, `driver_applications`, `checkin_photos`
 
 Note: `users.username` stores the email address (original field repurposed).
 
@@ -135,17 +135,23 @@ The admin account is seeded on first startup.
   - 2 email helpers: `sendEngineHoursRequest`, `sendEngineHoursReceivedAdmin`
   - Renter endpoint uses `/api/rentals/:id/info` (not admin endpoint)
 
-- [x] Task 8: QR Code Pickup / Return System
-  - `pickup_token`, `pickup_confirmed_at`, `return_token`, `return_confirmed_at` added to rentals
-  - Public pages `/pickup/:token` and `/return/:token` — mobile-friendly tap-to-confirm UI
-  - Admin rental detail panel — "Pickup & Return QR Codes" section, generate QR (shows scannable PNG), shows timestamp when confirmed
-  - 6 API routes: generate-pickup-qr, generate-return-qr, GET/POST pickup/:token, GET/POST return/:token
-  - Confirmation updates rental status + creates audit log entry
+- [x] Task 8: QR Code Pickup / Return System (Enhanced)
+  - `pickup_token`, `pickup_confirmed_at`, `return_token`, `return_confirmed_at` on rentals
+  - `checkin_photos` table — pre-inspection photos linked to rentals, uploaded to Cloudinary
+  - Multi-step check-in wizard on `/pickup/:token`: Step 1 confirm trailer → Step 2 upload 2+ photos → Step 3 final confirm
+  - Auth required: redirects unauthenticated users to `/login?redirect=/pickup/:token`
+  - Validates renter owns the rental (companyId match); shows error if unauthorized
+  - Photos uploaded to Cloudinary (`deluxe-checkin` folder) via `POST /api/pickup/:token/photos`
+  - Minimum 2 photos enforced before confirm allowed
+  - On confirm: status → `active_in_use`, registration email sent (if `trailer.registrationUrl` is set)
+  - Return flow unchanged: `/return/:token` — simple tap-to-confirm
+  - Admin rental detail: "Pre-Inspection Photos" gallery with timestamps, clickable full-size
+  - `GET /api/admin/rentals/:id/checkin-photos` admin endpoint
+  - `sendRegistrationEmail()` — delivers electronic registration document link to renter
 
-### Pending
-- [ ] Task 9: Admin Tools (audit logs, FMCSA, document management)
-- [ ] Task 10: Email Automation (SendGrid)
-- [ ] Task 11: Driver Hiring (full application form)
+- [x] Task 9: Admin Tools (audit logs, FMCSA, document management, admin notes)
+- [x] Task 10: Email Automation (SendGrid)
+- [x] Task 11: Driver Hiring (full application system)
 
 ## Key Notes
 
