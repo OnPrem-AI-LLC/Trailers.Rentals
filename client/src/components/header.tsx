@@ -44,6 +44,11 @@ export default function Header() {
                 Trailers
               </Button>
             </Link>
+            <Link href="/services">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                Services
+              </Button>
+            </Link>
             <Link href="/jobs">
               <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
                 Hiring
@@ -116,6 +121,9 @@ export default function Header() {
               <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
                 <Truck className="w-4 h-4" /> Trailers
               </div>
+            </Link>
+            <Link href="/services" onClick={() => setMobileOpen(false)}>
+              <div className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Services</div>
             </Link>
             <Link href="/jobs" onClick={() => setMobileOpen(false)}>
               <div className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Hiring</div>

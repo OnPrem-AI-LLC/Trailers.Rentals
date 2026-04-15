@@ -30,6 +30,9 @@ import AdminFMCSAPage from "@/pages/admin/fmcsa";
 import AdminDriverApplications from "@/pages/admin/driver-applications";
 import AdminAuditPage from "@/pages/admin/audit";
 import AdminUsersPage from "@/pages/admin/users";
+import AdminContactsPage from "@/pages/admin/contacts";
+import AdminContentPage from "@/pages/admin/content";
+import ServicesPage from "@/pages/services";
 import RegisterAdmin from "@/pages/register-admin";
 
 function Router() {
@@ -63,6 +66,9 @@ function Router() {
       <Route path="/admin/driver-applications" component={AdminDriverApplications} />
       <Route path="/admin/audit" component={AdminAuditPage} />
       <Route path="/admin/users" component={AdminUsersPage} />
+      <Route path="/admin/contacts" component={AdminContactsPage} />
+      <Route path="/admin/content" component={AdminContentPage} />
+      <Route path="/services" component={ServicesPage} />
       <Route component={NotFound} />
     </Switch>
   );

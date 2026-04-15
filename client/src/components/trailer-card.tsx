@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Thermometer, Package, ArrowRight, Clock } from "lucide-react";
+import { Thermometer, Package, ArrowRight, Clock, MapPin } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
 
 function formatPrice(cents: number): string {
@@ -112,6 +112,12 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
 
           {trailer.description && (
             <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{trailer.description}</p>
+          )}
+          {(trailer as TrailerWithPhotos & { location?: string | null }).location && (
+            <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
+              <MapPin className="w-3 h-3" />
+              {(trailer as TrailerWithPhotos & { location?: string | null }).location}
+            </div>
           )}
         </div>
 

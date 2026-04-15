@@ -1091,3 +1091,41 @@ export async function sendRegistrationEmail(data: RegistrationEmailData): Promis
     text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed. Here is your electronic registration:\n\n${data.registrationUrl}\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nCompany: ${data.companyName}\n\nKeep a copy in your cab at all times.\n\nDeluxe Logistics Inc.`,
   });
 }
+
+export async function sendContactFormEmail(data: {
+  name: string;
+  email: string;
+  phone?: string | null;
+  subject: string;
+  message: string;
+}): Promise<void> {
+  if (!isConfigured()) return;
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+  <div style="background: #1a1a1a; padding: 24px 32px;">
+    <h2 style="color: #ffffff; margin: 0; font-size: 20px;">New Contact Form Submission</h2>
+    <p style="color: #9ca3af; margin: 4px 0 0; font-size: 14px;">Deluxe Logistics Inc. Website</p>
+  </div>
+  <div style="padding: 32px;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 24px;">
+      <tr><td style="padding: 6px 0; color: #64748b; width: 100px;">Name</td><td style="padding: 6px 0; font-weight: bold;">${esc(data.name)}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">Email</td><td style="padding: 6px 0;"><a href="mailto:${esc(data.email)}" style="color: #e63946;">${esc(data.email)}</a></td></tr>
+      ${data.phone ? `<tr><td style="padding: 6px 0; color: #64748b;">Phone</td><td style="padding: 6px 0;">${esc(data.phone)}</td></tr>` : ""}
+      <tr><td style="padding: 6px 0; color: #64748b;">Subject</td><td style="padding: 6px 0;">${esc(data.subject)}</td></tr>
+    </table>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
+      <p style="margin: 0; white-space: pre-wrap; font-size: 14px; color: #1e293b;">${esc(data.message)}</p>
+    </div>
+    <p style="margin-top: 24px; color: #94a3b8; font-size: 12px;">Reply directly to this email to respond to the inquiry.</p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    replyTo: data.email,
+    subject: `Contact form: ${data.subject} — from ${data.name}`,
+    html,
+    text: `New contact form submission\n\nName: ${data.name}\nEmail: ${data.email}${data.phone ? `\nPhone: ${data.phone}` : ""}\nSubject: ${data.subject}\n\nMessage:\n${data.message}`,
+  });
+}

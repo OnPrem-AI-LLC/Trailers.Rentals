@@ -12,6 +12,8 @@ import {
   loginSchema,
   insertUserSchema,
   insertAdminNoteSchema,
+  insertContactSchema,
+  insertTestimonialSchema,
   type RentalApplication,
   type Rental,
 } from "@shared/schema";
@@ -25,6 +27,7 @@ import {
   sendMoreInfoRequest,
   sendInviteEmail,
   sendAgreementSignedEmails,
+  sendContactFormEmail,
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
 import { logAuditEvent } from "./audit-service";
@@ -165,8 +168,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/admin/trailers/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const allowed = insertTrailerSchema.partial().parse(req.body);
+      const before = await storage.getTrailer(req.params.id);
+      if (!before) return res.status(404).json({ message: "Trailer not found" });
       const trailer = await storage.updateTrailer(req.params.id, allowed);
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
+      const changedFields = Object.keys(allowed) as (keyof typeof allowed)[];
+      const beforeSnapshot: Record<string, unknown> = {};
+      const afterSnapshot: Record<string, unknown> = {};
+      for (const k of changedFields) {
+        beforeSnapshot[k] = (before as Record<string, unknown>)[k];
+        afterSnapshot[k] = (allowed as Record<string, unknown>)[k];
+      }
       await logAuditEvent({
         req,
         userId: req.session.userId!,
@@ -174,7 +186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         entityType: "trailer",
         entityId: trailer.id,
         description: `Updated trailer: ${trailer.vin}`,
-        metadata: allowed as Record<string, unknown>,
+        metadata: { before: beforeSnapshot, after: afterSnapshot, fields: changedFields },
         isAdminEntry: true,
       });
       return res.json(trailer);
@@ -1081,6 +1093,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const target = await storage.getUser(req.params.id);
       if (!target) return res.status(404).json({ message: "User not found" });
       const newActive = !target.isActive;
+      if (newActive && target.inviteToken) {
+        return res.status(400).json({ message: "Cannot reactivate an account with a pending invite. The user must complete registration first." });
+      }
       const updated = await storage.updateUser(req.params.id, { isActive: newActive });
       await logAuditEvent({
         req,
@@ -3036,6 +3051,131 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updated = await storage.updateDriverApplication(req.params.id, { ...(status ? { status } : {}), ...(adminNotes !== undefined ? { adminNotes } : {}) });
       if (!updated) return res.status(404).json({ message: "Not found" });
       return res.json(updated);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Contact Form ─────────────────────────────────────────────────────
+  app.post("/api/contact", async (req: Request, res: Response) => {
+    try {
+      const data = insertContactSchema.parse(req.body);
+      const contact = await storage.createContact(data);
+      sendContactFormEmail(data).catch(() => {});
+      await logAuditEvent({
+        actionType: "contact_form_submitted",
+        entityType: "contact",
+        entityId: contact.id,
+        description: `Contact form submitted by ${data.name} (${data.email}): ${data.subject}`,
+      });
+      return res.status(201).json({ id: contact.id });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.constructor.name === "ZodError") return res.status(400).json({ message: "Invalid input" });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/contacts", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.query as { status?: string };
+      const list = await storage.listContacts(status);
+      return res.json(list);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/contacts/:id/status", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body as { status: string };
+      const allowed = ["new", "read", "replied"];
+      if (!allowed.includes(status)) return res.status(400).json({ message: "Invalid status" });
+      const updated = await storage.updateContactStatus(req.params.id, status);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      return res.json(updated);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Testimonials ──────────────────────────────────────────────────────
+  app.get("/api/testimonials", async (_req: Request, res: Response) => {
+    try {
+      const list = await storage.listTestimonials(true);
+      return res.json(list);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/admin/testimonials", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const list = await storage.listTestimonials(false);
+      return res.json(list);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/testimonials", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const data = insertTestimonialSchema.parse(req.body);
+      const item = await storage.createTestimonial(data);
+      return res.status(201).json(item);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/testimonials/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const data = insertTestimonialSchema.partial().parse(req.body);
+      const updated = await storage.updateTestimonial(req.params.id, data);
+      if (!updated) return res.status(404).json({ message: "Not found" });
+      return res.json(updated);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/admin/testimonials/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      await storage.deleteTestimonial(req.params.id);
+      return res.json({ ok: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Site Content ──────────────────────────────────────────────────────
+  app.get("/api/site-content", async (_req: Request, res: Response) => {
+    try {
+      const all = await storage.getAllSiteContent();
+      const map: Record<string, string> = {};
+      for (const item of all) map[item.key] = item.value;
+      return res.json(map);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/site-content", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const updates = req.body as Record<string, string>;
+      for (const [key, value] of Object.entries(updates)) {
+        if (typeof value === "string") await storage.setSiteContent(key, value);
+      }
+      return res.json({ ok: true });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });

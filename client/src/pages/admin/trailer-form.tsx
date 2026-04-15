@@ -56,11 +56,12 @@ interface TrailerFormData {
   engineHourRate: string;
   status: string;
   description: string;
+  location: string;
 }
 
 const DEFAULT_FORM: TrailerFormData = {
   vin: "", type: "dry_van", make: "", model: "", year: "",
-  priceMonthly: "", engineHourRate: "", status: "available", description: "",
+  priceMonthly: "", engineHourRate: "", status: "available", description: "", location: "",
 };
 
 const TRAILER_TYPES = [
@@ -131,6 +132,7 @@ export default function TrailerForm() {
         engineHourRate: trailerData.engineHourRate ? String(trailerData.engineHourRate / 100) : "",
         status: trailerData.status ?? "available",
         description: trailerData.description ?? "",
+        location: trailerData.location ?? "",
       });
       try {
         setFeatures(trailerData.features ? JSON.parse(trailerData.features) : []);
@@ -253,6 +255,7 @@ export default function TrailerForm() {
         engineHourRate: form.engineHourRate ? Math.round(parseFloat(form.engineHourRate) * 100) : null,
         status: form.status,
         description: form.description.trim() || null,
+        location: form.location.trim() || null,
         features: features.length > 0 ? JSON.stringify(features) : null,
       };
 
@@ -470,6 +473,17 @@ export default function TrailerForm() {
           {/* ── Description & Features ─────────────────────────────────── */}
           <section className="bg-card border border-border rounded-xl p-6 space-y-5">
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Description & Features</h2>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="location">Yard / Location</Label>
+              <Input
+                id="location"
+                value={form.location}
+                onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
+                placeholder="e.g. Martinsburg, WV"
+              />
+              <p className="text-xs text-muted-foreground">The yard or city where this trailer is based.</p>
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="description">Description</Label>

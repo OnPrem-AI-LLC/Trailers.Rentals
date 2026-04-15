@@ -47,6 +47,7 @@ export const trailers = pgTable("trailers", {
   status: text("status").notNull().default("available"), // "available" | "rented" | "maintenance" | "inactive"
   description: text("description"),
   features: text("features"), // JSON array of feature strings
+  location: text("location"), // yard/city location e.g. "Martinsburg, WV"
   registrationUrl: text("registration_url"), // admin-only document
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -311,6 +312,45 @@ export const insertEngineHourEntrySchema = createInsertSchema(engineHourEntries)
   currentReading: z.number().int().min(0, "Reading must be 0 or greater"),
   notes: z.string().max(500).optional(),
 });
+
+// ── Contacts ───────────────────────────────────────────────────────────
+export const contacts = pgTable("contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  subject: text("subject").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("new"), // "new" | "read" | "replied"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertContactSchema = createInsertSchema(contacts).omit({ id: true, status: true, createdAt: true });
+export type InsertContact = z.infer<typeof insertContactSchema>;
+export type Contact = typeof contacts.$inferSelect;
+
+// ── Testimonials ────────────────────────────────────────────────────────
+export const testimonials = pgTable("testimonials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  customerName: text("customer_name").notNull(),
+  companyName: text("company_name"),
+  quote: text("quote").notNull(),
+  videoUrl: text("video_url"),
+  rating: integer("rating").default(5),
+  isActive: boolean("is_active").notNull().default(true),
+  displayOrder: integer("display_order").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertTestimonialSchema = createInsertSchema(testimonials).omit({ id: true, createdAt: true });
+export type InsertTestimonial = z.infer<typeof insertTestimonialSchema>;
+export type Testimonial = typeof testimonials.$inferSelect;
+
+// ── Site Content ────────────────────────────────────────────────────────
+export const siteContent = pgTable("site_content", {
+  key: varchar("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type SiteContent = typeof siteContent.$inferSelect;
 
 // ── Types ──────────────────────────────────────────────────────────────
 export type InsertUser = z.infer<typeof insertUserSchema>;

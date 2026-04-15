@@ -697,7 +697,8 @@ export default function AdminRequestDetail() {
                 <>
                   {/* Admin-entered field indicators */}
                   {(() => {
-                    const overrides: Record<string, boolean> = JSON.parse(companyProfile.company.adminOverrideFields ?? "{}");
+                    let overrides: Record<string, boolean> = {};
+                    try { overrides = JSON.parse(companyProfile.company.adminOverrideFields ?? "{}"); } catch { overrides = {}; }
                     const AdminBadge = ({ field }: { field: string }) =>
                       overrides[field] ? (
                         <Badge variant="outline" className="text-[9px] border-primary/40 text-primary px-1 py-0 ml-1 align-middle">Admin</Badge>

@@ -243,6 +243,22 @@ export default function AdminPortal() {
             href="/admin/users"
             cta="Manage Users"
           />
+
+          <QuickLinkCard
+            icon={ClipboardList}
+            title="Contact Inquiries"
+            description="Review messages from the website contact form. Mark as read or replied."
+            href="/admin/contacts"
+            cta="View Contacts"
+          />
+
+          <QuickLinkCard
+            icon={BarChart3}
+            title="Content Management"
+            description="Manage customer testimonials shown on the website."
+            href="/admin/content"
+            cta="Manage Content"
+          />
         </div>
       </div>
 

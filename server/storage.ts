@@ -19,10 +19,18 @@ import {
   type EngineHourEntry,
   type DriverApplication,
   type CheckinPhoto,
+  type Contact,
+  type InsertContact,
+  type Testimonial,
+  type InsertTestimonial,
+  type SiteContent,
   users,
   trailers,
   trailerPhotos,
   companies,
+  contacts,
+  testimonials,
+  siteContent,
   rentalApplications,
   rentals,
   documents,
@@ -117,6 +125,22 @@ export interface IStorage {
   // Check-in Photos
   createCheckinPhoto(data: typeof checkinPhotos.$inferInsert): Promise<CheckinPhoto>;
   getCheckinPhotos(rentalId: string): Promise<CheckinPhoto[]>;
+
+  // Contacts
+  createContact(data: InsertContact): Promise<Contact>;
+  listContacts(status?: string): Promise<Contact[]>;
+  updateContactStatus(id: string, status: string): Promise<Contact | undefined>;
+
+  // Testimonials
+  listTestimonials(activeOnly?: boolean): Promise<Testimonial[]>;
+  createTestimonial(data: InsertTestimonial): Promise<Testimonial>;
+  updateTestimonial(id: string, data: Partial<InsertTestimonial>): Promise<Testimonial | undefined>;
+  deleteTestimonial(id: string): Promise<void>;
+
+  // Site Content
+  getSiteContent(key: string): Promise<string | undefined>;
+  setSiteContent(key: string, value: string): Promise<void>;
+  getAllSiteContent(): Promise<SiteContent[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -518,6 +542,67 @@ export class DatabaseStorage implements IStorage {
       .from(checkinPhotos)
       .where(eq(checkinPhotos.rentalId, rentalId))
       .orderBy(checkinPhotos.createdAt);
+  }
+
+  // ── Contacts ────────────────────────────────────────────────────────
+  async createContact(data: InsertContact): Promise<Contact> {
+    const [row] = await db.insert(contacts).values(data).returning();
+    return row;
+  }
+
+  async listContacts(status?: string): Promise<Contact[]> {
+    if (status) {
+      return db.select().from(contacts).where(eq(contacts.status, status)).orderBy(contacts.createdAt);
+    }
+    return db.select().from(contacts).orderBy(contacts.createdAt);
+  }
+
+  async updateContactStatus(id: string, status: string): Promise<Contact | undefined> {
+    const [row] = await db.update(contacts).set({ status }).where(eq(contacts.id, id)).returning();
+    return row ?? undefined;
+  }
+
+  // ── Testimonials ────────────────────────────────────────────────────
+  async listTestimonials(activeOnly = true): Promise<Testimonial[]> {
+    if (activeOnly) {
+      return db
+        .select()
+        .from(testimonials)
+        .where(eq(testimonials.isActive, true))
+        .orderBy(testimonials.displayOrder);
+    }
+    return db.select().from(testimonials).orderBy(testimonials.displayOrder);
+  }
+
+  async createTestimonial(data: InsertTestimonial): Promise<Testimonial> {
+    const [row] = await db.insert(testimonials).values(data).returning();
+    return row;
+  }
+
+  async updateTestimonial(id: string, data: Partial<InsertTestimonial>): Promise<Testimonial | undefined> {
+    const [row] = await db.update(testimonials).set(data).where(eq(testimonials.id, id)).returning();
+    return row ?? undefined;
+  }
+
+  async deleteTestimonial(id: string): Promise<void> {
+    await db.delete(testimonials).where(eq(testimonials.id, id));
+  }
+
+  // ── Site Content ────────────────────────────────────────────────────
+  async getSiteContent(key: string): Promise<string | undefined> {
+    const [row] = await db.select().from(siteContent).where(eq(siteContent.key, key));
+    return row?.value;
+  }
+
+  async setSiteContent(key: string, value: string): Promise<void> {
+    await db
+      .insert(siteContent)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: siteContent.key, set: { value, updatedAt: new Date() } });
+  }
+
+  async getAllSiteContent(): Promise<SiteContent[]> {
+    return db.select().from(siteContent);
   }
 }
 
