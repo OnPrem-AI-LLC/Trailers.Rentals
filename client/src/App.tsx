@@ -34,6 +34,9 @@ import AdminContactsPage from "@/pages/admin/contacts";
 import AdminContentPage from "@/pages/admin/content";
 import ServicesPage from "@/pages/services";
 import RegisterAdmin from "@/pages/register-admin";
+import ForgotPasswordPage from "@/pages/forgot-password";
+import ResetPasswordPage from "@/pages/reset-password";
+import AdminEmailLogsPage from "@/pages/admin/email-logs";
 
 function Router() {
   return (
@@ -69,6 +72,9 @@ function Router() {
       <Route path="/admin/contacts" component={AdminContactsPage} />
       <Route path="/admin/content" component={AdminContentPage} />
       <Route path="/services" component={ServicesPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password/:token" component={ResetPasswordPage} />
+      <Route path="/admin/email-logs" component={AdminEmailLogsPage} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import cron from "node-cron";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedAdminUser } from "./seed-admin";
@@ -116,9 +117,58 @@ async function initStripe() {
   }
 }
 
+async function runReturnReminders() {
+  try {
+    const { storage } = await import("./storage");
+    const { sendReturnReminderEmail } = await import("./email-service");
+    const rentals = await storage.listRentals();
+    const now = new Date();
+    const targets = [7, 1];
+
+    for (const rental of rentals) {
+      if (!["active", "active_in_use"].includes(rental.status)) continue;
+      if (!rental.endDate) continue;
+      const endDate = new Date(rental.endDate);
+      const msUntil = endDate.getTime() - now.getTime();
+      const daysUntil = Math.round(msUntil / (1000 * 60 * 60 * 24));
+      if (!targets.includes(daysUntil)) continue;
+
+      try {
+        const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
+        const trailer = await storage.getTrailer(rental.trailerId);
+        const user = rental.userId ? await storage.getUser(rental.userId) : null;
+        if (!company || !trailer || !user) continue;
+
+        await sendReturnReminderEmail({
+          renterEmail: user.username,
+          renterName: `${user.firstName} ${user.lastName}`.trim() || user.username,
+          companyName: company.name,
+          trailerVin: trailer.vin,
+          trailerType: trailer.type,
+          endDate,
+          daysUntilReturn: daysUntil,
+          rentalId: rental.id,
+        });
+        log(`[return-reminder] Sent ${daysUntil}-day reminder for rental ${rental.id}`);
+      } catch (e: unknown) {
+        log(`[return-reminder] Error for rental ${rental.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  } catch (e: unknown) {
+    log(`[return-reminder] Scheduler error: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 (async () => {
   await seedAdminUser();
   await initStripe();
+
+  // Run return reminders daily at 8:00 AM
+  cron.schedule("0 8 * * *", () => {
+    log("[return-reminder] Running daily return reminder check...");
+    runReturnReminders();
+  });
+  log("[return-reminder] Scheduler registered (daily 8:00 AM)");
 
   const server = await registerRoutes(app);
 

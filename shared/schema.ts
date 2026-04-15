@@ -15,6 +15,8 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   inviteToken: varchar("invite_token"),
   inviteExpiry: timestamp("invite_expiry"),
+  passwordResetToken: varchar("password_reset_token"),
+  passwordResetExpiry: timestamp("password_reset_expiry"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -351,6 +353,20 @@ export const siteContent = pgTable("site_content", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 export type SiteContent = typeof siteContent.$inferSelect;
+
+// ── Email Logs ───────────────────────────────────────────────────────────
+export const emailLogs = pgTable("email_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  recipient: text("recipient").notNull(),
+  subject: text("subject").notNull(),
+  template: text("template").notNull(),
+  entityType: text("entity_type"),
+  entityId: varchar("entity_id"),
+  status: text("status").notNull().default("sent"), // "sent" | "failed" | "skipped"
+  error: text("error"),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+});
+export type EmailLog = typeof emailLogs.$inferSelect;
 
 // ── Types ──────────────────────────────────────────────────────────────
 export type InsertUser = z.infer<typeof insertUserSchema>;

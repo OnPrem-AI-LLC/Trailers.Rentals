@@ -24,6 +24,7 @@ import {
   type Testimonial,
   type InsertTestimonial,
   type SiteContent,
+  type EmailLog,
   users,
   trailers,
   trailerPhotos,
@@ -31,6 +32,7 @@ import {
   contacts,
   testimonials,
   siteContent,
+  emailLogs,
   rentalApplications,
   rentals,
   documents,
@@ -141,6 +143,13 @@ export interface IStorage {
   getSiteContent(key: string): Promise<string | undefined>;
   setSiteContent(key: string, value: string): Promise<void>;
   getAllSiteContent(): Promise<SiteContent[]>;
+
+  // Password Reset
+  getUserByResetToken(token: string): Promise<User | undefined>;
+
+  // Email Logs
+  createEmailLog(data: { recipient: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void>;
+  getEmailLogs(opts?: { entityType?: string; entityId?: string; limit?: number }): Promise<EmailLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -603,6 +612,36 @@ export class DatabaseStorage implements IStorage {
 
   async getAllSiteContent(): Promise<SiteContent[]> {
     return db.select().from(siteContent);
+  }
+
+  // ── Password Reset ──────────────────────────────────────────────────
+  async getUserByResetToken(token: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.passwordResetToken, token));
+    return user ?? undefined;
+  }
+
+  // ── Email Logs ──────────────────────────────────────────────────────
+  async createEmailLog(data: { recipient: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void> {
+    await db.insert(emailLogs).values({
+      recipient: data.recipient,
+      subject: data.subject,
+      template: data.template,
+      entityType: data.entityType ?? null,
+      entityId: data.entityId ?? null,
+      status: data.status,
+      error: data.error ?? null,
+    });
+  }
+
+  async getEmailLogs(opts?: { entityType?: string; entityId?: string; limit?: number }): Promise<EmailLog[]> {
+    const conditions = [];
+    if (opts?.entityType) conditions.push(eq(emailLogs.entityType, opts.entityType));
+    if (opts?.entityId) conditions.push(eq(emailLogs.entityId, opts.entityId));
+    const query = db.select().from(emailLogs).orderBy(desc(emailLogs.sentAt));
+    if (conditions.length > 0) {
+      return query.where(and(...conditions)).limit(opts?.limit ?? 200);
+    }
+    return query.limit(opts?.limit ?? 200);
   }
 }
 

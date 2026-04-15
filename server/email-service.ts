@@ -1,4 +1,6 @@
 import sgMail from "@sendgrid/mail";
+import { db } from "./db";
+import { emailLogs } from "@shared/schema";
 
 const FROM = "noreply@deluxelogistics.com";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || "admin@deluxelogistics.com";
@@ -11,6 +13,30 @@ function init() {
   if (isConfigured()) sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 }
 init();
+
+async function logEmail(opts: {
+  recipient: string;
+  subject: string;
+  template: string;
+  entityType?: string;
+  entityId?: string;
+  status: "sent" | "failed" | "skipped";
+  error?: string;
+}): Promise<void> {
+  try {
+    await db.insert(emailLogs).values({
+      recipient: opts.recipient,
+      subject: opts.subject,
+      template: opts.template,
+      entityType: opts.entityType ?? null,
+      entityId: opts.entityId ?? null,
+      status: opts.status,
+      error: opts.error ?? null,
+    });
+  } catch {
+    // Non-fatal: never let logging break email delivery
+  }
+}
 
 interface ApplicationData {
   id: string;
@@ -105,6 +131,7 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
     html,
     text: `New rental application from ${app.companyName}.\nDOT: ${app.dotNumber}\nEmail: ${app.email}\nReview: ${reviewUrl}`,
   });
+  logEmail({ recipient: ADMIN_EMAIL, subject: `[Application] ${app.companyName} — ${app.dotNumber}`, template: "admin_application_alert", entityType: "rental_application", entityId: rawApp.id, status: "sent" });
 }
 
 // ── 2. Renter acknowledgment ────────────────────────────────────────────────
@@ -267,6 +294,7 @@ export async function sendInviteEmail(email: string, ownerName: string, inviteTo
     html,
     text: `Hi ${ownerName},\n\nYour rental application has been approved! Create your account here:\n${registerUrl}\n\nThis link expires in 48 hours.\n\nDeluxe Logistics Inc.`,
   });
+  logEmail({ recipient: email, subject: "Your Deluxe Logistics rental application is approved — create your account", template: "invite_email", status: "sent" });
 }
 
 // ── 5. More info request email ──────────────────────────────────────────────
@@ -1092,6 +1120,107 @@ export async function sendRegistrationEmail(data: RegistrationEmailData): Promis
   });
 }
 
+// ── Password Reset email ─────────────────────────────────────────────────────
+export async function sendPasswordResetEmail(data: {
+  email: string;
+  firstName: string;
+  resetToken: string;
+}): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping password reset email"); return; }
+  const resetUrl = `${domain()}/reset-password/${data.resetToken}`;
+  const safeName = esc(data.firstName || "there");
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Reset Your Password</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>We received a request to reset your password. Click the button below to set a new password. This link expires in <strong>1 hour</strong>.</p>
+    <a href="${resetUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin: 16px 0;">
+      Reset Password →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${resetUrl}" style="color: #e63946;">${resetUrl}</a></p>
+    <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">If you did not request a password reset, you can safely ignore this email. Your password will not change.</p>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;">
+      <strong>Deluxe Logistics Inc.</strong><br/>
+      818 Corning Way, Martinsburg, WV 25401<br/>
+      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+    </p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.email,
+    from: FROM,
+    subject: "Reset your Deluxe Logistics password",
+    html,
+    text: `Hi ${data.firstName || "there"},\n\nClick here to reset your password:\n${resetUrl}\n\nThis link expires in 1 hour.\n\nIf you didn't request a reset, ignore this email.\n\nDeluxe Logistics Inc.`,
+  });
+  logEmail({ recipient: data.email, subject: "Reset your Deluxe Logistics password", template: "password_reset", status: "sent" });
+}
+
+// ── Return Reminder email ─────────────────────────────────────────────────────
+export async function sendReturnReminderEmail(data: {
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerVin: string;
+  trailerType: string;
+  endDate: Date;
+  daysUntilReturn: number;
+  rentalId: string;
+}): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping return reminder"); return; }
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const dateStr = esc(data.endDate.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }));
+  const dashUrl = `${domain()}/dashboard`;
+  const urgencyColor = data.daysUntilReturn <= 1 ? "#dc2626" : "#f59e0b";
+  const urgencyLabel = data.daysUntilReturn <= 1 ? "Tomorrow" : `${data.daysUntilReturn} days`;
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: ${urgencyColor}; margin: 0; font-size: 20px;">Trailer Return Reminder</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>This is a reminder that your trailer rental is scheduled to end <strong style="color: ${urgencyColor};">${urgencyLabel === "Tomorrow" ? "tomorrow" : `in ${data.daysUntilReturn} days`}</strong>.</p>
+    <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Return Date</td><td style="padding: 4px 0; font-weight: bold; color: ${urgencyColor};">${dateStr}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Days Remaining</td><td style="padding: 4px 0; font-weight: bold; color: ${urgencyColor};">${urgencyLabel}</td></tr>
+      </table>
+    </div>
+    <p>Please coordinate trailer return logistics with our team. If you need to extend your rental, contact us as soon as possible.</p>
+    <a href="${dashUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Dashboard →
+    </a>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
+  </div>
+</div>`;
+
+  const reminderSubject = `Reminder: Your trailer return is ${urgencyLabel === "Tomorrow" ? "tomorrow" : `in ${data.daysUntilReturn} days`} — ${safeType} VIN ${safeVin}`;
+  await sgMail.send({
+    to: data.renterEmail,
+    from: FROM,
+    subject: reminderSubject,
+    html,
+    text: `Hi ${data.renterName},\n\nYour trailer rental ends in ${data.daysUntilReturn} day(s) on ${data.endDate.toLocaleDateString()}.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\nPlease coordinate return logistics with our team.\n\nView dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.`,
+  });
+  logEmail({ recipient: data.renterEmail, subject: reminderSubject, template: "return_reminder", entityType: "rental", entityId: data.rentalId, status: "sent" });
+}
+
 export async function sendContactFormEmail(data: {
   name: string;
   email: string;
@@ -1120,12 +1249,14 @@ export async function sendContactFormEmail(data: {
   </div>
 </div>`;
 
+  const contactSubject = `Contact form: ${data.subject} — from ${data.name}`;
   await sgMail.send({
     to: ADMIN_EMAIL,
     from: FROM,
     replyTo: data.email,
-    subject: `Contact form: ${data.subject} — from ${data.name}`,
+    subject: contactSubject,
     html,
     text: `New contact form submission\n\nName: ${data.name}\nEmail: ${data.email}${data.phone ? `\nPhone: ${data.phone}` : ""}\nSubject: ${data.subject}\n\nMessage:\n${data.message}`,
   });
+  logEmail({ recipient: ADMIN_EMAIL, subject: contactSubject, template: "contact_form", status: "sent" });
 }

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Truck, ClipboardList, BarChart3, Plus, Settings, LogOut,
-  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp, Shield, Users,
+  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp, Shield, Users, Mail,
 } from "lucide-react";
 
 interface DashboardSummary {
@@ -258,6 +258,14 @@ export default function AdminPortal() {
             description="Manage customer testimonials shown on the website."
             href="/admin/content"
             cta="Manage Content"
+          />
+
+          <QuickLinkCard
+            icon={Mail}
+            title="Email Logs"
+            description="View all outbound emails sent by the platform including invites, reminders, and notifications."
+            href="/admin/email-logs"
+            cta="View Email Logs"
           />
         </div>
       </div>

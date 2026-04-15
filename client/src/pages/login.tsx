@@ -131,7 +131,12 @@ export default function Login() {
             </form>
           </div>
 
-          <p className="text-center text-xs text-muted-foreground mt-6">
+          <div className="mt-4 text-center">
+            <a href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary transition-colors">
+              Forgot your password?
+            </a>
+          </div>
+          <p className="text-center text-xs text-muted-foreground mt-4">
             Don't have an account?{" "}
             <a href="mailto:info@deluxelogistics.com" className="text-primary hover:underline">
               Contact us to get started

@@ -28,6 +28,7 @@ import {
   sendInviteEmail,
   sendAgreementSignedEmails,
   sendContactFormEmail,
+  sendPasswordResetEmail,
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
 import { logAuditEvent } from "./audit-service";
@@ -3176,6 +3177,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (typeof value === "string") await storage.setSiteContent(key, value);
       }
       return res.json({ ok: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Password Reset ───────────────────────────────────────────────────
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    try {
+      const { email } = z.object({ email: z.string().email() }).parse(req.body);
+      const user = await storage.getUserByEmail(email);
+      // Always respond 200 to avoid user enumeration
+      if (!user || !user.isActive) return res.json({ message: "If that email is registered, you will receive a reset link." });
+      const token = randomBytes(32).toString("hex");
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await storage.updateUser(user.id, { passwordResetToken: token, passwordResetExpiry: expiry });
+      sendPasswordResetEmail({ email: user.username, firstName: user.firstName, resetToken: token }).catch((e: unknown) =>
+        console.error("[forgot-password] email error:", e)
+      );
+      return res.json({ message: "If that email is registered, you will receive a reset link." });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Valid email required" });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const { token, password } = z.object({
+        token: z.string().min(1),
+        password: z.string().min(8, "Password must be at least 8 characters"),
+      }).parse(req.body);
+      const user = await storage.getUserByResetToken(token);
+      if (!user || !user.passwordResetExpiry || new Date() > user.passwordResetExpiry) {
+        return res.status(400).json({ message: "Reset link is invalid or has expired." });
+      }
+      const hashed = await bcrypt.hash(password, 10);
+      await storage.updateUser(user.id, { password: hashed, passwordResetToken: null as unknown as string, passwordResetExpiry: null as unknown as Date });
+      return res.json({ message: "Password updated successfully." });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0]?.message ?? "Invalid input" });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Email Logs ────────────────────────────────────────────────────────
+  app.get("/api/admin/email-logs", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const entityType = req.query.entityType as string | undefined;
+      const entityId = req.query.entityId as string | undefined;
+      const logs = await storage.getEmailLogs({ entityType, entityId, limit: 200 });
+      return res.json(logs);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
