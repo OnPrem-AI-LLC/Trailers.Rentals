@@ -149,7 +149,12 @@ The admin account is seeded on first startup.
   - `GET /api/admin/rentals/:id/checkin-photos` admin endpoint
   - `sendRegistrationEmail()` — delivers electronic registration document link to renter
 
-- [x] Task 9: Admin Tools (audit logs, FMCSA, document management, admin notes)
+- [x] Task 9: Admin Tools & Audit Logging (COMPLETE)
+  - Backend: `listUsers()` in storage; `GET /api/admin/audit` (filter/paginate); user management routes (list, invite, deactivate/reactivate); `sendAdminSetupEmail()`
+  - `/admin/audit` — searchable, filterable audit log table with color-coded entity badges and pagination
+  - `/admin/users` — invite form (email, name, role, 7-day token), admin accounts list, renter accounts list, deactivate/reactivate toggles (cannot deactivate own account)
+  - Both pages registered in App.tsx; nav cards added to admin portal `/admin` index
+
 - [x] Task 10: Email Automation (SendGrid)
 - [x] Task 11: Driver Hiring (full application system)
 

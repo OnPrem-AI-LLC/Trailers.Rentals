@@ -999,6 +999,49 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
   });
 }
 
+// ── Admin account setup email ───────────────────────────────────────────
+export async function sendAdminSetupEmail(data: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  inviteToken: string;
+}): Promise<void> {
+  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin setup email"); return; }
+  const setupUrl = `${domain()}/register/${data.inviteToken}`;
+  const safeName = esc(data.firstName);
+
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Admin Account Setup</h1>
+    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics — Internal Admin Portal</p>
+  </div>
+  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+    <p>Hi ${safeName},</p>
+    <p>You've been invited to join the Deluxe Logistics admin team. Click the link below to set your password and activate your account.</p>
+    <p><strong>This invitation link expires in 7 days.</strong></p>
+    <a href="${setupUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      Set Up Your Admin Account →
+    </a>
+    <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${setupUrl}" style="color: #e63946;">${setupUrl}</a></p>
+    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+    <p style="color: #64748b; font-size: 13px;">
+      <strong>Deluxe Logistics Inc.</strong><br/>
+      818 Corning Way, Martinsburg, WV 25401<br/>
+      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+    </p>
+  </div>
+</div>`;
+
+  await sgMail.send({
+    to: data.email,
+    from: FROM,
+    subject: "You've been invited to join the Deluxe Logistics admin team",
+    html,
+    text: `Hi ${data.firstName},\n\nYou've been invited to join the Deluxe Logistics admin portal. Set up your account here:\n${setupUrl}\n\nThis link expires in 7 days.\n\nDeluxe Logistics Inc.`,
+  });
+}
+
 // ── Registration delivery email (sent on check-in completion) ────────────
 export interface RegistrationEmailData {
   renterEmail: string;

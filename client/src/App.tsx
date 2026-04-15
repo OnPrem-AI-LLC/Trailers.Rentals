@@ -28,6 +28,8 @@ import PickupConfirmPage from "@/pages/pickup-confirm";
 import ReturnConfirmPage from "@/pages/return-confirm";
 import AdminFMCSAPage from "@/pages/admin/fmcsa";
 import AdminDriverApplications from "@/pages/admin/driver-applications";
+import AdminAuditPage from "@/pages/admin/audit";
+import AdminUsersPage from "@/pages/admin/users";
 
 function Router() {
   return (
@@ -57,6 +59,8 @@ function Router() {
       <Route path="/return/:token" component={ReturnConfirmPage} />
       <Route path="/admin/fmcsa" component={AdminFMCSAPage} />
       <Route path="/admin/driver-applications" component={AdminDriverApplications} />
+      <Route path="/admin/audit" component={AdminAuditPage} />
+      <Route path="/admin/users" component={AdminUsersPage} />
       <Route component={NotFound} />
     </Switch>
   );

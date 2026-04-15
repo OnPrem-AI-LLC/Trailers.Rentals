@@ -942,11 +942,115 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Admin: global audit log (paginated + filtered) ───────────────────
+  app.get("/api/admin/audit", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { entityType, entityId, actionType, userId, limit, offset } = req.query as Record<string, string | undefined>;
+      const logs = await storage.getAuditLogs(entityType, entityId);
+      let filtered = logs;
+      if (actionType) filtered = filtered.filter(l => l.actionType === actionType);
+      if (userId) filtered = filtered.filter(l => l.userId === userId);
+      const pageSize = Math.min(parseInt(limit ?? "100", 10), 500);
+      const pageOffset = parseInt(offset ?? "0", 10);
+      const page = filtered.slice(pageOffset, pageOffset + pageSize);
+      return res.json({ logs: page, total: filtered.length });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Admin: audit logs for an entity ─────────────────────────────────
   app.get("/api/admin/audit/:entityType/:entityId", requireAdmin, async (req: Request, res: Response) => {
     try {
       const logs = await storage.getAuditLogs(req.params.entityType, req.params.entityId);
       return res.json(logs);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Admin: user management ───────────────────────────────────────────
+  app.get("/api/admin/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const all = await storage.listUsers();
+      return res.json(all.map(u => ({
+        id: u.id,
+        email: u.username,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        role: u.role,
+        isActive: u.isActive,
+        createdAt: u.createdAt,
+      })));
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/admin/users/invite", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const inviteSchema = z.object({
+        email: z.string().email("Valid email required"),
+        firstName: z.string().min(1, "First name required"),
+        lastName: z.string().min(1, "Last name required"),
+        role: z.enum(["admin", "renter"]).default("admin"),
+      });
+      const { email, firstName, lastName, role } = inviteSchema.parse(req.body);
+      const existing = await storage.getUserByEmail(email);
+      if (existing) return res.status(409).json({ message: "User with this email already exists" });
+      const inviteToken = randomBytes(32).toString("hex");
+      const inviteExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const user = await storage.createUser({
+        username: email,
+        password: randomBytes(32).toString("hex"), // placeholder; set on accept
+        firstName,
+        lastName,
+        role,
+        isActive: false, // activated when they set password
+        inviteToken,
+        inviteExpiry,
+      });
+      const { sendAdminSetupEmail } = await import("./email-service");
+      await sendAdminSetupEmail({ email, firstName, lastName, inviteToken }).catch(console.error);
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: "admin_user_invited",
+        entityType: "user",
+        entityId: user.id,
+        description: `Admin invited ${role} user: ${email} (${firstName} ${lastName})`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.status(201).json({ id: user.id, email, firstName, lastName, role, isActive: false });
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/deactivate", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.params.id === req.session.userId) {
+        return res.status(400).json({ message: "You cannot deactivate your own account" });
+      }
+      const target = await storage.getUser(req.params.id);
+      if (!target) return res.status(404).json({ message: "User not found" });
+      const newActive = !target.isActive;
+      const updated = await storage.updateUser(req.params.id, { isActive: newActive });
+      await storage.createAuditLog({
+        userId: req.session.userId!,
+        actionType: newActive ? "admin_user_reactivated" : "admin_user_deactivated",
+        entityType: "user",
+        entityId: req.params.id,
+        description: `Admin ${newActive ? "reactivated" : "deactivated"} user: ${target.username}`,
+        isAdminEntry: true,
+        ipAddress: req.ip,
+      });
+      return res.json({ id: updated!.id, email: updated!.username, isActive: updated!.isActive });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });

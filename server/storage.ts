@@ -48,6 +48,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByInviteToken(token: string): Promise<User | undefined>;
+  listUsers(role?: string): Promise<User[]>;
   createUser(user: typeof users.$inferInsert): Promise<User>;
   updateUser(id: string, data: Partial<typeof users.$inferInsert>): Promise<User | undefined>;
 
@@ -132,6 +133,13 @@ export class DatabaseStorage implements IStorage {
   async getUserByInviteToken(token: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.inviteToken, token));
     return user ?? undefined;
+  }
+
+  async listUsers(role?: string): Promise<User[]> {
+    if (role) {
+      return db.select().from(users).where(eq(users.role, role)).orderBy(desc(users.createdAt));
+    }
+    return db.select().from(users).orderBy(desc(users.createdAt));
   }
 
   async createUser(insertUser: InsertUserFull): Promise<User> {

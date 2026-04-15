@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Truck, ClipboardList, BarChart3, Plus, Settings, LogOut,
-  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp,
+  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp, Shield, Users,
 } from "lucide-react";
 
 interface DashboardSummary {
@@ -226,6 +226,22 @@ export default function AdminPortal() {
             description="Review incoming driver job applications, update status, and add internal notes."
             href="/admin/driver-applications"
             cta="View Applications"
+          />
+
+          <QuickLinkCard
+            icon={Shield}
+            title="Audit Log"
+            description="Full trail of every admin action — approvals, edits, billing events, status changes."
+            href="/admin/audit"
+            cta="View Audit Log"
+          />
+
+          <QuickLinkCard
+            icon={Users}
+            title="User Management"
+            description="Invite admin accounts, deactivate users, and view all platform users."
+            href="/admin/users"
+            cta="Manage Users"
           />
         </div>
       </div>
