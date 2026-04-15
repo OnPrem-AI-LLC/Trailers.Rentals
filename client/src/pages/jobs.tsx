@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
@@ -11,8 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import type { JobListing } from "@shared/schema";
 import {
   Truck,
   MapPin,
@@ -22,6 +24,8 @@ import {
   ChevronDown,
   Loader2,
   BadgeCheck,
+  Briefcase,
+  ArrowRight,
 } from "lucide-react";
 
 const US_STATES = [
@@ -48,6 +52,12 @@ const BENEFITS = [
   "Direct deposit weekly",
 ];
 
+const TYPE_LABEL: Record<string, string> = {
+  "full-time": "Full-time",
+  "part-time": "Part-time",
+  "contract": "Contract",
+};
+
 const formSchema = z.object({
   fullName: z.string().min(2, "Full name required"),
   email: z.string().email("Valid email required"),
@@ -70,6 +80,12 @@ export default function Jobs() {
   const { toast } = useToast();
   const [submitted, setSubmitted] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [selectedListing, setSelectedListing] = useState<JobListing | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  const { data: listings = [], isLoading: listingsLoading } = useQuery<JobListing[]>({
+    queryKey: ["/api/jobs"],
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -107,6 +123,14 @@ export default function Jobs() {
 
   function onSubmit(values: FormValues) {
     submitMut.mutate(values);
+  }
+
+  function applyNow(listing?: JobListing) {
+    setSelectedListing(listing ?? null);
+    setFormOpen(true);
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
   }
 
   return (
@@ -157,6 +181,74 @@ export default function Jobs() {
 
       <div className="h-px bg-border mx-4 sm:mx-8 lg:mx-16" />
 
+      {/* Dynamic job listings */}
+      {(listingsLoading || listings.length > 0) && (
+        <section className="py-14 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-5xl mx-auto">
+            <h2 className="text-2xl font-black mb-1">Open Positions</h2>
+            <p className="text-muted-foreground text-sm mb-8">
+              Click a position to apply. Don't see what you're looking for?{" "}
+              <button
+                onClick={() => applyNow()}
+                className="text-primary underline underline-offset-2 hover:no-underline"
+              >
+                Submit a general application
+              </button>
+              .
+            </p>
+
+            {listingsLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <Skeleton key={i} className="h-24 w-full rounded-xl" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-4">
+                {listings.map((listing) => (
+                  <div
+                    key={listing.id}
+                    className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4 hover:border-primary/50 transition-colors group"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-start gap-3 mb-2">
+                        <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Briefcase className="w-4 h-4 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-foreground leading-tight">{listing.title}</h3>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />{listing.location}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />{TYPE_LABEL[listing.type] ?? listing.type}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
+                        {listing.description}
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => applyNow(listing)}
+                      className="w-full bg-primary hover:bg-primary/90 text-white font-bold gap-2 group-hover:gap-3 transition-all"
+                    >
+                      Apply Now <ArrowRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {(listingsLoading || listings.length > 0) && (
+        <div className="h-px bg-border mx-4 sm:mx-8 lg:mx-16" />
+      )}
+
       {/* Requirements + Benefits */}
       <section className="py-14 px-4 sm:px-6 lg:px-8">
         <div className="max-w-5xl mx-auto">
@@ -185,224 +277,243 @@ export default function Jobs() {
             </div>
           </div>
 
-          {/* Application */}
-          {submitted ? (
-            <div className="bg-card border border-border rounded-xl p-10 text-center">
-              <BadgeCheck className="w-14 h-14 text-primary mx-auto mb-4" />
-              <h2 className="text-2xl font-black mb-2">Application Submitted!</h2>
-              <p className="text-muted-foreground text-sm max-w-md mx-auto">
-                We've received your application and sent a confirmation to your email. We review every
-                application and will be in touch within 2 business days if you're a strong fit.
-              </p>
-            </div>
-          ) : (
-            <div className="bg-card border border-border rounded-xl overflow-hidden">
-              {/* Collapsed CTA header */}
-              <button
-                onClick={() => setFormOpen((o) => !o)}
-                className="w-full flex items-center justify-between p-8 text-left hover:bg-muted/30 transition-colors"
-              >
-                <div>
-                  <h2 className="text-2xl font-black mb-1">Ready to Apply?</h2>
-                  <p className="text-muted-foreground text-sm">
-                    Fill out the form below — takes about 3 minutes.
-                  </p>
-                </div>
-                <ChevronDown
-                  className={`w-6 h-6 text-muted-foreground transition-transform ${formOpen ? "rotate-180" : ""}`}
-                />
-              </button>
+          {/* Application form */}
+          <div ref={formRef}>
+            {submitted ? (
+              <div className="bg-card border border-border rounded-xl p-10 text-center">
+                <BadgeCheck className="w-14 h-14 text-primary mx-auto mb-4" />
+                <h2 className="text-2xl font-black mb-2">Application Submitted!</h2>
+                <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                  We've received your application and sent a confirmation to your email. We review every
+                  application and will be in touch within 2 business days if you're a strong fit.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                {/* Collapsed CTA header */}
+                <button
+                  onClick={() => setFormOpen((o) => !o)}
+                  className="w-full flex items-center justify-between p-8 text-left hover:bg-muted/30 transition-colors"
+                >
+                  <div>
+                    <h2 className="text-2xl font-black mb-1">
+                      {selectedListing ? `Apply: ${selectedListing.title}` : "Ready to Apply?"}
+                    </h2>
+                    <p className="text-muted-foreground text-sm">
+                      {selectedListing
+                        ? `${selectedListing.location} · ${TYPE_LABEL[selectedListing.type] ?? selectedListing.type}`
+                        : "Fill out the form below — takes about 3 minutes."}
+                    </p>
+                  </div>
+                  <ChevronDown
+                    className={`w-6 h-6 text-muted-foreground transition-transform ${formOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
 
-              {formOpen && (
-                <div className="px-8 pb-8 border-t border-border">
-                  <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-8">
+                {formOpen && (
+                  <div className="px-8 pb-8 border-t border-border">
+                    {selectedListing && (
+                      <div className="mt-6 mb-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-lg text-sm">
+                        <span className="font-semibold text-primary">Applying for:</span>{" "}
+                        <span className="text-foreground">{selectedListing.title}</span>
+                        <span className="text-muted-foreground"> · {selectedListing.location}</span>
+                        <button
+                          onClick={() => setSelectedListing(null)}
+                          className="ml-3 text-xs text-muted-foreground underline hover:no-underline"
+                        >
+                          Switch to general application
+                        </button>
+                      </div>
+                    )}
+                    <Form {...form}>
+                      <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-8">
 
-                      {/* Personal Info */}
-                      <div>
-                        <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">Personal Information</h3>
+                        {/* Personal Info */}
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">Personal Information</h3>
+                          <div className="grid sm:grid-cols-2 gap-4">
+                            <FormField control={form.control} name="fullName" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Full Name *</FormLabel>
+                                <FormControl><Input placeholder="John Smith" {...field} /></FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="email" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Email *</FormLabel>
+                                <FormControl><Input type="email" placeholder="john@email.com" {...field} /></FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="phone" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Phone *</FormLabel>
+                                <FormControl><Input placeholder="(304) 555-0100" {...field} /></FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="desiredPosition" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Desired Position</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select position" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="otr">OTR (Over the Road)</SelectItem>
+                                    <SelectItem value="regional">Regional</SelectItem>
+                                    <SelectItem value="local">Local</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                          </div>
+                        </div>
+
+                        {/* CDL Info */}
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">CDL Information</h3>
+                          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <FormField control={form.control} name="cdlClass" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>CDL Class *</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value}>
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Class" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    <SelectItem value="A">Class A</SelectItem>
+                                    <SelectItem value="B">Class B</SelectItem>
+                                    <SelectItem value="C">Class C</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="cdlState" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Issuing State *</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value}>
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="State" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    {US_STATES.map((s) => (
+                                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="cdlNumber" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>CDL Number *</FormLabel>
+                                <FormControl><Input placeholder="123456789" {...field} /></FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="yearsExperience" render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Years Experience *</FormLabel>
+                                <FormControl><Input type="number" min={0} max={60} {...field} /></FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )} />
+                          </div>
+                        </div>
+
+                        {/* Endorsements */}
+                        <div>
+                          <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">Endorsements &amp; Credentials</h3>
+                          <div className="flex flex-wrap gap-6">
+                            <FormField control={form.control} name="hasTwic" render={({ field }) => (
+                              <FormItem className="flex items-center gap-2 space-y-0">
+                                <FormControl>
+                                  <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                </FormControl>
+                                <FormLabel className="font-normal cursor-pointer">TWIC Card</FormLabel>
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="hasHazmat" render={({ field }) => (
+                              <FormItem className="flex items-center gap-2 space-y-0">
+                                <FormControl>
+                                  <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                </FormControl>
+                                <FormLabel className="font-normal cursor-pointer">Hazmat Endorsement</FormLabel>
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name="hasTanker" render={({ field }) => (
+                              <FormItem className="flex items-center gap-2 space-y-0">
+                                <FormControl>
+                                  <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                </FormControl>
+                                <FormLabel className="font-normal cursor-pointer">Tanker Endorsement</FormLabel>
+                              </FormItem>
+                            )} />
+                          </div>
+                        </div>
+
+                        {/* References + Cover Letter */}
                         <div className="grid sm:grid-cols-2 gap-4">
-                          <FormField control={form.control} name="fullName" render={({ field }) => (
+                          <FormField control={form.control} name="references" render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Full Name *</FormLabel>
-                              <FormControl><Input placeholder="John Smith" {...field} /></FormControl>
+                              <FormLabel>References</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  placeholder="Name, company, phone — one per line"
+                                  className="min-h-[120px] resize-none"
+                                  {...field}
+                                />
+                              </FormControl>
                               <FormMessage />
                             </FormItem>
                           )} />
-                          <FormField control={form.control} name="email" render={({ field }) => (
+                          <FormField control={form.control} name="coverLetter" render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Email *</FormLabel>
-                              <FormControl><Input type="email" placeholder="john@email.com" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="phone" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Phone *</FormLabel>
-                              <FormControl><Input placeholder="(304) 555-0100" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="desiredPosition" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Desired Position</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select position" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="otr">OTR (Over the Road)</SelectItem>
-                                  <SelectItem value="regional">Regional</SelectItem>
-                                  <SelectItem value="local">Local</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <FormLabel>Brief Introduction</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  placeholder="Tell us a bit about yourself and why you want to drive for Deluxe..."
+                                  className="min-h-[120px] resize-none"
+                                  {...field}
+                                />
+                              </FormControl>
                               <FormMessage />
                             </FormItem>
                           )} />
                         </div>
-                      </div>
 
-                      {/* CDL Info */}
-                      <div>
-                        <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">CDL Information</h3>
-                        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                          <FormField control={form.control} name="cdlClass" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>CDL Class *</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Class" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  <SelectItem value="A">Class A</SelectItem>
-                                  <SelectItem value="B">Class B</SelectItem>
-                                  <SelectItem value="C">Class C</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="cdlState" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Issuing State *</FormLabel>
-                              <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="State" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {US_STATES.map((s) => (
-                                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="cdlNumber" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>CDL Number *</FormLabel>
-                              <FormControl><Input placeholder="123456789" {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="yearsExperience" render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Years Experience *</FormLabel>
-                              <FormControl><Input type="number" min={0} max={60} {...field} /></FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )} />
-                        </div>
-                      </div>
-
-                      {/* Endorsements */}
-                      <div>
-                        <h3 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">Endorsements &amp; Credentials</h3>
-                        <div className="flex flex-wrap gap-6">
-                          <FormField control={form.control} name="hasTwic" render={({ field }) => (
-                            <FormItem className="flex items-center gap-2 space-y-0">
-                              <FormControl>
-                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                              </FormControl>
-                              <FormLabel className="font-normal cursor-pointer">TWIC Card</FormLabel>
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="hasHazmat" render={({ field }) => (
-                            <FormItem className="flex items-center gap-2 space-y-0">
-                              <FormControl>
-                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                              </FormControl>
-                              <FormLabel className="font-normal cursor-pointer">Hazmat Endorsement</FormLabel>
-                            </FormItem>
-                          )} />
-                          <FormField control={form.control} name="hasTanker" render={({ field }) => (
-                            <FormItem className="flex items-center gap-2 space-y-0">
-                              <FormControl>
-                                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                              </FormControl>
-                              <FormLabel className="font-normal cursor-pointer">Tanker Endorsement</FormLabel>
-                            </FormItem>
-                          )} />
-                        </div>
-                      </div>
-
-                      {/* References + Cover Letter */}
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <FormField control={form.control} name="references" render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>References</FormLabel>
-                            <FormControl>
-                              <Textarea
-                                placeholder="Name, company, phone — one per line"
-                                className="min-h-[120px] resize-none"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )} />
-                        <FormField control={form.control} name="coverLetter" render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Brief Introduction</FormLabel>
-                            <FormControl>
-                              <Textarea
-                                placeholder="Tell us a bit about yourself and why you want to drive for Deluxe..."
-                                className="min-h-[120px] resize-none"
-                                {...field}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )} />
-                      </div>
-
-                      <Button
-                        type="submit"
-                        size="lg"
-                        disabled={submitMut.isPending}
-                        className="bg-primary hover:bg-primary/90 text-white font-bold gap-2 h-12 px-10"
-                      >
-                        {submitMut.isPending ? (
-                          <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
-                        ) : (
-                          <><Truck className="w-5 h-5" /> Submit Application</>
-                        )}
-                      </Button>
-                      <p className="text-xs text-muted-foreground">
-                        We'll respond within 2 business days. No spam, ever.
-                      </p>
-                    </form>
-                  </Form>
-                </div>
-              )}
-            </div>
-          )}
+                        <Button
+                          type="submit"
+                          size="lg"
+                          disabled={submitMut.isPending}
+                          className="bg-primary hover:bg-primary/90 text-white font-bold gap-2 h-12 px-10"
+                        >
+                          {submitMut.isPending ? (
+                            <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
+                          ) : (
+                            <><Truck className="w-5 h-5" /> Submit Application</>
+                          )}
+                        </Button>
+                        <p className="text-xs text-muted-foreground">
+                          We'll respond within 2 business days. No spam, ever.
+                        </p>
+                      </form>
+                    </Form>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

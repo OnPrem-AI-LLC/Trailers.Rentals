@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Truck, ClipboardList, BarChart3, Plus, Settings, LogOut,
-  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp, Shield, Users, Mail,
+  FileSignature, CreditCard, Gauge, Search, QrCode, TrendingUp, Shield, Users, Mail, Briefcase,
 } from "lucide-react";
 
 interface DashboardSummary {
@@ -266,6 +266,14 @@ export default function AdminPortal() {
             description="View all outbound emails sent by the platform including invites, reminders, and notifications."
             href="/admin/email-logs"
             cta="View Email Logs"
+          />
+
+          <QuickLinkCard
+            icon={Briefcase}
+            title="Job Listings"
+            description="Create, edit, and deactivate open driving positions shown on the public Jobs page."
+            href="/admin/jobs"
+            cta="Manage Job Listings"
           />
         </div>
       </div>

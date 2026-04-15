@@ -354,6 +354,27 @@ export const siteContent = pgTable("site_content", {
 });
 export type SiteContent = typeof siteContent.$inferSelect;
 
+// ── Job Listings ─────────────────────────────────────────────────────────
+export const jobListings = pgTable("job_listings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  location: text("location").notNull(),
+  description: text("description").notNull(),
+  type: text("type").notNull().default("full-time"), // "full-time" | "part-time" | "contract"
+  status: text("status").notNull().default("active"), // "active" | "inactive"
+  displayOrder: integer("display_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export const insertJobListingSchema = createInsertSchema(jobListings).omit({ id: true, createdAt: true }).extend({
+  title: z.string().min(1, "Title required"),
+  location: z.string().min(1, "Location required"),
+  description: z.string().min(1, "Description required"),
+  type: z.enum(["full-time", "part-time", "contract"]).default("full-time"),
+  status: z.enum(["active", "inactive"]).default("active"),
+});
+export type InsertJobListing = z.infer<typeof insertJobListingSchema>;
+export type JobListing = typeof jobListings.$inferSelect;
+
 // ── Email Logs ───────────────────────────────────────────────────────────
 export const emailLogs = pgTable("email_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

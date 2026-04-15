@@ -2979,6 +2979,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Job Listings ─────────────────────────────────────────────────────
+
+  // GET /api/jobs — public list of active listings
+  app.get("/api/jobs", async (req: Request, res: Response) => {
+    try {
+      const listings = await storage.listJobListings(true);
+      return res.json(listings);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/admin/jobs — admin list (all)
+  app.get("/api/admin/jobs", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const listings = await storage.listJobListings(false);
+      return res.json(listings);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/admin/jobs — create listing
+  app.post("/api/admin/jobs", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { insertJobListingSchema } = await import("@shared/schema");
+      const data = insertJobListingSchema.parse(req.body);
+      const listing = await storage.createJobListing(data);
+      return res.status(201).json(listing);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/admin/jobs/:id — update listing
+  app.patch("/api/admin/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { insertJobListingSchema } = await import("@shared/schema");
+      const data = insertJobListingSchema.partial().parse(req.body);
+      const listing = await storage.updateJobListing(req.params.id, data);
+      if (!listing) return res.status(404).json({ message: "Job listing not found" });
+      return res.json(listing);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/admin/jobs/:id — delete listing
+  app.delete("/api/admin/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const existing = await storage.getJobListing(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Job listing not found" });
+      await storage.deleteJobListing(req.params.id);
+      return res.json({ success: true });
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // ── Driver Applications ──────────────────────────────────────────────
 
   // POST /api/driver-applications — public submit
