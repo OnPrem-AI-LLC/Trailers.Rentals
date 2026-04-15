@@ -16,6 +16,7 @@ init();
 
 async function logEmail(opts: {
   recipient: string;
+  sender?: string;
   subject: string;
   template: string;
   entityType?: string;
@@ -26,6 +27,7 @@ async function logEmail(opts: {
   try {
     await db.insert(emailLogs).values({
       recipient: opts.recipient,
+      sender: opts.sender ?? null,
       subject: opts.subject,
       template: opts.template,
       entityType: opts.entityType ?? null,
@@ -72,19 +74,21 @@ async function sendTracked(
     ? toRaw
     : ADMIN_EMAIL;
   const subject: string = typeof m["subject"] === "string" ? (m["subject"] as string) : "(no subject)";
+  const fromRaw = m["from"];
+  const sender: string = typeof fromRaw === "string" ? fromRaw : FROM;
 
   if (!isConfigured()) {
     console.log(`[email] SendGrid not configured — skipping ${opts.template}`);
-    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "skipped" });
+    logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "skipped" });
     return;
   }
 
   try {
     await sgMail.send(msg);
-    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
+    logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
+    logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
     throw err;
   }
 }

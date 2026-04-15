@@ -1058,6 +1058,7 @@ export default function AdminRentalDetail() {
                           <span className="text-muted-foreground text-[10px] truncate">{log.template}</span>
                         </div>
                         <p className="text-foreground truncate leading-snug">{log.subject}</p>
+                        {log.sender && <p className="text-muted-foreground truncate">From: {log.sender}</p>}
                         <p className="text-muted-foreground truncate">To: {log.recipient}</p>
                         <p className="text-muted-foreground text-[10px]">{new Date(log.sentAt).toLocaleString()}</p>
                         {log.error && <p className="text-red-400 text-[10px] truncate">Error: {log.error}</p>}

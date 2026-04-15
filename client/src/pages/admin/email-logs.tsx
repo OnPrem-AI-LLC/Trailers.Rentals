@@ -29,6 +29,7 @@ export default function AdminEmailLogsPage() {
   const filtered = search
     ? logs.filter((l) =>
         l.recipient.toLowerCase().includes(search.toLowerCase()) ||
+        (l.sender ?? "").toLowerCase().includes(search.toLowerCase()) ||
         l.subject.toLowerCase().includes(search.toLowerCase()) ||
         l.template.toLowerCase().includes(search.toLowerCase())
       )
@@ -83,7 +84,8 @@ export default function AdminEmailLogsPage() {
               <thead>
                 <tr className="bg-muted/50 border-b border-border">
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Recipient</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">From</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">To</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Template</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Subject</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden lg:table-cell">Entity</th>
@@ -99,7 +101,8 @@ export default function AdminEmailLogsPage() {
                         {statusBadge(log.status)}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground truncate max-w-[180px]">{log.recipient}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground truncate max-w-[160px]">{log.sender ?? "—"}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground truncate max-w-[160px]">{log.recipient}</td>
                     <td className="px-4 py-3">
                       <Badge variant="secondary" className="font-mono text-xs">{log.template}</Badge>
                     </td>

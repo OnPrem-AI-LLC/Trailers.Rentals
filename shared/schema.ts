@@ -358,6 +358,7 @@ export type SiteContent = typeof siteContent.$inferSelect;
 export const emailLogs = pgTable("email_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   recipient: text("recipient").notNull(),
+  sender: text("sender"),
   subject: text("subject").notNull(),
   template: text("template").notNull(),
   entityType: text("entity_type"),

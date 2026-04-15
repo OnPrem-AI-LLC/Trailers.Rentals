@@ -148,7 +148,7 @@ export interface IStorage {
   getUserByResetToken(token: string): Promise<User | undefined>;
 
   // Email Logs
-  createEmailLog(data: { recipient: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void>;
+  createEmailLog(data: { recipient: string; sender?: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void>;
   getEmailLogs(opts?: { entityType?: string; entityId?: string; limit?: number }): Promise<EmailLog[]>;
 }
 
@@ -621,9 +621,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ── Email Logs ──────────────────────────────────────────────────────
-  async createEmailLog(data: { recipient: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void> {
+  async createEmailLog(data: { recipient: string; sender?: string; subject: string; template: string; entityType?: string; entityId?: string; status: string; error?: string }): Promise<void> {
     await db.insert(emailLogs).values({
       recipient: data.recipient,
+      sender: data.sender ?? null,
       subject: data.subject,
       template: data.template,
       entityType: data.entityType ?? null,
