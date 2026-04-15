@@ -573,7 +573,7 @@ export default function AdminRentalDetail() {
                             onClick={() => genPickupQRMut.mutate()}
                             disabled={genPickupQRMut.isPending}
                           >
-                            <RotateCcw className="w-3 h-3" />Regenerate
+                            <RotateCcw className="w-3 h-3" />Refresh
                           </Button>
                         </div>
                       </>
@@ -623,7 +623,7 @@ export default function AdminRentalDetail() {
                             onClick={() => genReturnQRMut.mutate()}
                             disabled={genReturnQRMut.isPending}
                           >
-                            <RotateCcw className="w-3 h-3" />Regenerate
+                            <RotateCcw className="w-3 h-3" />Refresh
                           </Button>
                         </div>
                       </>

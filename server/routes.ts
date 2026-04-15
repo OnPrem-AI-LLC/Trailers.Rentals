@@ -307,7 +307,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rental = await storage.getRental(req.params.id);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
 
-      const qrType = req.params.type as "pickup" | "return";
+      const qrType = req.params.type;
+      if (qrType !== "pickup" && qrType !== "return") {
+        return res.status(400).json({ message: "Invalid QR type. Must be 'pickup' or 'return'" });
+      }
       const token = qrType === "return" ? rental.returnToken : rental.pickupToken;
       if (!token) return res.status(404).json({ message: `No ${qrType} token generated for this rental` });
 
