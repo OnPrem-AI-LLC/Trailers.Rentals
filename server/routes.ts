@@ -2492,6 +2492,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rental = await storage.getRentalByPickupToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
+      const eligibleStatuses = ["active", "active_in_use"];
+      if (!eligibleStatuses.includes(rental.status)) {
+        return res.status(400).json({ message: "This rental is not currently eligible for pickup" });
+      }
       const trailer = await storage.getTrailer(rental.trailerId);
       const company = rental.companyId ? await storage.getCompany(rental.companyId) : null;
       const isLoggedIn = !!req.session?.userId;
@@ -2532,6 +2536,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rental = await storage.getRentalByPickupToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid pickup link" });
+      const photoEligible = ["active", "active_in_use"];
+      if (!photoEligible.includes(rental.status)) {
+        return res.status(400).json({ message: "This rental is not currently eligible for pickup" });
+      }
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(401).json({ message: "Not authenticated" });
       if (user.role !== "admin" && user.companyId !== rental.companyId) {
@@ -2562,6 +2570,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rental = await storage.getRentalByPickupToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid or expired pickup link" });
+      const confirmEligible = ["active", "active_in_use"];
+      if (!confirmEligible.includes(rental.status)) {
+        return res.status(400).json({ message: "This rental is not currently eligible for pickup" });
+      }
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(401).json({ message: "Not authenticated" });
       if (user.role !== "admin" && user.companyId !== rental.companyId) {
