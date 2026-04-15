@@ -266,16 +266,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── QR Code ─────────────────────────────────────────────────────────
+  // ── QR Code (trailer-level — resolves active rental's pickup token) ─────
   app.get("/api/admin/trailers/:id/qr", requireAdmin, async (req: Request, res: Response) => {
     try {
       const trailer = await storage.getTrailer(req.params.id);
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
 
+      const rentals = await storage.getRentals();
+      const activeRental = rentals.find(
+        (r) => r.trailerId === trailer.id && r.pickupToken && ["active", "active_in_use"].includes(r.status)
+      );
+      if (!activeRental?.pickupToken) {
+        return res.status(404).json({ message: "No active rental with a pickup token found for this trailer" });
+      }
+
       const domainUrl = process.env.REPLIT_DEV_DOMAIN
         ? `https://${process.env.REPLIT_DEV_DOMAIN}`
         : "https://deluxelogistics.com";
-      const pickupUrl = `${domainUrl}/pickup/${trailer.id}`;
+      const pickupUrl = `${domainUrl}/pickup/${activeRental.pickupToken}`;
 
       const qrBuffer = await QRCode.toBuffer(pickupUrl, {
         type: "png",
@@ -285,7 +293,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.setHeader("Content-Type", "image/png");
-      res.setHeader("Content-Disposition", `attachment; filename="trailer-${trailer.vin}-qr.png"`);
+      res.setHeader("Content-Disposition", `attachment; filename="trailer-${trailer.vin}-pickup-qr.png"`);
+      return res.send(qrBuffer);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── QR Code download for rental (pickup or return) ────────────────────
+  app.get("/api/admin/rentals/:id/qr/:type", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      const qrType = req.params.type as "pickup" | "return";
+      const token = qrType === "return" ? rental.returnToken : rental.pickupToken;
+      if (!token) return res.status(404).json({ message: `No ${qrType} token generated for this rental` });
+
+      const domainUrl = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : "https://deluxelogistics.com";
+      const path = qrType === "return" ? "return" : "pickup";
+      const url = `${domainUrl}/${path}/${token}`;
+
+      const qrBuffer = await QRCode.toBuffer(url, {
+        type: "png",
+        width: 400,
+        margin: 2,
+        color: { dark: "#000000", light: "#ffffff" },
+      });
+
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", `attachment; filename="rental-${rental.id.slice(-8)}-${qrType}-qr.png"`);
       return res.send(qrBuffer);
     } catch (err: unknown) {
       console.error(err);

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  CheckCircle2, Truck, AlertCircle, Loader2, Camera, Upload, X, ChevronRight, ChevronLeft as ChevronLeftIcon, ImageIcon, LogIn,
+  CheckCircle2, Truck, AlertCircle, Loader2, Camera, Upload, ChevronRight, ChevronLeft as ChevronLeftIcon, ImageIcon, LogIn,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";

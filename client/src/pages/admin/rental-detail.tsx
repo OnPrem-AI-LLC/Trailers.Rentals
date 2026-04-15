@@ -557,15 +557,25 @@ export default function AdminRentalDetail() {
                       <>
                         <img src={pickupQR.dataUrl} alt="Pickup QR Code" className="rounded-lg w-40 h-40 bg-white p-1" />
                         <p className="text-[10px] text-muted-foreground text-center break-all">{pickupQR.url}</p>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 text-[10px] text-muted-foreground gap-1"
-                          onClick={() => genPickupQRMut.mutate()}
-                          disabled={genPickupQRMut.isPending}
-                        >
-                          <RotateCcw className="w-3 h-3" />Regenerate
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[10px] gap-1"
+                            onClick={() => window.open(`/api/admin/rentals/${rental!.id}/qr/pickup`, "_blank")}
+                          >
+                            <Download className="w-3 h-3" />Download
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[10px] text-muted-foreground gap-1"
+                            onClick={() => genPickupQRMut.mutate()}
+                            disabled={genPickupQRMut.isPending}
+                          >
+                            <RotateCcw className="w-3 h-3" />Regenerate
+                          </Button>
+                        </div>
                       </>
                     ) : (
                       <Button
@@ -597,15 +607,25 @@ export default function AdminRentalDetail() {
                       <>
                         <img src={returnQR.dataUrl} alt="Return QR Code" className="rounded-lg w-40 h-40 bg-white p-1" />
                         <p className="text-[10px] text-muted-foreground text-center break-all">{returnQR.url}</p>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 text-[10px] text-muted-foreground gap-1"
-                          onClick={() => genReturnQRMut.mutate()}
-                          disabled={genReturnQRMut.isPending}
-                        >
-                          <RotateCcw className="w-3 h-3" />Regenerate
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[10px] gap-1"
+                            onClick={() => window.open(`/api/admin/rentals/${rental!.id}/qr/return`, "_blank")}
+                          >
+                            <Download className="w-3 h-3" />Download
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[10px] text-muted-foreground gap-1"
+                            onClick={() => genReturnQRMut.mutate()}
+                            disabled={genReturnQRMut.isPending}
+                          >
+                            <RotateCcw className="w-3 h-3" />Regenerate
+                          </Button>
+                        </div>
                       </>
                     ) : (
                       <Button
