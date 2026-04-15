@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
@@ -115,7 +115,7 @@ function buildParams(opts: {
 
 export default function AdminAuditPage() {
   const [, navigate] = useLocation();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [search, setSearch] = useState("");
   const [filterAction, setFilterAction] = useState("all");
   const [filterEntity, setFilterEntity] = useState("all");
@@ -124,10 +124,12 @@ export default function AdminAuditPage() {
   const [toDate, setToDate] = useState("");
   const [page, setPage] = useState(0);
 
-  if (!user || user.role !== "admin") {
-    navigate("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user || user.role !== "admin") navigate("/login");
+  }, [user, authLoading, navigate]);
+
+  const isAdmin = !!user && user.role === "admin";
 
   const params = buildParams({
     actionType: filterAction,
@@ -147,17 +149,27 @@ export default function AdminAuditPage() {
       return res.json();
     },
     staleTime: 30000,
+    enabled: isAdmin,
   });
 
   const { data: usersData } = useQuery<UserRow[]>({
     queryKey: ["/api/admin/users"],
     staleTime: 60000,
+    enabled: isAdmin,
   });
 
   const resetPage = useCallback(() => setPage(0), []);
 
   const totalPages = Math.ceil((data?.total ?? 0) / PAGE_SIZE);
   const hasFilters = search.trim() || filterAction !== "all" || filterEntity !== "all" || filterActor !== "all" || fromDate || toDate;
+
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Skeleton className="h-8 w-48" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
@@ -39,15 +39,17 @@ type InviteForm = z.infer<typeof inviteSchema>;
 
 export default function AdminUsersPage() {
   const [, navigate] = useLocation();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showInvite, setShowInvite] = useState(false);
 
-  if (!currentUser || currentUser.role !== "admin") {
-    navigate("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUser || currentUser.role !== "admin") navigate("/login");
+  }, [currentUser, authLoading, navigate]);
+
+  const isAdmin = !!currentUser && currentUser.role === "admin";
 
   const { data: users, isLoading } = useQuery<AdminUser[]>({
     queryKey: ["/api/admin/users"],
@@ -56,6 +58,7 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error("Failed to load users");
       return res.json();
     },
+    enabled: isAdmin,
   });
 
   const inviteMut = useMutation({
@@ -91,6 +94,14 @@ export default function AdminUsersPage() {
 
   const admins = users?.filter(u => u.role === "admin") ?? [];
   const renters = users?.filter(u => u.role === "renter") ?? [];
+
+  if (authLoading || !currentUser) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Skeleton className="h-8 w-48" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
