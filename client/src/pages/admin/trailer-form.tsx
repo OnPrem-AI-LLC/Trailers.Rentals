@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useParams } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
@@ -22,10 +22,21 @@ import {
   ImageOff,
   QrCode,
   Link as LinkIcon,
+  Shield,
+  Clock,
 } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
 
 // ── Types ──────────────────────────────────────────────────────────────────
+interface AuditLogEntry {
+  id: string;
+  actorName?: string;
+  actionType: string;
+  description: string;
+  isAdminEntry: boolean;
+  createdAt: string;
+}
+
 interface PhotoState {
   id?: string;
   url: string;
@@ -95,6 +106,17 @@ export default function TrailerForm() {
   });
 
   const trailerData = isEdit ? allTrailers?.find(t => t.id === id) : undefined;
+
+  // Audit trail (edit mode only)
+  const { data: auditLogs } = useQuery<AuditLogEntry[]>({
+    queryKey: ["/api/admin/audit", "trailer", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/audit/trailer/${id}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load audit log");
+      return res.json();
+    },
+    enabled: isEdit && !!user && user.role === "admin",
+  });
 
   // Initialize form state once trailer data is available
   useEffect(() => {
@@ -631,6 +653,50 @@ export default function TrailerForm() {
               </Button>
             </Link>
           </div>
+
+          {/* ── Audit Trail (edit mode only) ───────────────────────────── */}
+          {isEdit && (
+            <section className="pt-2">
+              <div className="flex items-center gap-2 mb-3">
+                <Shield className="w-4 h-4 text-primary" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">Trailer Audit Trail</h3>
+                <span className="text-xs text-muted-foreground">({auditLogs?.length ?? 0} entries)</span>
+              </div>
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                {!auditLogs ? (
+                  <div className="p-4 space-y-2">
+                    {[1, 2, 3].map(i => <Skeleton key={i} className="h-4 w-full" />)}
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-muted-foreground">
+                    No audit events recorded for this trailer yet.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border/50 max-h-72 overflow-y-auto">
+                    {auditLogs.map(log => (
+                      <div key={log.id} className="flex items-start gap-3 px-4 py-2.5 hover:bg-secondary/20 transition-colors">
+                        <div className="flex items-center gap-1 text-muted-foreground min-w-[120px] pt-0.5">
+                          <Clock className="w-3 h-3 flex-shrink-0" />
+                          <span className="text-[10px] tabular-nums">
+                            {new Date(log.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}
+                            {" "}
+                            {new Date(log.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <span className="font-mono text-[10px] bg-secondary/40 px-1.5 py-0.5 rounded text-foreground/70 whitespace-nowrap">
+                          {log.actionType}
+                        </span>
+                        <span className="text-xs text-foreground/90 flex-1">{log.description}</span>
+                        {log.actorName && (
+                          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{log.actorName}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </form>
       </div>
     </div>

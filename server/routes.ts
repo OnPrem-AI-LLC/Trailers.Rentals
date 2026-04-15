@@ -27,6 +27,7 @@ import {
   sendAgreementSignedEmails,
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
+import { logAuditEvent } from "./audit-service";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
@@ -942,29 +943,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ── Admin: global audit log (paginated + filtered) ───────────────────
+  // ── Admin: global audit log (paginated + filtered + enriched) ────────
   app.get("/api/admin/audit", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { entityType, entityId, actionType, userId, limit, offset } = req.query as Record<string, string | undefined>;
+      const { entityType, entityId, actionType, userId, from, to, limit, offset } = req.query as Record<string, string | undefined>;
       const logs = await storage.getAuditLogs(entityType, entityId);
+
+      // Build a userId → display name map from all users (non-fatal)
+      const allUsers = await storage.listUsers().catch(() => []);
+      const userMap = new Map<string, string>(
+        allUsers.map(u => [u.id, `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username])
+      );
+
       let filtered = logs;
       if (actionType) filtered = filtered.filter(l => l.actionType === actionType);
       if (userId) filtered = filtered.filter(l => l.userId === userId);
+      if (from) {
+        const fromDate = new Date(from);
+        filtered = filtered.filter(l => new Date(l.createdAt) >= fromDate);
+      }
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        filtered = filtered.filter(l => new Date(l.createdAt) <= toDate);
+      }
+
       const pageSize = Math.min(parseInt(limit ?? "100", 10), 500);
       const pageOffset = parseInt(offset ?? "0", 10);
       const page = filtered.slice(pageOffset, pageOffset + pageSize);
-      return res.json({ logs: page, total: filtered.length });
+
+      // Enrich with actor name
+      const enriched = page.map(l => ({
+        ...l,
+        actorName: l.userId ? (userMap.get(l.userId) ?? "Unknown User") : "System",
+      }));
+
+      return res.json({ logs: enriched, total: filtered.length });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
   });
 
-  // ── Admin: audit logs for an entity ─────────────────────────────────
+  // ── Admin: audit logs for an entity (enriched with actor name) ───────
   app.get("/api/admin/audit/:entityType/:entityId", requireAdmin, async (req: Request, res: Response) => {
     try {
       const logs = await storage.getAuditLogs(req.params.entityType, req.params.entityId);
-      return res.json(logs);
+      const allUsers = await storage.listUsers().catch(() => []);
+      const userMap = new Map<string, string>(
+        allUsers.map(u => [u.id, `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username])
+      );
+      const enriched = logs.map(l => ({
+        ...l,
+        actorName: l.userId ? (userMap.get(l.userId) ?? "Unknown User") : "System",
+      }));
+      return res.json(enriched);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1015,14 +1048,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       const { sendAdminSetupEmail } = await import("./email-service");
       await sendAdminSetupEmail({ email, firstName, lastName, inviteToken }).catch(console.error);
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: "admin_user_invited",
         entityType: "user",
         entityId: user.id,
         description: `Admin invited ${role} user: ${email} (${firstName} ${lastName})`,
+        metadata: { role, email },
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.status(201).json({ id: user.id, email, firstName, lastName, role, isActive: false });
     } catch (err: unknown) {
@@ -1041,14 +1075,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!target) return res.status(404).json({ message: "User not found" });
       const newActive = !target.isActive;
       const updated = await storage.updateUser(req.params.id, { isActive: newActive });
-      await storage.createAuditLog({
+      await logAuditEvent({
+        req,
         userId: req.session.userId!,
         actionType: newActive ? "admin_user_reactivated" : "admin_user_deactivated",
         entityType: "user",
         entityId: req.params.id,
         description: `Admin ${newActive ? "reactivated" : "deactivated"} user: ${target.username}`,
+        metadata: { targetEmail: target.username, newState: newActive ? "active" : "inactive" },
         isAdminEntry: true,
-        ipAddress: req.ip,
       });
       return res.json({ id: updated!.id, email: updated!.username, isActive: updated!.isActive });
     } catch (err: unknown) {
