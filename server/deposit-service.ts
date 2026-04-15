@@ -17,6 +17,7 @@
 
 import { storage } from './storage';
 import { getUncachableStripeClient } from './stripeClient';
+import { randomBytes } from 'crypto';
 
 export interface FinalizeDepositOptions {
   rentalId: string;
@@ -44,11 +45,15 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   // ── 1. Activate rental (idempotent) ────────────────────────────────────────
   const wasAlreadyActive = rental.depositPaid;
   if (!wasAlreadyActive) {
+    const pickupToken = rental.pickupToken ?? randomBytes(32).toString('hex');
+    const returnToken = rental.returnToken ?? randomBytes(32).toString('hex');
     await storage.updateRental(rentalId, {
       depositPaid: true,
       status: 'active',
       startDate: new Date(),
       ...(customerId && !rental.stripeCustomerId ? { stripeCustomerId: customerId } : {}),
+      ...(!rental.pickupToken ? { pickupToken } : {}),
+      ...(!rental.returnToken ? { returnToken } : {}),
     });
 
     // Mark trailer as rented — allow any error to propagate so finalization fails and retries safely
