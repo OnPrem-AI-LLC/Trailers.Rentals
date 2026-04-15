@@ -57,20 +57,28 @@ export function emailTemplate(title: string, body: string, accentColor = "#e6394
 </div>`;
 }
 
-// ── Tracked send wrapper — logs every send (success/failure) ───────────────
+// ── Tracked send wrapper — single gatekeeper for all email sends ──────────
+// Logs every send as: sent, failed, or skipped (when SendGrid is unconfigured)
 type MailData = Parameters<typeof sgMail.send>[0];
 async function sendTracked(
   msg: MailData,
   opts: { template: string; entityType?: string; entityId?: string }
 ): Promise<void> {
-  const to = Array.isArray(msg.to)
-    ? (msg.to as string[]).join(", ")
-    : typeof msg.to === "string"
-    ? msg.to
+  const m = (msg as unknown) as Record<string, unknown>;
+  const toRaw = m["to"];
+  const to: string = Array.isArray(toRaw)
+    ? (toRaw as unknown[]).map(t => (typeof t === "string" ? t : "")).filter(Boolean).join(", ") || ADMIN_EMAIL
+    : typeof toRaw === "string"
+    ? toRaw
     : ADMIN_EMAIL;
-  const subject = typeof (msg as { subject?: string }).subject === "string"
-    ? (msg as { subject: string }).subject
-    : "(no subject)";
+  const subject: string = typeof m["subject"] === "string" ? (m["subject"] as string) : "(no subject)";
+
+  if (!isConfigured()) {
+    console.log(`[email] SendGrid not configured — skipping ${opts.template}`);
+    logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "skipped" });
+    return;
+  }
+
   try {
     await sgMail.send(msg);
     logEmail({ recipient: to, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
@@ -134,19 +142,13 @@ function escApp(app: ApplicationData): ApplicationData {
 // ── 1. Admin notification on new application ────────────────────────────────
 export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promise<void> {
   const app = escApp(rawApp);
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin alert"); return; }
 
   const reviewUrl = app.adminToken
     ? `${domain()}/admin/requests/${app.id}?tk=${app.adminToken}`
     : `${domain()}/admin/requests/${app.id}`;
   const price = app.priceMonthly ? `$${(app.priceMonthly / 100).toLocaleString()}/month` : "N/A";
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">New Rental Application</h1>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("New Rental Application", `
     <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
       <tr><td style="padding: 8px 0; color: #64748b; width: 160px;">Company</td><td style="padding: 8px 0; font-weight: bold;">${app.companyName}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Owner/Officer</td><td style="padding: 8px 0;">${app.ownerName}</td></tr>
@@ -164,8 +166,7 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
       Review Application &amp; SAFER Data →
     </a>
     <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">This link requires admin login.</p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: ADMIN_EMAIL,
@@ -179,15 +180,8 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
 // ── 2. Renter acknowledgment ────────────────────────────────────────────────
 export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise<void> {
   const app = escApp(rawApp);
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping renter ack"); return; }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Application Received</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Application Received", `
     <p>Hi ${app.ownerName},</p>
     <p>We've received your rental application for <strong>${app.trailerVin ? `trailer VIN ${app.trailerVin}` : "your requested trailer"}</strong>.</p>
     <p><strong>What happens next:</strong></p>
@@ -197,14 +191,7 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
       <li>You may be asked for additional documentation such as a Certificate of Insurance</li>
     </ul>
     <p>If you have questions in the meantime, reply to this email or call us.</p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: app.email,
@@ -219,27 +206,13 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
 export async function sendRejectionEmail(rawApp: ApplicationData, reason?: string): Promise<void> {
   const app = escApp(rawApp);
   const safeReason = reason ? esc(reason) : undefined;
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping rejection email"); return; }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Application Update</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Application Update", `
     <p>Hi ${app.ownerName},</p>
     <p>Thank you for your interest in renting from Deluxe Logistics. After reviewing your application, we are unable to proceed at this time.</p>
     ${safeReason ? `<p><strong>Reason:</strong> ${safeReason}</p>` : ""}
     <p>You are welcome to reapply in the future. If you have questions, please don't hesitate to reach out.</p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: app.email,
@@ -253,34 +226,18 @@ export async function sendRejectionEmail(rawApp: ApplicationData, reason?: strin
 // ── 4. COI Request email ────────────────────────────────────────────────────
 export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
   const app = escApp(rawApp);
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping COI request"); return; }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Certificate of Insurance Required</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Certificate of Insurance Required", `
     <p>Hi ${app.ownerName},</p>
     <p>Your rental application is progressing well. To finalize the review, we require a <strong>Certificate of Insurance (COI)</strong> naming Deluxe Logistics Inc. as an additional insured/certificate holder.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
       <p style="margin: 0 0 8px; font-weight: bold; color: #1e293b;">Certificate Holder Information:</p>
       <p style="margin: 0; font-family: monospace; font-size: 14px; line-height: 1.8; color: #334155;">
-        Deluxe Logistics Inc.<br/>
-        818 Corning Way<br/>
-        Martinsburg, WV 25401
+        Deluxe Logistics Inc.<br/>818 Corning Way<br/>Martinsburg, WV 25401
       </p>
     </div>
     <p>Please reply to this email with your COI attached, or email it to <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>. Once received, we will complete our review and get back to you within 24 hours.</p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: app.email,
@@ -292,18 +249,11 @@ export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
 }
 
 // ── 5b. Invite email (after approval) ─────────────────────────────────────
-export async function sendInviteEmail(email: string, ownerName: string, inviteToken: string): Promise<void> {
+export async function sendInviteEmail(email: string, ownerName: string, inviteToken: string, applicationId?: string): Promise<void> {
   const safeName = esc(ownerName);
   const registerUrl = `${domain()}/register/${inviteToken}`;
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping invite email"); return; }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Your Application Has Been Approved!</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Your Application Has Been Approved!", `
     <p>Hi ${safeName},</p>
     <p>Congratulations! Your rental application has been approved. Please create your account to access your renter dashboard, upload required documents, and manage your rental.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -320,14 +270,7 @@ export async function sendInviteEmail(email: string, ownerName: string, inviteTo
       Create Your Account →
     </a>
     <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${registerUrl}" style="color: #e63946;">${registerUrl}</a></p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: email,
@@ -335,14 +278,13 @@ export async function sendInviteEmail(email: string, ownerName: string, inviteTo
     subject: "Your Deluxe Logistics rental application is approved — create your account",
     html,
     text: `Hi ${ownerName},\n\nYour rental application has been approved! Create your account here:\n${registerUrl}\n\nThis link expires in 48 hours.\n\nDeluxe Logistics Inc.`,
-  }, { template: "invite_email" });
+  }, { template: "invite_email", entityType: applicationId ? "rental_application" : undefined, entityId: applicationId });
 }
 
 // ── 5. More info request email ──────────────────────────────────────────────
 export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: string): Promise<void> {
   const app = escApp(rawApp);
   const safeQuestions = esc(questions);
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping more-info email"); return; }
 
   if (!rawApp.renterToken) {
     console.warn("[email] sendMoreInfoRequest: renterToken missing — skipping email to avoid broken response link");
@@ -350,13 +292,7 @@ export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: st
   }
   const responseUrl = `${domain()}/applications/respond/${rawApp.renterToken}`;
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Additional Information Needed</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Additional Information Needed", `
     <p>Hi ${app.ownerName},</p>
     <p>Thank you for your rental application. We have a few follow-up questions:</p>
     <div style="background: #f8fafc; border-left: 4px solid #e63946; padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
@@ -368,14 +304,7 @@ export async function sendMoreInfoRequest(rawApp: ApplicationData, questions: st
     </a>
     <p style="color: #64748b; font-size: 13px;">Or copy and paste this link: <a href="${responseUrl}" style="color: #e63946;">${responseUrl}</a></p>
     <p>Once we receive your response, we'll complete the review and get back to you within 24 hours.</p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: app.email,
@@ -421,19 +350,9 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
   const signedDate = data.signedAt.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const dashboardUrl = `${domain()}/dashboard`;
 
-  if (!isConfigured()) {
-    console.log("[email] SendGrid not configured — skipping agreement signed email");
-    return;
-  }
 
   // Email to renter
-  const renterHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Rental Agreement Signed</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const renterHtml = emailTemplate("Rental Agreement Signed", `
     <p>Hi ${safeName},</p>
     <p>Thank you for signing your rental agreement. Here's a summary of your agreement:</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -450,24 +369,11 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
     <a href="${dashboardUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Your Dashboard →
     </a>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   // Email to admin
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
-  const adminHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Agreement Signed — Action Required</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental Portal</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const adminHtml = emailTemplate("Agreement Signed — Action Required", `
     <p><strong>${safeCompany}</strong> has signed their rental agreement and is awaiting payment setup.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
@@ -483,8 +389,7 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Rental in Admin →
     </a>
-  </div>
-</div>`;
+  `);
 
   await Promise.allSettled([
     sendTracked({
@@ -513,18 +418,8 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
   const signUrl = `${domain()}/dashboard/sign-agreement/${data.rentalId}`;
 
-  if (!isConfigured()) {
-    console.log("[email] SendGrid not configured — skipping agreement request email");
-    return;
-  }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Your Rental Agreement is Ready to Sign</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Your Rental Agreement is Ready to Sign", `
     <p>Hi ${safeName},</p>
     <p>Great news — your rental agreement for <strong>${safeType} (VIN: ${safeVin})</strong> is ready for your electronic signature.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -545,14 +440,7 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
       <li>Your full legal name for the signature</li>
       <li>Your preferred pickup date and time</li>
     </ul>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.renterEmail,
@@ -575,18 +463,8 @@ export async function sendDepositReceivedAdminEmail(data: {
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
 
-  if (!isConfigured()) {
-    console.log("[email] SendGrid not configured — skipping admin deposit notification");
-    return;
-  }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #22c55e; margin: 0; font-size: 18px;">💰 Security Deposit Received</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics — Admin Notification</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Security Deposit Received", `
     <p>A security deposit has been paid and the rental has been automatically activated.</p>
     <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
       <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
@@ -598,8 +476,7 @@ export async function sendDepositReceivedAdminEmail(data: {
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
       View Rental →
     </a>
-  </div>
-</div>`;
+  `, "#22c55e");
 
   await sendTracked({
     to: ADMIN_EMAIL,
@@ -629,18 +506,8 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
   const dashboardUrl = `${domain()}/dashboard`;
 
-  if (!isConfigured()) {
-    console.log("[email] SendGrid not configured — skipping deposit confirmed email");
-    return;
-  }
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #22c55e; margin: 0; font-size: 20px;">🚛 Your Rental is Now Active!</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Your Rental is Now Active!", `
     <p>Hi ${safeName},</p>
     <p>Great news — your security deposit has been confirmed and your rental is now <strong style="color: #16a34a;">active</strong>.</p>
     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -660,14 +527,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
     <a href="${dashboardUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Your Dashboard →
     </a>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `, "#22c55e");
 
   await sendTracked({
     to: data.renterEmail,
@@ -680,6 +540,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
 
 // ── Monthly invoice email ─────────────────────────────────────────────────────
 export interface MonthlyInvoiceEmailData {
+  rentalId?: string;
   renterEmail: string;
   renterName: string;
   companyName: string;
@@ -692,10 +553,6 @@ export interface MonthlyInvoiceEmailData {
 }
 
 export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Promise<void> {
-  if (!isConfigured()) {
-    console.log("[email] SendGrid not configured — skipping monthly invoice email");
-    return;
-  }
 
   const safeName    = esc(data.renterName);
   const safeCompany = esc(data.companyName);
@@ -705,30 +562,22 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
   const period      = data.billingPeriod ? esc(data.billingPeriod) : "this month";
   const dashUrl     = `${domain()}/dashboard`;
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #0a0a0a; padding: 30px; text-align: center;">
-    <h1 style="color: #f59e0b; margin: 0; font-size: 24px;">Monthly Invoice</h1>
-    <p style="color: #9ca3af; margin: 8px 0 0;">Deluxe Logistics Inc.</p>
-  </div>
-  <div style="background: #111; padding: 30px;">
-    <p style="color: #e5e7eb;">Hi ${safeName},</p>
-    <p style="color: #9ca3af;">Your monthly rental invoice for <strong style="color:#e5e7eb;">${period}</strong> is ready.</p>
-    <div style="background: #1c1c1c; border: 1px solid #333; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <table style="width:100%; color:#9ca3af; font-size:14px; border-collapse:collapse;">
-        <tr><td style="padding:4px 0;">Company</td><td style="text-align:right; color:#e5e7eb;">${safeCompany}</td></tr>
-        <tr><td style="padding:4px 0;">Trailer</td><td style="text-align:right; color:#e5e7eb;">${safeType} — VIN ${safeVin}</td></tr>
-        <tr style="border-top:1px solid #333;">
-          <td style="padding:8px 0 4px; font-weight:bold; color:#e5e7eb;">Amount Due</td>
-          <td style="text-align:right; color:#f59e0b; font-weight:bold; font-size:18px;">${amountStr}</td>
+  const html = emailTemplate("Monthly Invoice", `
+    <p>Hi ${safeName},</p>
+    <p>Your monthly rental invoice for <strong>${period}</strong> is ready.</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 4px 0; color: #64748b;">Trailer</td><td style="padding: 4px 0;">${safeType} — VIN ${safeVin}</td></tr>
+        <tr style="border-top: 1px solid #e2e8f0;">
+          <td style="padding: 8px 0 4px; font-weight: bold; color: #1e293b;">Amount Due</td>
+          <td style="padding: 8px 0 4px; font-weight: bold; font-size: 18px; color: #f59e0b;">${amountStr}</td>
         </tr>
       </table>
     </div>
-    ${data.invoiceUrl ? `<div style="text-align:center; margin:24px 0;"><a href="${esc(data.invoiceUrl)}" style="background:#f59e0b; color:#000; padding:12px 28px; border-radius:6px; text-decoration:none; font-weight:bold;">View &amp; Pay Invoice</a></div>` : ''}
-    <p style="color:#6b7280; font-size:13px;">You can also view your payment history in your <a href="${dashUrl}" style="color:#f59e0b;">dashboard</a>.</p>
-    <p style="color:#6b7280; font-size:12px;">Questions? Contact us at <a href="mailto:info@deluxelogistics.com" style="color:#f59e0b;">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+    ${data.invoiceUrl ? `<a href="${esc(data.invoiceUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">View &amp; Pay Invoice →</a>` : ""}
+    <p style="color: #64748b; font-size: 13px;">You can also view your payment history in your <a href="${dashUrl}" style="color: #e63946;">dashboard</a>.</p>
+  `, "#f59e0b");
 
   await sendTracked({
     to: data.renterEmail,
@@ -736,7 +585,7 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     subject: `Invoice for ${period} — ${safeType} rental (${safeVin})`,
     html,
     text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? info@deluxelogistics.com\n\nDeluxe Logistics Inc.`,
-  }, { template: "monthly_invoice" });
+  }, { template: "monthly_invoice", entityType: data.rentalId ? "rental" : undefined, entityId: data.rentalId });
 }
 
 // ── QR Pickup confirmed notification ──────────────────────────────────────────
@@ -751,7 +600,6 @@ export interface QREventData {
 }
 
 export async function sendPickupConfirmedEmails(data: QREventData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping pickup confirmed email"); return; }
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
   const safeName = esc(data.renterName);
   const safeCompany = esc(data.companyName);
@@ -760,13 +608,7 @@ export async function sendPickupConfirmedEmails(data: QREventData): Promise<void
   const dateStr = esc(data.confirmedAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }));
   const dashUrl = `${domain()}/dashboard`;
 
-  const renterHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #052e16; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #4ade80; margin: 0; font-size: 20px;">Pickup Confirmed!</h1>
-    <p style="color: #86efac; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const renterHtml = emailTemplate("Pickup Confirmed!", `
     <p>Hi ${safeName},</p>
     <p>Your trailer pickup has been confirmed. Welcome aboard!</p>
     <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
@@ -780,18 +622,9 @@ export async function sendPickupConfirmedEmails(data: QREventData): Promise<void
     <a href="${dashUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Dashboard →
     </a>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+  `, "#22c55e");
 
-  const adminHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #052e16; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #4ade80; margin: 0; font-size: 18px;">Pickup Confirmed via QR Scan</h1>
-    <p style="color: #86efac; margin: 6px 0 0;">Deluxe Logistics Admin</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const adminHtml = emailTemplate("Pickup Confirmed via QR Scan", `
     <p><strong>${safeCompany}</strong> has scanned the pickup QR code and confirmed trailer receipt.</p>
     <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
       <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0;">${safeCompany}</td></tr>
@@ -799,8 +632,7 @@ export async function sendPickupConfirmedEmails(data: QREventData): Promise<void
       <tr><td style="padding: 4px 0; color: #64748b;">Confirmed At</td><td style="padding: 4px 0; color: #16a34a;">${dateStr}</td></tr>
     </table>
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold;">View Rental →</a>
-  </div>
-</div>`;
+  `, "#22c55e");
 
   await Promise.allSettled([
     sendTracked({ to: data.renterEmail, from: FROM, subject: `Pickup confirmed — ${data.trailerType} (${data.trailerVin})`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nPickup Time: ${dateStr}\n\nView your dashboard: ${dashUrl}\n\nDeluxe Logistics Inc.` }, { template: "pickup_confirmed_renter", entityType: "rental", entityId: data.rentalId }),
@@ -809,7 +641,6 @@ export async function sendPickupConfirmedEmails(data: QREventData): Promise<void
 }
 
 export async function sendReturnConfirmedEmails(data: QREventData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping return confirmed email"); return; }
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
   const safeName = esc(data.renterName);
   const safeCompany = esc(data.companyName);
@@ -818,13 +649,7 @@ export async function sendReturnConfirmedEmails(data: QREventData): Promise<void
   const dateStr = esc(data.confirmedAt.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }));
   const dashUrl = `${domain()}/dashboard`;
 
-  const renterHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #0c1a2e; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #60a5fa; margin: 0; font-size: 20px;">Return Confirmed — Thank You!</h1>
-    <p style="color: #93c5fd; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const renterHtml = emailTemplate("Return Confirmed — Thank You!", `
     <p>Hi ${safeName},</p>
     <p>Your trailer return has been confirmed. Thank you for choosing Deluxe Logistics!</p>
     <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
@@ -838,18 +663,9 @@ export async function sendReturnConfirmedEmails(data: QREventData): Promise<void
     <a href="${dashUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Dashboard →
     </a>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+  `, "#3b82f6");
 
-  const adminHtml = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #0c1a2e; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #60a5fa; margin: 0; font-size: 18px;">Return Confirmed via QR Scan</h1>
-    <p style="color: #93c5fd; margin: 6px 0 0;">Deluxe Logistics Admin</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const adminHtml = emailTemplate("Return Confirmed via QR Scan", `
     <p><strong>${safeCompany}</strong> has scanned the return QR code and confirmed trailer return. Rental is now <strong>completed</strong>.</p>
     <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
       <tr><td style="padding: 4px 0; color: #64748b;">Company</td><td style="padding: 4px 0;">${safeCompany}</td></tr>
@@ -857,8 +673,7 @@ export async function sendReturnConfirmedEmails(data: QREventData): Promise<void
       <tr><td style="padding: 4px 0; color: #64748b;">Return Time</td><td style="padding: 4px 0; color: #2563eb;">${dateStr}</td></tr>
     </table>
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold;">View Rental →</a>
-  </div>
-</div>`;
+  `, "#3b82f6");
 
   await Promise.allSettled([
     sendTracked({ to: data.renterEmail, from: FROM, subject: `Return confirmed — ${data.trailerType} (${data.trailerVin}) — Thank you!`, html: renterHtml, text: `Hi ${data.renterName},\n\nYour trailer return has been confirmed.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReturn Time: ${dateStr}\n\nThank you for choosing Deluxe Logistics!\n\nDeluxe Logistics Inc.` }, { template: "return_confirmed_renter", entityType: "rental", entityId: data.rentalId }),
@@ -878,7 +693,6 @@ export interface EngineHoursRequestData {
 }
 
 export async function sendEngineHoursRequest(data: EngineHoursRequestData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping engine hours request"); return; }
   const dashboardUrl = `/dashboard/engine-hours/${data.rentalId}`;
   // Link to login with a redirect param so logged-out users land directly on the submission page
   const submitUrl = `${domain()}/login?redirect=${encodeURIComponent(dashboardUrl)}`;
@@ -888,13 +702,7 @@ export async function sendEngineHoursRequest(data: EngineHoursRequestData): Prom
   const safeType = esc(data.trailerType);
   const prevReading = data.previousReading != null ? data.previousReading.toLocaleString() : "None";
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Engine Hour Reading Requested</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Engine Hour Reading Requested", `
     <p>Hi ${safeName},</p>
     <p>Deluxe Logistics is requesting your current reefer engine hour reading for your trailer.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
@@ -909,10 +717,7 @@ export async function sendEngineHoursRequest(data: EngineHoursRequestData): Prom
       Submit Engine Hours →
     </a>
     <p style="color: #64748b; font-size: 13px;">Or paste this link: <a href="${esc(submitUrl)}" style="color: #e63946;">${esc(submitUrl)}</a></p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.renterEmail,
@@ -935,20 +740,13 @@ export interface EngineHoursSubmittedData {
 }
 
 export async function sendEngineHoursReceivedAdmin(data: EngineHoursSubmittedData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping engine hours admin notify"); return; }
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
   const safeCompany = esc(data.companyName);
   const safeVin = esc(data.trailerVin);
   const safeType = esc(data.trailerType);
   const chargeStr = data.calculatedCharge != null ? `$${(data.calculatedCharge / 100).toLocaleString()}` : "N/A";
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Engine Hours Submitted</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental Portal</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Engine Hours Submitted", `
     <p><strong>${safeCompany}</strong> has submitted an engine hour reading.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
@@ -961,8 +759,7 @@ export async function sendEngineHoursReceivedAdmin(data: EngineHoursSubmittedDat
     <a href="${esc(adminUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
       View Rental &amp; Bill →
     </a>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: ADMIN_EMAIL,
@@ -991,18 +788,11 @@ export interface DriverApplicationEmailData {
 }
 
 export async function sendDriverApplicationConfirmation(data: DriverApplicationEmailData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping driver app confirmation"); return; }
   const safeName = esc(data.fullName);
   const positionLabel = data.desiredPosition === "otr" ? "OTR" : data.desiredPosition === "regional" ? "Regional" : data.desiredPosition === "local" ? "Local" : "Any";
   const endorsements = [data.hasTwic && "TWIC", data.hasHazmat && "Hazmat", data.hasTanker && "Tanker"].filter(Boolean).join(", ") || "None";
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Application Received</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Inc. — Driver Hiring</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Application Received", `
     <p>Hi <strong>${safeName}</strong>,</p>
     <p>Thank you for applying to drive for Deluxe Logistics. We've received your application and will review it within 2 business days. If you're a strong match, we'll reach out to schedule a quick call.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
@@ -1016,8 +806,7 @@ export async function sendDriverApplicationConfirmation(data: DriverApplicationE
     </div>
     <p style="font-size: 13px; color: #64748b;">Questions? Reply to this email or contact us at jobs@deluxelogistics.com.</p>
     <p style="font-size: 13px; color: #64748b;">— The Deluxe Logistics Team</p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.email,
@@ -1029,19 +818,12 @@ export async function sendDriverApplicationConfirmation(data: DriverApplicationE
 }
 
 export async function sendDriverApplicationAdmin(data: DriverApplicationEmailData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping driver app admin notify"); return; }
   const safeName = esc(data.fullName);
   const adminUrl = `${domain()}/admin/driver-applications`;
   const positionLabel = data.desiredPosition === "otr" ? "OTR" : data.desiredPosition === "regional" ? "Regional" : data.desiredPosition === "local" ? "Local" : "Any";
   const endorsements = [data.hasTwic && "TWIC", data.hasHazmat && "Hazmat", data.hasTanker && "Tanker"].filter(Boolean).join(", ") || "None";
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">New Driver Application</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Hiring Portal</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("New Driver Application", `
     <p><strong>${safeName}</strong> submitted a driver application.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
@@ -1056,8 +838,7 @@ export async function sendDriverApplicationAdmin(data: DriverApplicationEmailDat
     <a href="${esc(adminUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px;">
       Review Application →
     </a>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: ADMIN_EMAIL,
@@ -1075,17 +856,10 @@ export async function sendAdminSetupEmail(data: {
   lastName: string;
   inviteToken: string;
 }): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping admin setup email"); return; }
   const setupUrl = `${domain()}/register/admin/${data.inviteToken}`;
   const safeName = esc(data.firstName);
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Admin Account Setup</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics — Internal Admin Portal</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Admin Account Setup", `
     <p>Hi ${safeName},</p>
     <p>You've been invited to join the Deluxe Logistics admin team. Click the link below to set your password and activate your account.</p>
     <p><strong>This invitation link expires in 7 days.</strong></p>
@@ -1093,14 +867,7 @@ export async function sendAdminSetupEmail(data: {
       Set Up Your Admin Account →
     </a>
     <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${setupUrl}" style="color: #e63946;">${setupUrl}</a></p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.email,
@@ -1122,19 +889,12 @@ export interface RegistrationEmailData {
 }
 
 export async function sendRegistrationEmail(data: RegistrationEmailData): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping registration email"); return; }
   const safeName = esc(data.renterName);
   const safeCompany = esc(data.companyName);
   const safeVin = esc(data.trailerVin);
   const safeType = esc(data.trailerType);
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Trailer Registration Document</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Trailer Registration Document", `
     <p>Hi ${safeName},</p>
     <p>Your trailer pickup has been confirmed. Attached below is the electronic registration for your trailer. Please keep a copy in your cab at all times.</p>
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
@@ -1147,10 +907,7 @@ export async function sendRegistrationEmail(data: RegistrationEmailData): Promis
       View Registration Document →
     </a>
     <p style="color: #64748b; font-size: 13px;">Or copy the link: <a href="${esc(data.registrationUrl)}" style="color: #e63946;">${esc(data.registrationUrl)}</a></p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.renterEmail,
@@ -1167,17 +924,10 @@ export async function sendPasswordResetEmail(data: {
   firstName: string;
   resetToken: string;
 }): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping password reset email"); return; }
   const resetUrl = `${domain()}/reset-password/${data.resetToken}`;
   const safeName = esc(data.firstName || "there");
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: #e63946; margin: 0; font-size: 20px;">Reset Your Password</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Reset Your Password", `
     <p>Hi ${safeName},</p>
     <p>We received a request to reset your password. Click the button below to set a new password. This link expires in <strong>1 hour</strong>.</p>
     <a href="${resetUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin: 16px 0;">
@@ -1185,14 +935,7 @@ export async function sendPasswordResetEmail(data: {
     </a>
     <p style="color: #64748b; font-size: 13px;">Or copy and paste: <a href="${resetUrl}" style="color: #e63946;">${resetUrl}</a></p>
     <p style="color: #94a3b8; font-size: 12px; margin-top: 20px;">If you did not request a password reset, you can safely ignore this email. Your password will not change.</p>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
-    </p>
-  </div>
-</div>`;
+  `);
 
   await sendTracked({
     to: data.email,
@@ -1214,7 +957,6 @@ export async function sendReturnReminderEmail(data: {
   daysUntilReturn: number;
   rentalId: string;
 }): Promise<void> {
-  if (!isConfigured()) { console.log("[email] SendGrid not configured — skipping return reminder"); return; }
   const safeName = esc(data.renterName);
   const safeCompany = esc(data.companyName);
   const safeVin = esc(data.trailerVin);
@@ -1224,13 +966,7 @@ export async function sendReturnReminderEmail(data: {
   const urgencyColor = data.daysUntilReturn <= 1 ? "#dc2626" : "#f59e0b";
   const urgencyLabel = data.daysUntilReturn <= 1 ? "Tomorrow" : `${data.daysUntilReturn} days`;
 
-  const html = `
-<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-  <div style="background: #1a0a0c; padding: 20px 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: ${urgencyColor}; margin: 0; font-size: 20px;">Trailer Return Reminder</h1>
-    <p style="color: #94a3b8; margin: 6px 0 0;">Deluxe Logistics Equipment Rental</p>
-  </div>
-  <div style="background: #fff; padding: 30px; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px;">
+  const html = emailTemplate("Trailer Return Reminder", `
     <p>Hi ${safeName},</p>
     <p>This is a reminder that your trailer rental is scheduled to end <strong style="color: ${urgencyColor};">${urgencyLabel === "Tomorrow" ? "tomorrow" : `in ${data.daysUntilReturn} days`}</strong>.</p>
     <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 16px 20px; margin: 20px 0;">
@@ -1245,10 +981,7 @@ export async function sendReturnReminderEmail(data: {
     <a href="${dashUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Dashboard →
     </a>
-    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-    <p style="color: #64748b; font-size: 13px;"><strong>Deluxe Logistics Inc.</strong><br/>818 Corning Way, Martinsburg, WV 25401<br/><a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a></p>
-  </div>
-</div>`;
+  `, urgencyColor);
 
   const reminderSubject = `Reminder: Your trailer return is ${urgencyLabel === "Tomorrow" ? "tomorrow" : `in ${data.daysUntilReturn} days`} — ${safeType} VIN ${safeVin}`;
   await sendTracked({
@@ -1267,7 +1000,6 @@ export async function sendContactFormEmail(data: {
   subject: string;
   message: string;
 }): Promise<void> {
-  if (!isConfigured()) return;
   const html = `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
   <div style="background: #1a1a1a; padding: 24px 32px;">

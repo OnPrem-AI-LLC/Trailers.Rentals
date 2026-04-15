@@ -89,7 +89,7 @@ export default function Home() {
     const locs = allAvailable
       .map((t) => (t as TrailerWithPhotos & { location?: string | null }).location)
       .filter((l): l is string => !!l);
-    return [...new Set(locs)].sort();
+    return Array.from(new Set(locs)).sort();
   }, [allAvailable]);
 
   const available = useMemo(() => {

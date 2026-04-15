@@ -129,8 +129,10 @@ async function runReturnReminders() {
       if (!["active", "active_in_use"].includes(rental.status)) continue;
       if (!rental.endDate) continue;
       const endDate = new Date(rental.endDate);
-      const msUntil = endDate.getTime() - now.getTime();
-      const daysUntil = Math.round(msUntil / (1000 * 60 * 60 * 24));
+      // Compare calendar dates (midnight UTC) to avoid fractional-day drift
+      const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+      const endUtc = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+      const daysUntil = (endUtc - todayUtc) / (1000 * 60 * 60 * 24);
       if (!targets.includes(daysUntil)) continue;
 
       try {

@@ -286,9 +286,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailer = await storage.getTrailer(req.params.id);
       if (!trailer) return res.status(404).json({ message: "Trailer not found" });
 
-      const rentals = await storage.getRentals();
+      const rentals = await storage.listRentals();
       const activeRental = rentals.find(
-        (r) => r.trailerId === trailer.id && r.pickupToken && ["active", "active_in_use"].includes(r.status)
+        (r: { trailerId: string; pickupToken: string | null; status: string }) =>
+          r.trailerId === trailer.id && r.pickupToken && ["active", "active_in_use"].includes(r.status)
       );
       if (!activeRental?.pickupToken) {
         return res.status(404).json({ message: "No active rental with a pickup token found for this trailer" });
@@ -779,7 +780,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Send invite email (non-fatal)
-      sendInviteEmail(application.email, application.ownerName, inviteToken)
+      sendInviteEmail(application.email, application.ownerName, inviteToken, application.id)
         .catch((e: unknown) => console.warn("[email] invite send failed:", e));
 
       return res.json(updated);
