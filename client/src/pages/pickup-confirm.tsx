@@ -41,7 +41,7 @@ export default function PickupConfirmPage() {
   const [uploading, setUploading] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery<PickupInfo>({
-    queryKey: ["/api/pickup", token],
+    queryKey: ["/api/pickup", token, user?.id ?? "anon"],
     queryFn: async () => {
       const res = await fetch(`/api/pickup/${token}`);
       if (!res.ok) throw new Error("Invalid link");
@@ -49,6 +49,7 @@ export default function PickupConfirmPage() {
     },
     enabled: !!token,
     retry: false,
+    staleTime: 0,
   });
 
   useEffect(() => {
