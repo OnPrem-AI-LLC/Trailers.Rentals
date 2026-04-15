@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
@@ -32,6 +32,14 @@ interface AuditResponse {
   total: number;
 }
 
+interface UserRow {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  username: string;
+  role: string;
+}
+
 const ACTION_TYPE_LABELS: Record<string, string> = {
   create_trailer: "Create Trailer",
   update_trailer: "Update Trailer",
@@ -53,16 +61,26 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   agreement_signed: "Agreement Signed",
   pickup_confirmed: "Pickup Confirmed",
   return_confirmed: "Return Confirmed",
-  engine_hour_entry_submitted: "Engine Hours Submitted",
-  engine_hour_entry_admin: "Engine Hours (admin)",
+  engine_hours_submitted: "Engine Hours Submitted",
+  engine_hours_manual_entry: "Engine Hours (admin)",
+  engine_hours_requested: "Engine Hours Requested",
+  engine_hours_billed: "Engine Hours Billed",
   note_added: "Note Added",
   rental_message_sent: "Message Sent",
   subscription_creation_failed: "Subscription Failed",
+  subscription_created_by_admin: "Subscription Created",
+  subscription_cancelled: "Subscription Cancelled",
+  admin_invoice_created: "Invoice Created",
   admin_user_invited: "User Invited",
   admin_user_deactivated: "User Deactivated",
   admin_user_reactivated: "User Reactivated",
+  admin_account_activated: "Admin Account Activated",
+  account_registered: "Account Registered",
   safer_refreshed: "FMCSA SAFER Refreshed",
+  rental_updated_by_admin: "Rental Updated",
 };
+
+const KNOWN_ENTITY_TYPES = ["trailer", "rental", "rental_application", "company", "user"];
 
 const ENTITY_COLORS: Record<string, string> = {
   trailer: "bg-blue-500/15 text-blue-400",
@@ -73,6 +91,27 @@ const ENTITY_COLORS: Record<string, string> = {
 };
 
 const PAGE_SIZE = 50;
+
+function buildParams(opts: {
+  actionType: string;
+  entityType: string;
+  userId: string;
+  from: string;
+  to: string;
+  search: string;
+  page: number;
+}): string {
+  const p = new URLSearchParams();
+  p.set("limit", String(PAGE_SIZE));
+  p.set("offset", String(opts.page * PAGE_SIZE));
+  if (opts.actionType !== "all") p.set("actionType", opts.actionType);
+  if (opts.entityType !== "all") p.set("entityType", opts.entityType);
+  if (opts.userId !== "all") p.set("userId", opts.userId);
+  if (opts.from) p.set("from", opts.from);
+  if (opts.to) p.set("to", opts.to);
+  if (opts.search.trim()) p.set("search", opts.search.trim());
+  return p.toString();
+}
 
 export default function AdminAuditPage() {
   const [, navigate] = useLocation();
@@ -90,61 +129,35 @@ export default function AdminAuditPage() {
     return null;
   }
 
+  const params = buildParams({
+    actionType: filterAction,
+    entityType: filterEntity,
+    userId: filterActor,
+    from: fromDate,
+    to: toDate,
+    search,
+    page,
+  });
+
   const { data, isLoading, refetch, isFetching } = useQuery<AuditResponse>({
-    queryKey: ["/api/admin/audit"],
+    queryKey: ["/api/admin/audit", params],
     queryFn: async () => {
-      const res = await fetch("/api/admin/audit?limit=500");
+      const res = await fetch(`/api/admin/audit?${params}`);
       if (!res.ok) throw new Error("Failed to load audit logs");
       return res.json();
     },
     staleTime: 30000,
   });
 
-  const uniqueActions = useMemo(() => [...new Set((data?.logs ?? []).map(l => l.actionType))].sort(), [data]);
-  const uniqueEntities = useMemo(() => [...new Set((data?.logs ?? []).map(l => l.entityType).filter(Boolean))].sort() as string[], [data]);
+  const { data: usersData } = useQuery<UserRow[]>({
+    queryKey: ["/api/admin/users"],
+    staleTime: 60000,
+  });
 
-  // Build unique actor list (userId + name pairs)
-  const uniqueActors = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const l of data?.logs ?? []) {
-      if (l.userId && !seen.has(l.userId)) {
-        seen.set(l.userId, l.actorName);
-      }
-    }
-    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [data]);
+  const resetPage = useCallback(() => setPage(0), []);
 
-  const filtered = useMemo(() => {
-    let logs = data?.logs ?? [];
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      logs = logs.filter(l =>
-        l.description.toLowerCase().includes(q) ||
-        l.actionType.toLowerCase().includes(q) ||
-        (l.entityType?.toLowerCase().includes(q)) ||
-        (l.entityId?.toLowerCase().includes(q)) ||
-        l.actorName.toLowerCase().includes(q)
-      );
-    }
-    if (filterAction !== "all") logs = logs.filter(l => l.actionType === filterAction);
-    if (filterEntity !== "all") logs = logs.filter(l => l.entityType === filterEntity);
-    if (filterActor !== "all") logs = logs.filter(l => l.userId === filterActor);
-    if (fromDate) {
-      const from = new Date(fromDate);
-      logs = logs.filter(l => new Date(l.createdAt) >= from);
-    }
-    if (toDate) {
-      const to = new Date(toDate);
-      to.setHours(23, 59, 59, 999);
-      logs = logs.filter(l => new Date(l.createdAt) <= to);
-    }
-    return logs;
-  }, [data, search, filterAction, filterEntity, filterActor, fromDate, toDate]);
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const pageLogs = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  const resetPage = () => setPage(0);
+  const totalPages = Math.ceil((data?.total ?? 0) / PAGE_SIZE);
+  const hasFilters = search.trim() || filterAction !== "all" || filterEntity !== "all" || filterActor !== "all" || fromDate || toDate;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
@@ -167,14 +180,13 @@ export default function AdminAuditPage() {
 
         {/* Filters */}
         <div className="bg-card border border-border rounded-xl p-4 mb-5 space-y-3">
-          {/* Row 1: search + action + entity */}
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={e => { setSearch(e.target.value); resetPage(); }}
-                placeholder="Search description, action, entity, actor..."
+                placeholder="Search description..."
                 className="pl-9 h-8 text-sm"
               />
             </div>
@@ -185,8 +197,8 @@ export default function AdminAuditPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Actions</SelectItem>
-                {uniqueActions.map(a => (
-                  <SelectItem key={a} value={a}>{ACTION_TYPE_LABELS[a] ?? a}</SelectItem>
+                {Object.entries(ACTION_TYPE_LABELS).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -196,23 +208,25 @@ export default function AdminAuditPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Entities</SelectItem>
-                {uniqueEntities.map(e => (
+                {KNOWN_ENTITY_TYPES.map(e => (
                   <SelectItem key={e} value={e}>{e.replace(/_/g, " ")}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          {/* Row 2: actor + date range */}
+
           <div className="flex flex-wrap gap-3 items-center">
             <Select value={filterActor} onValueChange={v => { setFilterActor(v); resetPage(); }}>
               <SelectTrigger className="w-[200px] h-8 text-sm">
                 <User className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
-                <SelectValue placeholder="Filter by admin" />
+                <SelectValue placeholder="Filter by user" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Users</SelectItem>
-                {uniqueActors.map(([uid, name]) => (
-                  <SelectItem key={uid} value={uid}>{name}</SelectItem>
+                {(usersData ?? []).map(u => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.username}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -223,7 +237,6 @@ export default function AdminAuditPage() {
                 value={fromDate}
                 onChange={e => { setFromDate(e.target.value); resetPage(); }}
                 className="h-8 text-sm w-[140px]"
-                placeholder="From"
               />
               <span className="text-xs text-muted-foreground">–</span>
               <Input
@@ -231,9 +244,8 @@ export default function AdminAuditPage() {
                 value={toDate}
                 onChange={e => { setToDate(e.target.value); resetPage(); }}
                 className="h-8 text-sm w-[140px]"
-                placeholder="To"
               />
-              {(fromDate || toDate || filterActor !== "all" || filterAction !== "all" || filterEntity !== "all" || search) && (
+              {hasFilters && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -248,7 +260,7 @@ export default function AdminAuditPage() {
               )}
             </div>
             <span className="ml-auto text-xs text-muted-foreground">
-              {filtered.length !== (data?.total ?? 0) ? `${filtered.length} of ${data?.total ?? 0} shown` : `${filtered.length} entries`}
+              {data ? `Showing ${Math.min(page * PAGE_SIZE + 1, data.total)}–${Math.min((page + 1) * PAGE_SIZE, data.total)} of ${data.total}` : ""}
             </span>
           </div>
         </div>
@@ -277,13 +289,13 @@ export default function AdminAuditPage() {
                       <td className="p-3"><Skeleton className="h-4 w-20" /></td>
                     </tr>
                   ))
-                ) : pageLogs.length === 0 ? (
+                ) : (data?.logs ?? []).length === 0 ? (
                   <tr>
                     <td colSpan={5} className="text-center py-12 text-muted-foreground">
                       No audit log entries match your filters
                     </td>
                   </tr>
-                ) : pageLogs.map(log => (
+                ) : (data?.logs ?? []).map(log => (
                   <tr key={log.id} className="border-b border-border/50 hover:bg-secondary/20 transition-colors">
                     <td className="p-3">
                       <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -328,11 +340,10 @@ export default function AdminAuditPage() {
             </table>
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between p-3 border-t border-border">
               <span className="text-xs text-muted-foreground">
-                Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
+                Page {page + 1} of {totalPages}
               </span>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" className="h-7 w-7 p-0" disabled={page === 0} onClick={() => setPage(p => p - 1)}>

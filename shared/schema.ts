@@ -30,6 +30,7 @@ export const companies = pgTable("companies", {
   phone: text("phone").notNull(),
   address: text("address"),
   driverLicenseNumber: text("driver_license_number"),
+  adminOverrideFields: text("admin_override_fields"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

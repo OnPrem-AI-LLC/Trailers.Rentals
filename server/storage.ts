@@ -100,7 +100,7 @@ export interface IStorage {
   // Audit Logs
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(entityType?: string, entityId?: string): Promise<AuditLog[]>;
-  getAuditLogsFiltered(opts: { entityType?: string; entityId?: string; actionType?: string; userId?: string; from?: Date; to?: Date; limit?: number; offset?: number }): Promise<{ logs: AuditLog[]; total: number }>;
+  getAuditLogsFiltered(opts: { entityType?: string; entityId?: string; actionType?: string; userId?: string; from?: Date; to?: Date; search?: string; limit?: number; offset?: number }): Promise<{ logs: AuditLog[]; total: number }>;
 
   // Engine Hour Entries
   createEngineHourEntry(entry: typeof engineHourEntries.$inferInsert): Promise<EngineHourEntry>;
@@ -407,20 +407,23 @@ export class DatabaseStorage implements IStorage {
     userId?: string;
     from?: Date;
     to?: Date;
+    search?: string;
     limit?: number;
     offset?: number;
   }): Promise<{ logs: AuditLog[]; total: number }> {
-    // Build conditions dynamically; cast to any[] to satisfy Drizzle's overloaded and() signature
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const conditions: any[] = [];
-    if (opts.entityType) conditions.push(eq(auditLogs.entityType, opts.entityType));
-    if (opts.entityId) conditions.push(eq(auditLogs.entityId, opts.entityId));
-    if (opts.actionType) conditions.push(eq(auditLogs.actionType, opts.actionType));
-    if (opts.userId) conditions.push(eq(auditLogs.userId, opts.userId));
-    if (opts.from) conditions.push(gte(auditLogs.createdAt, opts.from));
-    if (opts.to) conditions.push(lte(auditLogs.createdAt, opts.to));
+    const searchCondition = opts.search
+      ? sql`lower(${auditLogs.description}) like ${"%" + opts.search.toLowerCase() + "%"}`
+      : undefined;
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereClause = and(
+      opts.entityType ? eq(auditLogs.entityType, opts.entityType) : undefined,
+      opts.entityId ? eq(auditLogs.entityId, opts.entityId) : undefined,
+      opts.actionType ? eq(auditLogs.actionType, opts.actionType) : undefined,
+      opts.userId ? eq(auditLogs.userId, opts.userId) : undefined,
+      opts.from ? gte(auditLogs.createdAt, opts.from) : undefined,
+      opts.to ? lte(auditLogs.createdAt, opts.to) : undefined,
+      searchCondition,
+    );
 
     const [countResult, rows] = await Promise.all([
       db

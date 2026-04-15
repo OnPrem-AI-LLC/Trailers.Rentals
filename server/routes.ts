@@ -948,7 +948,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Admin: global audit log — server-side filtered + paginated + enriched ──
   app.get("/api/admin/audit", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { entityType, entityId, actionType, userId, from, to, limit, offset } = req.query as Record<string, string | undefined>;
+      const { entityType, entityId, actionType, userId, from, to, search, limit, offset } = req.query as Record<string, string | undefined>;
 
       const pageSize = Math.min(parseInt(limit ?? "50", 10), 500);
       const pageOffset = parseInt(offset ?? "0", 10);
@@ -964,6 +964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           from: fromDate,
           to: toDate,
+          search: search?.trim() || undefined,
           limit: pageSize,
           offset: pageOffset,
         }),
@@ -1047,8 +1048,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         inviteToken,
         inviteExpiry,
       });
-      const { sendAdminSetupEmail } = await import("./email-service");
-      await sendAdminSetupEmail({ email, firstName, lastName, inviteToken }).catch(console.error);
+      if (role === "admin") {
+        const { sendAdminSetupEmail } = await import("./email-service");
+        await sendAdminSetupEmail({ email, firstName, lastName, inviteToken }).catch(console.error);
+      } else {
+        const { sendInviteEmail } = await import("./email-service");
+        await sendInviteEmail(email, `${firstName} ${lastName}`, inviteToken).catch(console.error);
+      }
       await logAuditEvent({
         req,
         userId: req.session.userId!,
@@ -1405,7 +1411,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/admin/companies/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const updates = updateCompanySchema.parse(req.body);
-      const company = await storage.updateCompany(req.params.id, updates);
+
+      // Track which fields were admin-entered at the field level
+      const existing = await storage.getCompany(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Company not found" });
+      const prevOverrides: Record<string, boolean> = JSON.parse(existing.adminOverrideFields ?? "{}");
+      const newOverrides = { ...prevOverrides };
+      for (const key of Object.keys(updates)) {
+        if (updates[key as keyof typeof updates] !== undefined) {
+          newOverrides[key] = true;
+        }
+      }
+
+      const company = await storage.updateCompany(req.params.id, {
+        ...updates,
+        adminOverrideFields: JSON.stringify(newOverrides),
+      });
       if (!company) return res.status(404).json({ message: "Company not found" });
       await logAuditEvent({
         req,
@@ -1413,8 +1434,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "company_edited_by_admin",
         entityType: "company",
         entityId: req.params.id,
-        description: `Admin manually updated company profile for ${company.name}`,
-        metadata: updates as Record<string, unknown>,
+        description: `Admin manually updated company profile for ${company.name}: ${Object.keys(updates).join(", ")}`,
+        metadata: { fields: Object.keys(updates), ...updates } as Record<string, unknown>,
         isAdminEntry: true,
       });
       return res.json(company);
