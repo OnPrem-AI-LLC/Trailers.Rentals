@@ -389,8 +389,20 @@ export default function AdminRequestDetail() {
       toast({ title: "Company profile updated" });
       setEditCompanyOpen(false);
       qc.invalidateQueries({ queryKey: ["/api/admin/companies", app?.companyId] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/audit/company", app?.companyId] });
     },
     onError: () => toast({ title: "Failed to update company", variant: "destructive" }),
+  });
+
+  type CompanyAuditLog = { id: string; actionType: string; description: string; createdAt: string; isAdminEntry: boolean; actorName: string };
+  const { data: companyAuditData } = useQuery<{ logs: CompanyAuditLog[]; total: number }>({
+    queryKey: ["/api/admin/audit/company", app?.companyId],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/audit?entityType=company&entityId=${app!.companyId}&limit=50`, { credentials: "include" });
+      if (!res.ok) return { logs: [], total: 0 };
+      return res.json();
+    },
+    enabled: !!app?.companyId && !!user && user.role === "admin",
   });
 
   // Linked rentals (only when application is approved and has a companyId)
@@ -683,61 +695,83 @@ export default function AdminRequestDetail() {
                 </div>
               ) : companyProfile ? (
                 <>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm mb-5">
-                    <div>
-                      <span className="text-xs text-muted-foreground">Legal Name</span>
-                      <p className="font-semibold">{companyProfile.company.name}</p>
-                    </div>
-                    <div>
-                      <span className="text-xs text-muted-foreground">Owner</span>
-                      <p>{companyProfile.company.ownerName}</p>
-                    </div>
-                    {companyProfile.company.authorizedUser && (
-                      <div className="col-span-2">
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><UserCheck className="w-3 h-3" />Authorized User</span>
-                        <p>{companyProfile.company.authorizedUser}</p>
+                  {/* Admin-entered field indicators */}
+                  {(() => {
+                    const overrides: Record<string, boolean> = JSON.parse(companyProfile.company.adminOverrideFields ?? "{}");
+                    const AdminBadge = ({ field }: { field: string }) =>
+                      overrides[field] ? (
+                        <Badge variant="outline" className="text-[9px] border-primary/40 text-primary px-1 py-0 ml-1 align-middle">Admin</Badge>
+                      ) : null;
+                    return (
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm mb-5">
+                        <div>
+                          <span className="text-xs text-muted-foreground">Legal Name<AdminBadge field="name" /></span>
+                          <p className="font-semibold">{companyProfile.company.name}</p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-muted-foreground">Owner<AdminBadge field="ownerName" /></span>
+                          <p>{companyProfile.company.ownerName}</p>
+                        </div>
+                        {companyProfile.company.authorizedUser && (
+                          <div className="col-span-2">
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <UserCheck className="w-3 h-3" />Authorized User<AdminBadge field="authorizedUser" />
+                            </span>
+                            <p>{companyProfile.company.authorizedUser}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.dotNumber && (
+                          <div>
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Hash className="w-3 h-3" />DOT<AdminBadge field="dotNumber" />
+                            </span>
+                            <p className="font-mono">{companyProfile.company.dotNumber}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.mcNumber && (
+                          <div>
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Hash className="w-3 h-3" />MC<AdminBadge field="mcNumber" />
+                            </span>
+                            <p className="font-mono">{companyProfile.company.mcNumber}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.phone && (
+                          <div>
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Phone className="w-3 h-3" />Phone<AdminBadge field="phone" />
+                            </span>
+                            <p>{companyProfile.company.phone}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.email && (
+                          <div>
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Mail className="w-3 h-3" />Email<AdminBadge field="email" />
+                            </span>
+                            <p>{companyProfile.company.email}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.driverLicenseNumber && (
+                          <div className="col-span-2">
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <CreditCard className="w-3 h-3" />Driver's License<AdminBadge field="driverLicenseNumber" />
+                            </span>
+                            <p className="font-mono">{companyProfile.company.driverLicenseNumber}</p>
+                          </div>
+                        )}
+                        {companyProfile.company.address && (
+                          <div className="col-span-2">
+                            <span className="text-xs text-muted-foreground">Address<AdminBadge field="address" /></span>
+                            <p>{companyProfile.company.address}</p>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {companyProfile.company.dotNumber && (
-                      <div>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />DOT</span>
-                        <p className="font-mono">{companyProfile.company.dotNumber}</p>
-                      </div>
-                    )}
-                    {companyProfile.company.mcNumber && (
-                      <div>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" />MC</span>
-                        <p className="font-mono">{companyProfile.company.mcNumber}</p>
-                      </div>
-                    )}
-                    {companyProfile.company.phone && (
-                      <div>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />Phone</span>
-                        <p>{companyProfile.company.phone}</p>
-                      </div>
-                    )}
-                    {companyProfile.company.email && (
-                      <div>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><Mail className="w-3 h-3" />Email</span>
-                        <p>{companyProfile.company.email}</p>
-                      </div>
-                    )}
-                    {companyProfile.company.driverLicenseNumber && (
-                      <div className="col-span-2">
-                        <span className="text-xs text-muted-foreground flex items-center gap-1"><CreditCard className="w-3 h-3" />Driver's License</span>
-                        <p className="font-mono">{companyProfile.company.driverLicenseNumber}</p>
-                      </div>
-                    )}
-                    {companyProfile.company.address && (
-                      <div className="col-span-2">
-                        <span className="text-xs text-muted-foreground">Address</span>
-                        <p>{companyProfile.company.address}</p>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
 
                   {/* Documents */}
-                  <div>
+                  <div className="mb-5">
                     <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-2">Documents on File</p>
                     {companyProfile.documents.length === 0 ? (
                       <p className="text-sm text-muted-foreground italic">No documents uploaded yet.</p>
@@ -765,6 +799,28 @@ export default function AdminRequestDetail() {
                       </div>
                     )}
                   </div>
+
+                  {/* Company-scoped audit log */}
+                  {companyAuditData && companyAuditData.logs.length > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mb-2">Company Audit Trail</p>
+                      <div className="space-y-2">
+                        {companyAuditData.logs.map(log => (
+                          <div key={log.id} className="flex gap-2.5 text-xs">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary/40 mt-1.5 flex-shrink-0" />
+                            <div>
+                              <span className="text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</span>
+                              <span className="mx-1.5 text-border">·</span>
+                              <span>{log.description}</span>
+                              {log.isAdminEntry && (
+                                <Badge variant="outline" className="text-[9px] border-primary/40 text-primary px-1 py-0 ml-1.5">Admin</Badge>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">Company profile not available.</p>

@@ -1428,14 +1428,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adminOverrideFields: JSON.stringify(newOverrides),
       });
       if (!company) return res.status(404).json({ message: "Company not found" });
+      const changedFields = Object.keys(updates);
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      for (const key of changedFields) {
+        before[key] = (existing as Record<string, unknown>)[key] ?? null;
+        after[key] = (updates as Record<string, unknown>)[key] ?? null;
+      }
       await logAuditEvent({
         req,
         userId: req.session.userId!,
         actionType: "company_edited_by_admin",
         entityType: "company",
         entityId: req.params.id,
-        description: `Admin manually updated company profile for ${company.name}: ${Object.keys(updates).join(", ")}`,
-        metadata: { fields: Object.keys(updates), ...updates } as Record<string, unknown>,
+        description: `Admin updated company profile for ${company.name}: ${changedFields.join(", ")}`,
+        metadata: { fields: changedFields, before, after },
         isAdminEntry: true,
       });
       return res.json(company);
@@ -1785,6 +1792,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stripeSubscriptionId: z.string().nullable().optional(),
       });
       const body = updateSchema.parse(req.body);
+      const existingRental = await storage.getRental(req.params.id);
+      if (!existingRental) return res.status(404).json({ message: "Rental not found" });
       const payload: UpdateRental = {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.monthlyRate !== undefined ? { monthlyRate: body.monthlyRate } : {}),
@@ -1797,14 +1806,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const rental = await storage.updateRental(req.params.id, payload);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const changedFields = Object.keys(body);
+      const rentalBefore: Record<string, unknown> = {};
+      const rentalAfter: Record<string, unknown> = {};
+      for (const key of changedFields) {
+        rentalBefore[key] = (existingRental as Record<string, unknown>)[key] ?? null;
+        rentalAfter[key] = (body as Record<string, unknown>)[key] ?? null;
+      }
       await logAuditEvent({
         req,
         userId: req.session.userId!,
         actionType: "rental_updated_by_admin",
         entityType: "rental",
         entityId: rental.id,
-        description: `Admin updated rental fields: ${Object.keys(body).join(", ")}`,
-        metadata: body as Record<string, unknown>,
+        description: `Admin updated rental fields: ${changedFields.join(", ")}`,
+        metadata: { fields: changedFields, before: rentalBefore, after: rentalAfter },
         isAdminEntry: true,
       });
       return res.json(rental);
