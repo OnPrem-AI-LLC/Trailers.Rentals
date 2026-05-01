@@ -274,6 +274,29 @@ const inventory: EquipmentRow[] = [
     features: [],
     priceMonthly: 0,
   },
+  // ── Unknown / Photos Only ──────────────────────────────────
+  {
+    unitNumber: "5821",
+    vin: "UNKNOWN-5821",
+    year: "",
+    make: "Unknown",
+    type: "reefer",
+    status: "available",
+    description: "Unit #5821 — photos available.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5686",
+    vin: "UNKNOWN-5686",
+    year: "",
+    make: "Unknown",
+    type: "reefer",
+    status: "available",
+    description: "Unit #5686 — photos available.",
+    features: [],
+    priceMonthly: 0,
+  },
   // ── Dry Van ───────────────────────────────────────────────
   {
     unitNumber: "5093",
@@ -292,10 +315,9 @@ async function main() {
   console.log(`Seeding ${inventory.length} equipment records...`);
 
   for (const item of inventory) {
-    const existing = await db
-      .select()
-      .from(trailers)
-      .where(eq(trailers.vin, item.vin));
+    const existing = item.vin
+      ? await db.select().from(trailers).where(eq(trailers.vin, item.vin))
+      : await db.select().from(trailers).where(eq(trailers.unitNumber, item.unitNumber));
 
     if (existing.length > 0) {
       await db
