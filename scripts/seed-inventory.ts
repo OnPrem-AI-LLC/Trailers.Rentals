@@ -283,9 +283,14 @@ const inventory: EquipmentRow[] = [
     make: "Wabash",
     type: "dry_van",
     status: "available",
-    description: "Wabash National dry van — Unit #5821.",
-    features: [],
+    description: "Wabash National 53' dry van — Unit #5821. FMCSA inspected June 2024.",
+    features: ["53 ft", "FMCSA inspected June 2024"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/5821/5821-1.jpg",
+      "attached_assets/5821/5821-2.jpg",
+      "attached_assets/5821/5821-3.jpg",
+    ],
   },
   {
     unitNumber: "5686",
