@@ -295,9 +295,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "No active rental with a pickup token found for this trailer" });
       }
 
-      const domainUrl = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : "https://deluxelogistics.com";
+      const domainUrl = process.env.APP_URL || "https://deluxelogistics.com";
       const pickupUrl = `${domainUrl}/pickup/${activeRental.pickupToken}`;
 
       const qrBuffer = await QRCode.toBuffer(pickupUrl, {
@@ -329,9 +327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const token = qrType === "return" ? rental.returnToken : rental.pickupToken;
       if (!token) return res.status(404).json({ message: `No ${qrType} token generated for this rental` });
 
-      const domainUrl = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : "https://deluxelogistics.com";
+      const domainUrl = process.env.APP_URL || "https://deluxelogistics.com";
       const path = qrType === "return" ? "return" : "pickup";
       const url = `${domainUrl}/${path}/${token}`;
 

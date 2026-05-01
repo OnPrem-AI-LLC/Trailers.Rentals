@@ -89,28 +89,10 @@ app.use((req, res, next) => {
 
 // ── Stripe initialization ────────────────────────────────────────────────
 async function initStripe() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    log("WARNING: DATABASE_URL not set — skipping Stripe initialization");
-    return;
-  }
   try {
-    const { runMigrations } = await import("stripe-replit-sync");
-    log("Initializing Stripe schema...");
-    await runMigrations({ databaseUrl });
-    log("Stripe schema ready");
-
-    const { getStripeSync } = await import("./stripeClient");
-    const stripeSync = await getStripeSync();
-
-    const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
-    await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-    log("Stripe webhook configured");
-
-    // Sync existing data in background
-    stripeSync.syncBackfill()
-      .then(() => log("Stripe data synced"))
-      .catch((err: any) => log(`Stripe sync warning: ${err.message}`));
+    const { getStripeClient } = await import("./stripeClient");
+    getStripeClient(); // validate keys are set
+    log("Stripe client ready");
   } catch (err: any) {
     log(`WARNING: Stripe initialization failed: ${err.message}`);
     // Non-fatal — app continues without Stripe

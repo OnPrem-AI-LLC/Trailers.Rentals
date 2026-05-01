@@ -13,7 +13,7 @@
  */
 
 import { db } from "../server/db";
-import { trailers } from "../shared/schema";
+import { trailers, trailerPhotos } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
 type EquipmentRow = {
@@ -26,6 +26,7 @@ type EquipmentRow = {
   description: string;
   features: string[];
   priceMonthly: number;
+  photos?: string[]; // relative paths from project root
 };
 
 function mapStatus(use: string): string {
@@ -274,15 +275,15 @@ const inventory: EquipmentRow[] = [
     features: [],
     priceMonthly: 0,
   },
-  // ── Unknown / Photos Only ──────────────────────────────────
+  // ── Wabash Dry Vans (photos on file) ────────────────────────
   {
     unitNumber: "5821",
     vin: "UNKNOWN-5821",
     year: "",
-    make: "Unknown",
-    type: "reefer",
+    make: "Wabash",
+    type: "dry_van",
     status: "available",
-    description: "Unit #5821 — photos available.",
+    description: "Wabash National dry van — Unit #5821.",
     features: [],
     priceMonthly: 0,
   },
@@ -290,12 +291,18 @@ const inventory: EquipmentRow[] = [
     unitNumber: "5686",
     vin: "UNKNOWN-5686",
     year: "",
-    make: "Unknown",
-    type: "reefer",
+    make: "Wabash",
+    type: "dry_van",
     status: "available",
-    description: "Unit #5686 — photos available.",
-    features: [],
+    description: "Wabash National Duraplate dry van — Unit #5686. Good condition.",
+    features: ["Duraplate sidewalls"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/5686/5686-1.jpg",
+      "attached_assets/5686/5686-2.jpg",
+      "attached_assets/5686/5686-3.jpg",
+      "attached_assets/5686/5686-4.jpg",
+    ],
   },
   // ── Dry Van ───────────────────────────────────────────────
   {
@@ -319,7 +326,10 @@ async function main() {
       ? await db.select().from(trailers).where(eq(trailers.vin, item.vin))
       : await db.select().from(trailers).where(eq(trailers.unitNumber, item.unitNumber));
 
+    let trailerId: string;
+
     if (existing.length > 0) {
+      trailerId = existing[0].id;
       await db
         .update(trailers)
         .set({
@@ -331,10 +341,10 @@ async function main() {
           description: item.description,
           features: JSON.stringify(item.features),
         })
-        .where(eq(trailers.vin, item.vin));
+        .where(eq(trailers.id, trailerId));
       console.log(`  Updated: Unit #${item.unitNumber} (${item.vin})`);
     } else {
-      await db.insert(trailers).values({
+      const [inserted] = await db.insert(trailers).values({
         unitNumber: item.unitNumber,
         vin: item.vin,
         year: item.year,
@@ -344,8 +354,24 @@ async function main() {
         description: item.description,
         features: JSON.stringify(item.features),
         priceMonthly: item.priceMonthly,
-      });
+      }).returning();
+      trailerId = inserted.id;
       console.log(`  Inserted: Unit #${item.unitNumber} (${item.vin})`);
+    }
+
+    // Seed photos if provided
+    if (item.photos && item.photos.length > 0) {
+      // Clear existing photos for this trailer first
+      await db.delete(trailerPhotos).where(eq(trailerPhotos.trailerId, trailerId));
+      for (let i = 0; i < item.photos.length; i++) {
+        await db.insert(trailerPhotos).values({
+          trailerId,
+          url: item.photos[i],
+          isPrimary: i === 0,
+          displayOrder: i,
+        });
+      }
+      console.log(`    → ${item.photos.length} photo(s) linked`);
     }
   }
 

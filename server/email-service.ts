@@ -112,8 +112,7 @@ interface ApplicationData {
 }
 
 function domain(): string {
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  return "https://deluxelogistics.com";
+  return process.env.APP_URL || "https://deluxelogistics.com";
 }
 
 function esc(str: string | null | undefined): string {
