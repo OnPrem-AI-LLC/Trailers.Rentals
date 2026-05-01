@@ -1,0 +1,337 @@
+/**
+ * seed-inventory.ts
+ * Seeds the trailers table from the Deluxe Logistics equipment CSV.
+ * Run: npx tsx scripts/seed-inventory.ts
+ *
+ * Status mapping:
+ *   IN USE / In Use  → "rented"
+ *   Sell or rent     → "available"
+ *   Sell             → "inactive"  (tracked, not listed publicly)
+ *   Find Driver / Sell or find driver → "maintenance"
+ *   Not usable / Sell for parts       → "inactive"
+ *   (blank)          → "available"
+ */
+
+import { db } from "../server/db";
+import { trailers } from "../shared/schema";
+import { eq } from "drizzle-orm";
+
+type EquipmentRow = {
+  unitNumber: string;
+  vin: string;
+  year: string;
+  make: string;
+  type: string;
+  status: string;
+  description: string;
+  features: string[];
+  priceMonthly: number;
+};
+
+function mapStatus(use: string): string {
+  const u = (use || "").toLowerCase().trim();
+  if (u.includes("in use")) return "rented";
+  if (u.includes("sell or rent") || u.includes("sell or find driver")) return "available";
+  if (u.includes("find driver")) return "maintenance";
+  if (u.includes("not usable") || u.includes("sell for parts")) return "inactive";
+  if (u.includes("sell")) return "inactive";
+  return "available";
+}
+
+function mapType(rawType: string): string {
+  const t = (rawType || "").toLowerCase().trim();
+  if (t.includes("reefer")) return "reefer";
+  if (t.includes("dry van")) return "dry_van";
+  if (t.includes("flatbed")) return "flatbed";
+  if (t.includes("tractor")) return "tractor";
+  if (t.includes("box truck")) return "box_truck";
+  if (t.includes("trailer jockey")) return "trailer_jockey";
+  return "specialized";
+}
+
+const inventory: EquipmentRow[] = [
+  // ── Tractors ──────────────────────────────────────────────
+  {
+    unitNumber: "9004",
+    vin: "1XKYD49X0PJ244660",
+    year: "2023",
+    make: "Kenworth",
+    type: "tractor",
+    status: mapStatus("IN USE"),
+    description: "2023 Kenworth T680 — currently in service.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "4659",
+    vin: "IXKYD49X4PJ244659",
+    year: "2023",
+    make: "Kenworth",
+    type: "tractor",
+    status: mapStatus("Find Driver"),
+    description: "2023 Kenworth T680 — available, seeking driver assignment.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "9007",
+    vin: "1XKYD49X3LJ427836",
+    year: "2020",
+    make: "Kenworth",
+    type: "tractor",
+    status: mapStatus("Sell"),
+    description: "2020 Kenworth — orange, needs battery replacement.",
+    features: ["Needs battery"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "3772",
+    vin: "1XKYD49XXNJ493772",
+    year: "2022",
+    make: "Kenworth",
+    type: "tractor",
+    status: mapStatus("Sell or find driver"),
+    description: "2022 Kenworth — needs $10-15K repair.",
+    features: ["Needs repair ($10–15K)"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "9012",
+    vin: "IXKYDP9X5KJ216640",
+    year: "2019",
+    make: "Kenworth",
+    type: "tractor",
+    status: mapStatus("Sell for parts"),
+    description: "2019 Kenworth — not in service, parts only.",
+    features: [],
+    priceMonthly: 0,
+  },
+  // ── Box Truck ─────────────────────────────────────────────
+  {
+    unitNumber: "3",
+    vin: "WDXPF445899406961",
+    year: "2009",
+    make: "Dodge",
+    type: "box_truck",
+    status: mapStatus("Sell or use"),
+    description: "2009 Dodge Sprinter box truck — needs alternator, currently not running.",
+    features: ["Needs alternator"],
+    priceMonthly: 0,
+  },
+  // ── Trailer Jockey ────────────────────────────────────────
+  {
+    unitNumber: "4",
+    vin: "4LMBR211BL022481",
+    year: "2011",
+    make: "Trailer Jockey",
+    type: "trailer_jockey",
+    status: mapStatus("Sell"),
+    description: "2011 Trailer Jockey — usable condition.",
+    features: ["Usable"],
+    priceMonthly: 0,
+  },
+  // ── Reefers ───────────────────────────────────────────────
+  {
+    unitNumber: "5061",
+    vin: "IUYVS25327M160206",
+    year: "2007",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell or rent"),
+    description: "2007 Utility reefer — usable, decent condition.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5062",
+    vin: "1UYVS25347M160207",
+    year: "2007",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("IN USE"),
+    description: "2007 Utility reefer — decent condition, currently in service.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5074",
+    vin: "1UYVS2539AM887902",
+    year: "2010",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell or rent"),
+    description: "2010 Utility reefer — reefer unit not cooling, does not start.",
+    features: ["Reefer unit needs service", "Does not start"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5086",
+    vin: "1UYVS2534BM152620",
+    year: "2011",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2011 Utility reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5120",
+    vin: "IUYVS2535GM663308",
+    year: "2016",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2016 Utility reefer — air ride suspension.",
+    features: ["Air Ride"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5201",
+    vin: "1UYVS2533EU857509",
+    year: "2014",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell or rent"),
+    description: "2014 Utility reefer — needs reefer unit replacement.",
+    features: ["Needs reefer unit"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5202",
+    vin: "1UYVS2535FM226004",
+    year: "2015",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("In Use"),
+    description: "2015 Utility reefer — currently in service.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5225",
+    vin: "IJJV532B3BL382184",
+    year: "2011",
+    make: "WANC",
+    type: "reefer",
+    status: mapStatus("Sell or rent"),
+    description: "2011 WANC reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "8",
+    vin: "IDW1A5327JS807613",
+    year: "2013",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2013 Utility reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "11",
+    vin: "3H3V532C0ET144001",
+    year: "2014",
+    make: "Hyundai",
+    type: "reefer",
+    status: mapStatus("Sell or Rent"),
+    description: "2014 Hyundai reefer — roll-up doors.",
+    features: ["Roll-up doors"],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "2",
+    vin: "1UYVS2539CU257039",
+    year: "2012",
+    make: "Utility",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2012 Utility reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "5",
+    vin: "IJJV532B2AL328406",
+    year: "2010",
+    make: "Wabash",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2010 Wabash reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  {
+    unitNumber: "14",
+    vin: "1GRAP0628FK243468",
+    year: "2015",
+    make: "Great Dane",
+    type: "reefer",
+    status: mapStatus("Sell"),
+    description: "2015 Great Dane reefer.",
+    features: [],
+    priceMonthly: 0,
+  },
+  // ── Dry Van ───────────────────────────────────────────────
+  {
+    unitNumber: "5093",
+    vin: "1GRAA06269W700079",
+    year: "2009",
+    make: "Great Dane",
+    type: "dry_van",
+    status: mapStatus("Sell"),
+    description: "2009 Great Dane dry van.",
+    features: [],
+    priceMonthly: 0,
+  },
+];
+
+async function main() {
+  console.log(`Seeding ${inventory.length} equipment records...`);
+
+  for (const item of inventory) {
+    const existing = await db
+      .select()
+      .from(trailers)
+      .where(eq(trailers.vin, item.vin));
+
+    if (existing.length > 0) {
+      await db
+        .update(trailers)
+        .set({
+          unitNumber: item.unitNumber,
+          year: item.year,
+          make: item.make,
+          type: item.type,
+          status: item.status,
+          description: item.description,
+          features: JSON.stringify(item.features),
+        })
+        .where(eq(trailers.vin, item.vin));
+      console.log(`  Updated: Unit #${item.unitNumber} (${item.vin})`);
+    } else {
+      await db.insert(trailers).values({
+        unitNumber: item.unitNumber,
+        vin: item.vin,
+        year: item.year,
+        make: item.make,
+        type: item.type,
+        status: item.status,
+        description: item.description,
+        features: JSON.stringify(item.features),
+        priceMonthly: item.priceMonthly,
+      });
+      console.log(`  Inserted: Unit #${item.unitNumber} (${item.vin})`);
+    }
+  }
+
+  console.log("Done.");
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

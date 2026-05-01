@@ -39,8 +39,9 @@ export const companies = pgTable("companies", {
 // ── Trailers ───────────────────────────────────────────────────────────
 export const trailers = pgTable("trailers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  unitNumber: text("unit_number"),
   vin: text("vin").notNull().unique(),
-  type: text("type").notNull(), // "reefer" | "dry_van" | "flatbed" | "chassis" | "specialized"
+  type: text("type").notNull(), // "reefer" | "dry_van" | "flatbed" | "chassis" | "specialized" | "tractor" | "box_truck" | "trailer_jockey"
   make: text("make"),
   model: text("model"),
   year: text("year"),
