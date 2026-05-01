@@ -211,9 +211,14 @@ const inventory: EquipmentRow[] = [
     make: "Utility",
     type: "reefer",
     status: mapStatus("In Use"),
-    description: "2015 Utility reefer — currently in service.",
-    features: [],
+    description: "2015 Utility 3000R reefer — Thermo King reefer unit. Clean interior with aluminum T-floor. Currently in service.",
+    features: ["Utility 3000R", "Thermo King reefer unit", "Aluminum T-floor", "Clean interior"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/5202/5202-1.jpg",
+      "attached_assets/5202/5202-2.jpg",
+      "attached_assets/5202/5202-3.jpg",
+    ],
   },
   {
     unitNumber: "5225",
