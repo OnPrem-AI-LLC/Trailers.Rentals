@@ -146,9 +146,16 @@ const inventory: EquipmentRow[] = [
     make: "Trailer Jockey",
     type: "trailer_jockey",
     status: mapStatus("Sell"),
-    description: "2011 Trailer Jockey — usable condition.",
-    features: ["Usable"],
+    description: "2011 Trailer Jockey yard spotter — usable condition. Simple cab interior with manual controls and fifth wheel coupling. Surface rust on body panels. 11R22.5 tires. Available for sale.",
+    features: ["Yard spotter / hostler", "Fifth wheel coupling", "Manual controls", "11R22.5 tires", "Usable condition"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/unit4/unit4-1.jpg",
+      "attached_assets/unit4/unit4-2.jpg",
+      "attached_assets/unit4/unit4-3.jpg",
+      "attached_assets/unit4/unit4-4.jpg",
+      "attached_assets/unit4/unit4-5.jpg",
+    ],
   },
   // ── Reefers ───────────────────────────────────────────────
   {
