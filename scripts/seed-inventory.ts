@@ -150,9 +150,15 @@ const inventory: EquipmentRow[] = [
     make: "Utility",
     type: "reefer",
     status: mapStatus("IN USE"),
-    description: "2007 Utility reefer — decent condition, currently in service.",
-    features: [],
+    description: "2007 Utility 3000R reefer — Carrier Precedent refrigeration unit. Decent condition, interior in working order. Currently in service.",
+    features: ["Utility 3000R", "Carrier Precedent reefer unit", "Interior liner intact"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/5062/5062-1.jpg",
+      "attached_assets/5062/5062-2.jpg",
+      "attached_assets/5062/5062-3.jpg",
+      "attached_assets/5062/5062-4.jpg",
+    ],
   },
   {
     unitNumber: "5074",
