@@ -114,9 +114,17 @@ const inventory: EquipmentRow[] = [
     make: "Kenworth",
     type: "tractor",
     status: mapStatus("Sell for parts"),
-    description: "2019 Kenworth — not in service, parts only.",
-    features: [],
+    description: "2019 Kenworth T660 sleeper — available for parts. Cab interior stripped (dash removed, wiring exposed). Sleeper bunk intact. Engine present and accessible. Good source for drivetrain and sleeper components.",
+    features: ["T660 sleeper cab", "Engine present", "Sleeper bunk intact", "Stripped interior — parts only"],
     priceMonthly: 0,
+    photos: [
+      "attached_assets/9012/9012-1.jpg",
+      "attached_assets/9012/9012-2.jpg",
+      "attached_assets/9012/9012-3.jpg",
+      "attached_assets/9012/9012-4.jpg",
+      "attached_assets/9012/9012-5.jpg",
+      "attached_assets/9012/9012-6.jpg",
+    ],
   },
   // ── Box Truck ─────────────────────────────────────────────
   {
