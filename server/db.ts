@@ -1,9 +1,6 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from "ws";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
-
-neonConfig.webSocketConstructor = ws;
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -11,5 +8,18 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle({ client: pool, schema });
+// Railway Postgres uses standard TCP. Neon's serverless WS driver does not work here.
+// Use node-postgres (`pg`) for any standard Postgres host.
+//
+// Notes:
+// - Railway internal hostnames (e.g. *.railway.internal) do NOT serve TLS — disable SSL.
+// - External Postgres URLs (Neon, Supabase, AWS RDS, etc.) require SSL.
+const isRailwayInternal =
+  /\.railway\.internal/i.test(process.env.DATABASE_URL ?? "");
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: isRailwayInternal ? false : { rejectUnauthorized: false },
+});
+
+export const db = drizzle(pool, { schema });
