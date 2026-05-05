@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import path from "path";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import cron from "node-cron";
@@ -34,6 +35,9 @@ app.post(
     }
   }
 );
+
+// ── Serve attached_assets (seed photos) as static files ──────────────────
+app.use("/attached_assets", express.static(path.resolve(import.meta.dirname, "..", "attached_assets")));
 
 // ── Body parsing (after webhook route) ──────────────────────────────────
 app.use(express.json());
