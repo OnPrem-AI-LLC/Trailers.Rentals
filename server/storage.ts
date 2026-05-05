@@ -162,6 +162,11 @@ export interface IStorage {
   deleteJobListing(id: string): Promise<void>;
 }
 
+function normalizePhotoUrl(url: string): string {
+  if (url && !url.startsWith('/') && !url.startsWith('http')) return '/' + url;
+  return url;
+}
+
 export class DatabaseStorage implements IStorage {
   // ── Users ──────────────────────────────────────────────────────────
   async getUser(id: string): Promise<User | undefined> {
@@ -212,7 +217,8 @@ export class DatabaseStorage implements IStorage {
       ...t,
       photos: photos
         .filter((p) => p.trailerId === t.id)
-        .sort((a, b) => a.displayOrder - b.displayOrder),
+        .sort((a, b) => a.displayOrder - b.displayOrder)
+        .map((p) => ({ ...p, url: normalizePhotoUrl(p.url) })),
     }));
   }
 
@@ -224,7 +230,7 @@ export class DatabaseStorage implements IStorage {
       .from(trailerPhotos)
       .where(eq(trailerPhotos.trailerId, id))
       .orderBy(trailerPhotos.displayOrder);
-    return { ...trailer, photos };
+    return { ...trailer, photos: photos.map((p) => ({ ...p, url: normalizePhotoUrl(p.url) })) };
   }
 
   async createTrailer(insertTrailer: InsertTrailer): Promise<Trailer> {
