@@ -72,6 +72,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return res.json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role, companyId: user.companyId });
   });
 
+  app.get("/api/my/company", requireAuth, async (req: Request, res: Response) => {
+    const user = await storage.getUser(req.session!.userId!);
+    if (!user?.companyId) return res.status(404).json({ message: "No company on file" });
+    const company = await storage.getCompany(user.companyId);
+    if (!company) return res.status(404).json({ message: "Company not found" });
+    return res.json(company);
+  });
+
   // ── Signup ──────────────────────────────────────────────────────────
   const signupSchema = insertUserSchema.pick({ username: true, password: true, firstName: true, lastName: true }).extend({
     username: z.string().email("Valid email required"),
@@ -653,7 +661,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const status = req.query.status as string | undefined;
       const applications = await storage.listRentalApplications(status);
-      return res.json(applications);
+      const enriched = await Promise.all(
+        applications.map(async (app) => {
+          const trailer = await storage.getTrailer(app.trailerId).catch(() => undefined);
+          return {
+            ...app,
+            trailerType: trailer?.type ?? null,
+            trailerName: trailer
+              ? (trailer.make && trailer.model
+                  ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
+                  : trailer.type)
+              : null,
+            trailerVin: trailer?.vin ?? null,
+          };
+        })
+      );
+      return res.json(enriched);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -666,6 +689,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const application = await storage.getRentalApplication(req.params.id);
       if (!application) return res.status(404).json({ message: "Application not found" });
 
+      const trailer = await storage.getTrailer(application.trailerId).catch(() => undefined);
+      const trailerInfo = {
+        trailerType: trailer?.type ?? null,
+        trailerName: trailer
+          ? (trailer.make && trailer.model
+              ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
+              : trailer.type)
+          : null,
+        trailerVin: trailer?.vin ?? null,
+        trailerPriceMonthly: trailer?.priceMonthly ?? null,
+        trailerLocation: trailer?.location ?? null,
+        trailerPrimaryPhoto: trailer?.photos?.find(p => p.isPrimary)?.url ?? trailer?.photos?.[0]?.url ?? null,
+      };
+
       // Auto-run SAFER if not cached (DOT first, MC fallback)
       if (!application.saferData && application.dotNumber) {
         try {
@@ -676,11 +713,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           const saferJson = JSON.stringify(safer);
           await storage.updateRentalApplication(application.id, { saferData: saferJson });
-          return res.json({ ...application, saferData: saferJson });
+          return res.json({ ...application, ...trailerInfo, saferData: saferJson });
         } catch { /* non-fatal: return without SAFER */ }
       }
 
-      return res.json(application);
+      return res.json({ ...application, ...trailerInfo });
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -1175,16 +1212,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(404).json({ message: "User not found" });
-      const [userRentals, userDocs, company] = await Promise.all([
+      const [userRentals, userDocs, company, rawApplications] = await Promise.all([
         user.companyId ? storage.listRentals(user.companyId) : Promise.resolve([] as Rental[]),
         user.companyId ? storage.getDocuments(user.companyId) : Promise.resolve([]),
         user.companyId ? storage.getCompany(user.companyId) : Promise.resolve(undefined),
+        storage.listRentalApplicationsByEmail(user.username),
       ]);
+
+      // Enrich each application with trailer info, renter-visible notes, and audit history
+      const applications = await Promise.all(
+        rawApplications.map(async (app) => {
+          const [trailer, notes, auditLogs] = await Promise.all([
+            storage.getTrailer(app.trailerId).catch(() => undefined),
+            storage.getAdminNotes("rental_application", app.id),
+            storage.getAuditLogs("rental_application", app.id),
+          ]);
+          return {
+            ...app,
+            // Strip sensitive server-only fields
+            adminToken: undefined,
+            saferData: undefined,
+            trailer: trailer
+              ? {
+                  id: trailer.id,
+                  vin: trailer.vin,
+                  type: trailer.type,
+                  make: trailer.make,
+                  model: trailer.model,
+                  year: trailer.year,
+                  priceMonthly: trailer.priceMonthly,
+                  location: trailer.location,
+                  primaryPhoto: trailer.photos?.find(p => p.isPrimary)?.url ?? trailer.photos?.[0]?.url ?? null,
+                }
+              : null,
+            notes: notes,
+            auditHistory: auditLogs.filter(l => !l.isAdminEntry).map(l => ({
+              id: l.id,
+              actionType: l.actionType,
+              description: l.description,
+              createdAt: l.createdAt,
+            })),
+          };
+        })
+      );
+
       return res.json({
         user: { id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role, companyId: user.companyId },
         rentals: userRentals,
-        documents: userDocs.filter(d => !d.isAdminOnly), // Never expose admin-only docs to renters
+        documents: userDocs.filter(d => !d.isAdminOnly),
         company: company ?? null,
+        applications,
       });
     } catch (err: unknown) {
       console.error(err);

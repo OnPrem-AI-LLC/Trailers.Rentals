@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import Header from "@/components/header";
@@ -17,9 +17,11 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { ArrowLeft, Truck, Thermometer, CheckCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Truck, Thermometer, CheckCircle, AlertCircle, Building2 } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
 import { formatTrailerName } from "@/lib/trailer-utils";
+import { useAuth } from "@/hooks/use-auth";
+import type { Company } from "@shared/schema";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
@@ -53,8 +55,32 @@ export default function Apply() {
   const { trailerId } = useParams();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [form, setForm] = useState<ApplicationForm>(EMPTY_FORM);
   const [submitted, setSubmitted] = useState(false);
+
+  // Fetch existing company for logged-in users who have one on file
+  const { data: existingCompany, isLoading: companyLoading } = useQuery<Company>({
+    queryKey: ["/api/my/company"],
+    queryFn: async () => {
+      const res = await fetch("/api/my/company");
+      if (!res.ok) throw new Error("No company");
+      return res.json();
+    },
+    enabled: !!user?.companyId,
+    retry: false,
+  });
+
+  // Pre-fill form from logged-in user's account (fallback for users without a company)
+  useEffect(() => {
+    if (user && !existingCompany) {
+      setForm((prev) => ({
+        ...prev,
+        email: user.email,
+        ownerName: prev.ownerName || `${user.firstName} ${user.lastName}`.trim(),
+      }));
+    }
+  }, [user, existingCompany]);
 
   const { data: trailer, isLoading, isError } = useQuery<TrailerWithPhotos>({
     queryKey: ["/api/trailers", trailerId],
@@ -102,7 +128,7 @@ export default function Apply() {
     mutation.mutate({ ...form, trailerId });
   };
 
-  if (isLoading) {
+  if (isLoading || (user?.companyId && companyLoading)) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Header />
@@ -174,6 +200,103 @@ export default function Apply() {
               </Button>
             </Link>
           </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Logged-in users with an existing company skip the form entirely
+  if (existingCompany && trailer && !submitted) {
+    const submitAsCompany = () => {
+      mutation.mutate({
+        trailerId: trailerId!,
+        companyName: existingCompany.name,
+        ownerName: existingCompany.ownerName,
+        authorizedUser: existingCompany.authorizedUser ?? "",
+        email: existingCompany.email,
+        mcNumber: existingCompany.mcNumber ?? "",
+        dotNumber: existingCompany.dotNumber ?? "",
+        phone: existingCompany.phone,
+        intendedUse: "Returning customer",
+        intendedUseDetails: "",
+      });
+    };
+
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Header />
+        <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-10">
+          <Link href={`/trailers/${trailerId}`}>
+            <Button variant="ghost" size="sm" className="text-muted-foreground gap-2 mb-6 -ml-1">
+              <ArrowLeft className="w-4 h-4" />
+              Back to trailer
+            </Button>
+          </Link>
+
+          {/* Trailer summary */}
+          <div className="bg-card border border-border rounded-xl p-5 mb-8 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+              {trailer.type === "reefer" ? (
+                <Thermometer className="w-6 h-6 text-primary" />
+              ) : (
+                <Truck className="w-6 h-6 text-primary" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-foreground">{formatTrailerName(trailer)}</div>
+              <div className="text-sm text-muted-foreground">
+                {formatPrice(trailer.priceMonthly)}/month · No mileage fees
+              </div>
+            </div>
+            <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-950 text-green-400 flex-shrink-0">
+              Available
+            </span>
+          </div>
+
+          <div className="mb-6">
+            <h1 className="text-2xl font-black tracking-tight">Confirm Rental Request</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Your company info is already on file. Confirm to submit.
+            </p>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-5 mb-6 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Building2 className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Company on file</span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2 text-sm">
+              <div><span className="text-muted-foreground">Company: </span><span className="font-medium">{existingCompany.name}</span></div>
+              <div><span className="text-muted-foreground">Owner: </span><span className="font-medium">{existingCompany.ownerName}</span></div>
+              <div><span className="text-muted-foreground">Email: </span><span className="font-medium">{existingCompany.email}</span></div>
+              <div><span className="text-muted-foreground">Phone: </span><span className="font-medium">{existingCompany.phone}</span></div>
+              {existingCompany.dotNumber && (
+                <div><span className="text-muted-foreground">DOT: </span><span className="font-medium">{existingCompany.dotNumber}</span></div>
+              )}
+              {existingCompany.mcNumber && (
+                <div><span className="text-muted-foreground">MC: </span><span className="font-medium">{existingCompany.mcNumber}</span></div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-muted rounded-lg p-4 text-sm text-muted-foreground mb-6">
+            <strong className="text-foreground">Deposit note:</strong> Upon approval, a security deposit
+            equal to 2 months' rent ({formatPrice(trailer.priceMonthly * 2)}) is required — billed as
+            first month + deposit. No mileage fees, ever.
+          </div>
+
+          <Button
+            size="lg"
+            className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-12"
+            onClick={submitAsCompany}
+            disabled={mutation.isPending}
+          >
+            {mutation.isPending ? "Submitting..." : "Submit Rental Request"}
+          </Button>
+          <p className="text-xs text-center text-muted-foreground mt-3">
+            Application typically reviewed within 24 hours
+          </p>
         </div>
         <Footer />
       </div>
@@ -283,7 +406,14 @@ export default function Apply() {
                   placeholder="john@abctrucking.com"
                   className="bg-background border-border"
                   required
+                  readOnly={!!user}
+                  disabled={!!user}
                 />
+                {user && (
+                  <p className="text-xs text-muted-foreground">
+                    Linked to your account. <Link href="/login"><span className="text-primary hover:underline cursor-pointer">Sign out</span></Link> to use a different email.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="phone">Phone Number *</Label>
