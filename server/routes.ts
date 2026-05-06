@@ -49,7 +49,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!valid) return res.status(401).json({ message: "Invalid credentials" });
       req.session.userId = user.id;
       req.session.userRole = user.role;
-      return res.json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
+      const payload = { id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role };
+      req.session.save((err) => {
+        if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+        return res.json(payload);
+      });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);

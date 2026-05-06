@@ -16,6 +16,7 @@ if (!sessionSecret && process.env.NODE_ENV === "production") {
 }
 
 const app = express();
+app.set("trust proxy", 1); // Required for Railway / reverse-proxy environments
 
 // ── Stripe webhook MUST be registered BEFORE express.json() ─────────────
 // Webhook needs raw Buffer, not parsed JSON
