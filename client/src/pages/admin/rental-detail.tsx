@@ -18,6 +18,7 @@ import {
   Gauge, Send, QrCode, PackageCheck, RotateCcw, Camera,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { formatTypeLabel } from "@/lib/trailer-utils";
 import type { Rental, Document, AuditLog, Company, EngineHourEntry, CheckinPhoto, EmailLog } from "@shared/schema";
 
 interface TrailerInfo {
@@ -331,7 +332,7 @@ export default function AdminRentalDetail() {
                       <span className="font-black text-lg">{company?.name ?? "Unknown Company"}</span>
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {trailer ? `${trailer.year ? trailer.year + " " : ""}${trailer.make ? trailer.make + " " : ""}${trailer.type.replace("_"," ")} — VIN: ${trailer.vin}` : "Trailer details unavailable"}
+                      {trailer ? `${trailer.year ? trailer.year + " " : ""}${trailer.make ? trailer.make + " " : ""}${formatTypeLabel(trailer.type)} — VIN: ${trailer.vin}` : "Trailer details unavailable"}
                     </div>
                   </div>
                   {s && <Badge className={`text-xs border ${s.cls}`}>{s.label}</Badge>}

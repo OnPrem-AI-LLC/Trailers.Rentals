@@ -16,6 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
+import { formatTypeLabel, formatTrailerName } from "@/lib/trailer-utils";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
@@ -173,7 +174,7 @@ export default function TrailerDetail() {
                 <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
                   trailer.type === "reefer" ? "bg-blue-950 text-blue-400" : "bg-red-950 text-red-400"
                 }`}>
-                  {trailer.type.replace("_", " ")}
+                  {formatTypeLabel(trailer.type)}
                 </span>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                   isAvailable ? "bg-green-950 text-green-400" : "bg-yellow-950 text-yellow-400"
@@ -183,9 +184,7 @@ export default function TrailerDetail() {
               </div>
 
               <h1 className="text-3xl font-black tracking-tight">
-                {trailer.make && trailer.model
-                  ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
-                  : `${trailer.type === "reefer" ? "Refrigerated" : "Dry Van"} Trailer`}
+                {formatTrailerName(trailer)}
               </h1>
 
               {trailer.vin && (

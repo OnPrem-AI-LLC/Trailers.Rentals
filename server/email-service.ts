@@ -1,18 +1,17 @@
-import sgMail from "@sendgrid/mail";
+import { Resend } from "resend";
 import { db } from "./db";
 import { emailLogs } from "@shared/schema";
 
-const FROM = "noreply@deluxelogistics.com";
+const FROM = "noreply@getonprem.com";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || "admin@deluxelogistics.com";
 
 function isConfigured(): boolean {
-  return !!process.env.SENDGRID_API_KEY;
+  return !!process.env.RESEND_API_KEY;
 }
 
-function init() {
-  if (isConfigured()) sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+function getResend(): Resend {
+  return new Resend(process.env.RESEND_API_KEY!);
 }
-init();
 
 async function logEmail(opts: {
   recipient: string;
@@ -60,31 +59,40 @@ export function emailTemplate(title: string, body: string, accentColor = "#e6394
 }
 
 // ── Tracked send wrapper — single gatekeeper for all email sends ──────────
-// Logs every send as: sent, failed, or skipped (when SendGrid is unconfigured)
-type MailData = Parameters<typeof sgMail.send>[0];
+// Logs every send as: sent, failed, or skipped (when Resend is unconfigured)
+interface MailPayload {
+  to: string | string[];
+  from: string;
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+}
+
 async function sendTracked(
-  msg: MailData,
+  msg: MailPayload,
   opts: { template: string; entityType?: string; entityId?: string }
 ): Promise<void> {
-  const m = (msg as unknown) as Record<string, unknown>;
-  const toRaw = m["to"];
-  const to: string = Array.isArray(toRaw)
-    ? (toRaw as unknown[]).map(t => (typeof t === "string" ? t : "")).filter(Boolean).join(", ") || ADMIN_EMAIL
-    : typeof toRaw === "string"
-    ? toRaw
-    : ADMIN_EMAIL;
-  const subject: string = typeof m["subject"] === "string" ? (m["subject"] as string) : "(no subject)";
-  const fromRaw = m["from"];
-  const sender: string = typeof fromRaw === "string" ? fromRaw : FROM;
+  const to = Array.isArray(msg.to) ? msg.to.join(", ") : msg.to;
+  const sender = msg.from;
+  const subject = msg.subject;
 
   if (!isConfigured()) {
-    console.log(`[email] SendGrid not configured — skipping ${opts.template}`);
+    console.log(`[email] Resend not configured — skipping ${opts.template}`);
     logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "skipped" });
     return;
   }
 
   try {
-    await sgMail.send(msg);
+    const resend = getResend();
+    await resend.emails.send({
+      from: msg.from,
+      to: Array.isArray(msg.to) ? msg.to : [msg.to],
+      subject: msg.subject,
+      html: msg.html,
+      ...(msg.text ? { text: msg.text } : {}),
+      ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+    });
     logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);

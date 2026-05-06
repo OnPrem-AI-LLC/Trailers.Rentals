@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Thermometer, Package, ArrowRight, Clock, MapPin } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
+import { formatTypeLabel, formatTrailerName } from "@/lib/trailer-utils";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
@@ -26,7 +27,7 @@ function TrailerTypeBadge({ type }: { type: string }) {
   }
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-secondary text-secondary-foreground">
-      {type.replace("_", " ")}
+      {formatTypeLabel(type)}
     </span>
   );
 }
@@ -98,9 +99,7 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="font-bold text-foreground text-base leading-tight">
-                {trailer.make && trailer.model
-                  ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
-                  : `${trailer.type === "reefer" ? "Refrigerated" : "Dry Van"} Trailer`}
+                {formatTrailerName(trailer)}
               </h3>
               {trailer.vin && (
                 <p className="text-xs text-muted-foreground mt-0.5 font-mono">

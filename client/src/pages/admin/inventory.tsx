@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatTypeLabel } from "@/lib/trailer-utils";
 import {
   Plus,
   Pencil,
@@ -248,7 +249,7 @@ export default function AdminInventory() {
                         {trailer.status}
                       </span>
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-secondary text-secondary-foreground">
-                        {trailer.type.replace("_", " ")}
+                        {formatTypeLabel(trailer.type)}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground font-mono mt-0.5 truncate">

@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Gauge, Clock, CheckCircle, ArrowLeft } from "lucide-react";
 import type { EngineHourEntry, Rental } from "@shared/schema";
+import { formatTypeLabel } from "@/lib/trailer-utils";
 
 interface TrailerInfo { vin: string; type: string; engineHourRate: number | null; }
 interface RentalWithTrailer { rental: Rental; trailer: TrailerInfo | null; }
@@ -116,7 +117,7 @@ export default function EngineHoursPage() {
           <div>
             <h1 className="text-2xl font-black">Engine Hours</h1>
             <p className="text-sm text-muted-foreground">
-              {trailer ? `${trailer.type.replace("_", " ")} — VIN ${trailer.vin}` : "Loading…"}
+              {trailer ? `${formatTypeLabel(trailer.type)} — VIN ${trailer.vin}` : "Loading…"}
             </p>
           </div>
         </div>

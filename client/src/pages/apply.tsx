@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ArrowLeft, Truck, Thermometer, CheckCircle, AlertCircle } from "lucide-react";
 import type { TrailerWithPhotos } from "@shared/schema";
+import { formatTrailerName } from "@/lib/trailer-utils";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
@@ -163,7 +164,7 @@ export default function Apply() {
             <h2 className="text-2xl font-black">Application submitted!</h2>
             <p className="text-muted-foreground">
               We've received your application for the{" "}
-              <strong>{trailer.make && trailer.model ? `${trailer.make} ${trailer.model}` : trailer.type}</strong>.
+              <strong>{formatTrailerName(trailer)}</strong>.
               Our team will review it and contact you within 24 hours at{" "}
               <strong>{form.email}</strong>.
             </p>
@@ -203,9 +204,7 @@ export default function Apply() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-bold text-foreground">
-              {trailer.make && trailer.model
-                ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
-                : `${trailer.type === "reefer" ? "Refrigerated" : "Dry Van"} Trailer`}
+              {formatTrailerName(trailer)}
             </div>
             <div className="text-sm text-muted-foreground">
               {formatPrice(trailer.priceMonthly)}/month · No mileage fees
