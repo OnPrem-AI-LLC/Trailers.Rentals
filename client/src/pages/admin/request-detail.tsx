@@ -256,6 +256,8 @@ export default function AdminRequestDetail() {
   const [needsInfoMsg, setNeedsInfoMsg] = useState("");
   const [noteBody, setNoteBody] = useState("");
   const [editCompanyOpen, setEditCompanyOpen] = useState(false);
+  const [createRentalOpen, setCreateRentalOpen] = useState(false);
+  const [rentalForm, setRentalForm] = useState({ trailerId: "", monthlyRate: "" });
   const [companyForm, setCompanyForm] = useState<{
     name: string; ownerName: string; authorizedUser: string; email: string;
     phone: string; address: string; mcNumber: string; dotNumber: string; driverLicenseNumber: string;
@@ -425,6 +427,38 @@ export default function AdminRequestDetail() {
       refetchRentals();
     },
     onError: () => toast({ title: "Failed to send agreement", variant: "destructive" }),
+  });
+
+  // Available trailers for "Create Rental" picker
+  type TrailerOption = { id: string; vin: string; type: string; make: string | null; year: string | null; status: string };
+  const { data: availableTrailers } = useQuery<TrailerOption[]>({
+    queryKey: ["/api/admin/trailers"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/trailers", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: createRentalOpen && !!user && user.role === "admin",
+  });
+
+  const createRentalMut = useMutation({
+    mutationFn: async () => {
+      const rate = Math.round(parseFloat(rentalForm.monthlyRate) * 100);
+      if (!rate || rate <= 0) throw new Error("Invalid rate");
+      return apiRequest("POST", "/api/admin/rentals", {
+        applicationId: app?.id,
+        trailerId: rentalForm.trailerId,
+        companyId: app?.companyId,
+        monthlyRate: rate,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Rental created", description: "You can now send the rental agreement." });
+      setCreateRentalOpen(false);
+      setRentalForm({ trailerId: "", monthlyRate: "" });
+      refetchRentals();
+    },
+    onError: (err: Error) => toast({ title: "Failed to create rental", description: err.message, variant: "destructive" }),
   });
 
   const RENTAL_STATUS_LABELS: Record<string, string> = {
@@ -835,6 +869,9 @@ export default function AdminRequestDetail() {
               <div className="flex items-center gap-2 mb-4">
                 <ClipboardSignature className="w-4 h-4 text-primary" />
                 <h3 className="font-bold text-sm uppercase tracking-wider">Linked Rentals</h3>
+                <Button size="sm" variant="outline" className="ml-auto gap-1.5 text-xs" onClick={() => setCreateRentalOpen(true)}>
+                  <Truck className="w-3.5 h-3.5" /> Create Rental
+                </Button>
               </div>
               {!linkedRentals || linkedRentals.length === 0 ? (
                 <p className="text-sm text-muted-foreground italic">No rentals linked to this company yet.</p>
@@ -1117,6 +1154,55 @@ export default function AdminRequestDetail() {
               className="bg-blue-700 hover:bg-blue-600 text-white"
             >
               {needsInfoMut.isPending ? "Sending..." : "Send to Renter"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Rental Dialog */}
+      <Dialog open={createRentalOpen} onOpenChange={setCreateRentalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Rental</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Trailer</Label>
+              <select
+                className="w-full mt-1.5 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={rentalForm.trailerId}
+                onChange={(e) => setRentalForm((f) => ({ ...f, trailerId: e.target.value }))}
+              >
+                <option value="">Select a trailer...</option>
+                {availableTrailers
+                  ?.filter((t) => t.status === "available")
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.year ? `${t.year} ` : ""}{t.make ? `${t.make} ` : ""}{t.type} — VIN {t.vin}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <Label>Monthly Rate ($)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="e.g. 1500.00"
+                className="mt-1.5"
+                value={rentalForm.monthlyRate}
+                onChange={(e) => setRentalForm((f) => ({ ...f, monthlyRate: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateRentalOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => createRentalMut.mutate()}
+              disabled={createRentalMut.isPending || !rentalForm.trailerId || !rentalForm.monthlyRate}
+            >
+              {createRentalMut.isPending ? "Creating..." : "Create Rental"}
             </Button>
           </DialogFooter>
         </DialogContent>

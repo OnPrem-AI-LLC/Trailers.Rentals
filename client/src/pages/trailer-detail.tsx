@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation, Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ function formatPrice(cents: number): string {
 export default function TrailerDetail() {
   const { id } = useParams();
   const [, navigate] = useLocation();
+  const { user, isLoading: authLoading } = useAuth();
   const [activeIdx, setActiveIdx] = useState(0);
 
   const { data: trailer, isLoading, isError } = useQuery<TrailerWithPhotos>({
@@ -233,13 +235,26 @@ export default function TrailerDetail() {
 
             {/* CTA */}
             {isAvailable ? (
-              <Button
-                size="lg"
-                className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-12"
-                onClick={() => navigate(`/apply/${trailer.id}`)}
-              >
-                Apply to Rent This Trailer
-              </Button>
+              <div className="space-y-3">
+                <Button
+                  size="lg"
+                  className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-12"
+                  onClick={() => navigate(`/apply/${trailer.id}`)}
+                  disabled={authLoading}
+                >
+                  Apply to Rent This Trailer
+                </Button>
+                {!authLoading && !user && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full h-12 font-bold"
+                    onClick={() => navigate(`/login?redirect=/trailers/${trailer.id}`)}
+                  >
+                    Sign In to Rent This Trailer
+                  </Button>
+                )}
+              </div>
             ) : (
               <Button size="lg" className="w-full" variant="outline" disabled>
                 Currently Unavailable

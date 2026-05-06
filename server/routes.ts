@@ -97,7 +97,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({ username, password: hashed, firstName, lastName, role: "renter", isActive: true });
       req.session.userId = user.id;
       req.session.userRole = user.role;
-      return res.status(201).json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
+      req.session.save((err) => {
+        if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+        return res.status(201).json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
+      });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
@@ -1885,6 +1888,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Admin: create rental ─────────────────────────────────────────────
+  const createRentalSchema = z.object({
+    applicationId: z.string().optional(),
+    trailerId: z.string(),
+    companyId: z.string(),
+    monthlyRate: z.number().positive(),
+  });
+
+  app.post("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { applicationId, trailerId, companyId, monthlyRate } = createRentalSchema.parse(req.body);
+
+      // Validate trailer exists
+      const trailer = await storage.getTrailer(trailerId);
+      if (!trailer) return res.status(404).json({ message: "Trailer not found" });
+
+      // Validate company exists
+      const company = await storage.getCompany(companyId);
+      if (!company) return res.status(404).json({ message: "Company not found" });
+
+      const rental = await storage.createRental({
+        applicationId: applicationId ?? null,
+        trailerId,
+        companyId,
+        monthlyRate,
+        status: "pending_agreement",
+        depositPaid: false,
+      });
+
+      await logAuditEvent({
+        req,
+        userId: req.session.userId!,
+        actionType: "create_rental",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Created rental for ${company.name} — trailer ${trailer.vin} (${trailer.type}) at $${(monthlyRate / 100).toFixed(2)}/mo`,
+        isAdminEntry: true,
+      });
+
+      return res.status(201).json(rental);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.patch("/api/admin/rentals/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const updateSchema = z.object({
@@ -2295,6 +2345,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
         ],
         metadata: { rentalId, type: "deposit" },
+        payment_intent_data: {
+          metadata: { rentalId, type: "deposit" },
+        },
         success_url: `${baseUrl}/dashboard?payment=success&rentalId=${rentalId}`,
         cancel_url: `${baseUrl}/dashboard?payment=cancelled`,
       });

@@ -13,16 +13,40 @@ import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
   Building2, Phone, Mail, Hash, Loader2, MessageSquare, ChevronDown, ChevronUp, Send,
-  Receipt, Download
+  Receipt, Download, ClipboardList, MapPin, Calendar,
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+
+interface ApplicationTrailer {
+  id: string; vin: string; type: string; make: string | null; model: string | null;
+  year: string | null; priceMonthly: number | null; location: string | null; primaryPhoto: string | null;
+}
+
+interface ApplicationNote {
+  id: string; body: string; authorId: string; createdAt: string;
+}
+
+interface ApplicationAuditEntry {
+  id: string; actionType: string; description: string; createdAt: string;
+}
+
+interface DashboardApplication {
+  id: string; trailerId: string; companyName: string; ownerName: string;
+  email: string; dotNumber: string; mcNumber: string | null; phone: string;
+  intendedUse: string; status: string; adminNotes: string | null;
+  renterToken: string | null; createdAt: string;
+  trailer: ApplicationTrailer | null;
+  notes: ApplicationNote[];
+  auditHistory: ApplicationAuditEntry[];
+}
 
 interface DashboardData {
   user: { id: string; email: string; firstName: string; lastName: string; role: string; companyId: string | null | undefined };
   rentals: Rental[];
   documents: Document[];
   company: Company | null;
+  applications: DashboardApplication[];
 }
 
 const DOC_TYPES = [
@@ -45,6 +69,18 @@ const RENTAL_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   active_in_use: { label: "In Use", color: "text-blue-400 bg-blue-950 border-blue-800" },
   completed: { label: "Completed", color: "text-muted-foreground bg-muted border-border" },
   cancelled: { label: "Cancelled", color: "text-red-400 bg-red-950 border-red-800" },
+};
+
+const APP_STATUS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  pending:    { label: "Under Review",    color: "text-yellow-400 bg-yellow-950 border-yellow-800", icon: <Clock className="w-3 h-3" /> },
+  needs_info: { label: "Info Needed",     color: "text-blue-400 bg-blue-950 border-blue-800",       icon: <AlertCircle className="w-3 h-3" /> },
+  approved:   { label: "Approved",        color: "text-green-400 bg-green-950 border-green-800",    icon: <CheckCircle className="w-3 h-3" /> },
+  rejected:   { label: "Not Approved",    color: "text-red-400 bg-red-950 border-red-800",          icon: <AlertCircle className="w-3 h-3" /> },
+};
+
+const TRAILER_TYPE_LABELS: Record<string, string> = {
+  dry_van: "Dry Van", reefer: "Reefer", flatbed: "Flatbed",
+  chassis: "Chassis", specialized: "Specialized",
 };
 
 function RentalMessageThread({ rentalId, currentUserId }: { rentalId: string; currentUserId: string }) {
@@ -231,6 +267,138 @@ function RentalInvoiceHistory({ rentalId }: { rentalId: string }) {
   );
 }
 
+function ApplicationCard({ app, currentUserId }: { app: DashboardApplication; currentUserId: string }) {
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const status = APP_STATUS[app.status] ?? { label: app.status, color: "text-muted-foreground bg-muted border-border", icon: null };
+  const t = app.trailer;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <ClipboardList className="w-5 h-5 text-primary flex-shrink-0" />
+          <div className="min-w-0">
+            <div className="font-semibold truncate">Application #{app.id.slice(-8).toUpperCase()}</div>
+            <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+              <Calendar className="w-3 h-3" />
+              Submitted {new Date(app.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </div>
+          </div>
+        </div>
+        <Badge className={`text-xs border flex items-center gap-1 flex-shrink-0 ${status.color}`}>
+          {status.icon}{status.label}
+        </Badge>
+      </div>
+
+      {/* Trailer info */}
+      {t ? (
+        <div className="flex gap-3 bg-secondary/30 rounded-lg p-3 mb-3">
+          {t.primaryPhoto ? (
+            <img src={t.primaryPhoto} alt="Trailer" className="w-20 h-14 object-cover rounded-md flex-shrink-0" />
+          ) : (
+            <div className="w-20 h-14 bg-muted rounded-md flex items-center justify-center flex-shrink-0">
+              <Truck className="w-6 h-6 text-muted-foreground/30" />
+            </div>
+          )}
+          <div className="min-w-0 text-sm">
+            <div className="font-semibold">
+              {[t.year, t.make, t.model].filter(Boolean).join(" ") || TRAILER_TYPE_LABELS[t.type] || t.type}
+            </div>
+            <div className="text-xs text-muted-foreground font-mono mt-0.5">VIN: {t.vin}</div>
+            {t.location && (
+              <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                <MapPin className="w-3 h-3" />{t.location}
+              </div>
+            )}
+            {t.priceMonthly != null && (
+              <div className="text-xs font-semibold text-primary mt-1">
+                ${(t.priceMonthly / 100).toLocaleString()}/month
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Admin message if rejected/needs_info */}
+      {app.status === "rejected" && app.adminNotes && (
+        <div className="bg-red-950/30 border border-red-800/50 rounded-lg px-3 py-2 mb-3 text-xs text-red-300">
+          <span className="font-semibold block mb-0.5">Reason:</span>
+          {app.adminNotes}
+        </div>
+      )}
+      {app.status === "needs_info" && (
+        <div className="bg-blue-950/30 border border-blue-800/50 rounded-lg px-3 py-2 mb-3 text-xs text-blue-300">
+          Additional information is required. Check the correspondence below for details.
+        </div>
+      )}
+      {app.status === "approved" && (
+        <div className="bg-green-950/30 border border-green-800/50 rounded-lg px-3 py-2 mb-3 text-xs text-green-300">
+          Your application has been approved. Check your rentals above for next steps.
+        </div>
+      )}
+
+      {/* Correspondence */}
+      {app.notes.length > 0 && (
+        <div className="border-t border-border pt-3 mt-1">
+          <button
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full text-left"
+            onClick={() => setNotesOpen(v => !v)}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Correspondence ({app.notes.length})</span>
+            {notesOpen ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+          </button>
+          {notesOpen && (
+            <div className="mt-3 space-y-2 max-h-48 overflow-y-auto pr-1">
+              {[...app.notes].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).map(note => {
+                const isMe = note.authorId === currentUserId;
+                return (
+                  <div key={note.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div className={`rounded-lg px-3 py-2 text-xs max-w-[80%] ${isMe ? "bg-primary/20 border border-primary/30" : "bg-secondary border border-border"}`}>
+                      <p className="text-[10px] mb-1 text-muted-foreground">
+                        {isMe ? "You" : "Deluxe Logistics"} · {new Date(note.createdAt).toLocaleDateString()}
+                      </p>
+                      <p className="leading-snug whitespace-pre-wrap">{note.body}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Activity history */}
+      {app.auditHistory.length > 0 && (
+        <div className="border-t border-border pt-3 mt-3">
+          <button
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full text-left"
+            onClick={() => setHistoryOpen(v => !v)}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Activity ({app.auditHistory.length})</span>
+            {historyOpen ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+          </button>
+          {historyOpen && (
+            <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              {[...app.auditHistory].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(entry => (
+                <div key={entry.id} className="flex items-start gap-2 text-xs py-1 border-b border-border/40 last:border-0">
+                  <span className="text-muted-foreground whitespace-nowrap tabular-nums min-w-[80px]">
+                    {new Date(entry.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                  <span className="text-foreground/80">{entry.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
@@ -316,6 +484,7 @@ export default function Dashboard() {
   const rentals: Rental[] = dashData?.rentals ?? [];
   const docs: Document[] = dashData?.documents ?? [];
   const company: Company | null = dashData?.company ?? null;
+  const applications: DashboardApplication[] = dashData?.applications ?? [];
 
   const docsByType = docs.reduce<Record<string, Document[]>>((acc, d) => {
     if (!acc[d.type]) acc[d.type] = [];
@@ -416,6 +585,24 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : null}
+
+            {/* Applications */}
+            {(dataLoading || applications.length > 0) && (
+              <div>
+                <h2 className="text-lg font-bold mb-4">Your Applications</h2>
+                {dataLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-32 w-full" />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {applications.map(app => (
+                      <ApplicationCard key={app.id} app={app} currentUserId={user.id} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Active rentals */}
             <div>

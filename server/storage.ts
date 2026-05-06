@@ -88,6 +88,7 @@ export interface IStorage {
   getRentalApplicationByToken(token: string): Promise<RentalApplication | undefined>;
   getRentalApplicationByRenterToken(renterToken: string): Promise<RentalApplication | undefined>;
   listRentalApplications(status?: string): Promise<RentalApplication[]>;
+  listRentalApplicationsByEmail(email: string): Promise<RentalApplication[]>;
   updateRentalApplication(id: string, data: UpdateRentalApplication): Promise<RentalApplication | undefined>;
 
   // Rentals
@@ -318,6 +319,14 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(rentalApplications.createdAt));
     }
     return db.select().from(rentalApplications).orderBy(desc(rentalApplications.createdAt));
+  }
+
+  async listRentalApplicationsByEmail(email: string): Promise<RentalApplication[]> {
+    return db
+      .select()
+      .from(rentalApplications)
+      .where(eq(rentalApplications.email, email))
+      .orderBy(desc(rentalApplications.createdAt));
   }
 
   async updateRentalApplication(

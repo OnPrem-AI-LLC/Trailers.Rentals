@@ -19,6 +19,12 @@ import {
 } from "lucide-react";
 import type { RentalApplication } from "@shared/schema";
 
+type EnrichedApplication = RentalApplication & {
+  trailerType: string | null;
+  trailerName: string | null;
+  trailerVin: string | null;
+};
+
 const STATUS_TABS = [
   { value: "all", label: "All", icon: FileText },
   { value: "pending", label: "Pending", icon: Clock },
@@ -65,12 +71,12 @@ export default function AdminRequests() {
     }
   }, [user, authLoading, navigate]);
 
-  const { data: allApps, isLoading } = useQuery<RentalApplication[]>({
+  const { data: allApps, isLoading } = useQuery<EnrichedApplication[]>({
     queryKey: ["/api/admin/applications"],
     queryFn: async () => {
       const res = await fetch("/api/admin/applications", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load applications");
-      return res.json() as Promise<RentalApplication[]>;
+      return res.json() as Promise<EnrichedApplication[]>;
     },
     enabled: !!user && user.role === "admin",
   });
@@ -209,7 +215,14 @@ export default function AdminRequests() {
                         <span>{app.email}</span>
                         <span>{app.phone}</span>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1.5">
+                      {app.trailerName && (
+                        <div className="flex items-center gap-1.5 text-xs text-primary mt-1">
+                          <ChevronRight className="w-3 h-3" />
+                          {app.trailerName}
+                          {app.trailerVin && <span className="text-muted-foreground font-mono">· VIN: {app.trailerVin}</span>}
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground mt-1">
                         Submitted {formatDate(app.createdAt)} · Use: {app.intendedUse}
                       </div>
                     </div>
