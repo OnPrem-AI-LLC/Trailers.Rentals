@@ -33,6 +33,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   activated: boolean;
   subscriptionCreated: boolean;
   alreadyDone: boolean;
+  needsSubscriptionRetry: boolean;
 }> {
   const { rentalId, paymentIntentId, triggeredBy, userId, ipAddress } = opts;
 
@@ -200,9 +201,16 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     console.error('[deposit] Email dispatch failed:', err);
   }
 
+  // Flag if rental is active but subscription failed — needs admin attention
+  const needsSubscriptionRetry = !wasAlreadyActive && !subscriptionCreated && rental.monthlyRate > 0;
+  if (needsSubscriptionRetry) {
+    console.warn(`[deposit] ALERT: Rental ${rentalId} activated but subscription NOT created. Needs admin intervention.`);
+  }
+
   return {
     activated: !wasAlreadyActive,
     subscriptionCreated,
     alreadyDone: wasAlreadyActive && !subscriptionCreated,
+    needsSubscriptionRetry,
   };
 }

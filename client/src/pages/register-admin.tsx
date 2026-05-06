@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle, Loader2, AlertTriangle, Lock, ShieldCheck } from "lucide-react";
+import { COMPANY } from "@shared/constants";
 
 const schema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -105,7 +106,7 @@ export default function RegisterAdmin() {
               {error instanceof Error ? error.message : "This invite link is invalid or has expired."}
             </p>
             <p className="text-sm text-muted-foreground">
-              Contact <a href="mailto:info@deluxelogistics.com" className="text-primary hover:underline">info@deluxelogistics.com</a> for a new link.
+              Contact <a href={`mailto:${COMPANY.email}`} className="text-primary hover:underline">{COMPANY.email}</a> for a new link.
             </p>
           </div>
         </div>

@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import logoPath from "@assets/Deluxe Logo_1758417985453.jpg";
 import { Lock, Mail, ArrowLeft } from "lucide-react";
+import { COMPANY } from "@shared/constants";
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -138,7 +139,7 @@ export default function Login() {
           </div>
           <p className="text-center text-xs text-muted-foreground mt-4">
             Don't have an account?{" "}
-            <a href="mailto:info@deluxelogistics.com" className="text-primary hover:underline">
+            <a href={`mailto:${COMPANY.email}`} className="text-primary hover:underline">
               Contact us to get started
             </a>
           </p>

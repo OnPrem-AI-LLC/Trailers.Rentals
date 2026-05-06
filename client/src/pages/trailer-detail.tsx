@@ -79,7 +79,11 @@ export default function TrailerDetail() {
 
   const activePhoto = sortedPhotos[activeIdx] ?? null;
   const isAvailable = trailer.status === "available";
-  const features: string[] = trailer.features ? JSON.parse(trailer.features) : [];
+  let features: string[] = [];
+  try {
+    const parsed = trailer.features ? JSON.parse(trailer.features) : [];
+    features = Array.isArray(parsed) ? parsed.filter((f): f is string => typeof f === "string") : [];
+  } catch { /* malformed JSON — ignore */ }
 
   const prev = () => setActiveIdx((i) => (i - 1 + sortedPhotos.length) % sortedPhotos.length);
   const next = () => setActiveIdx((i) => (i + 1) % sortedPhotos.length);
@@ -153,7 +157,7 @@ export default function TrailerDetail() {
 
             {/* Thumbnails */}
             {sortedPhotos.length > 1 && (
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                 {sortedPhotos.map((photo, i) => (
                   <button
                     key={photo.id}

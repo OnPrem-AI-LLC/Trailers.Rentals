@@ -3,7 +3,7 @@ import { useParams, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -158,6 +158,7 @@ export default function PaymentPage() {
   const { user, isLoading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [stripePromise, setStripePromise] = useState<ReturnType<typeof loadStripe> | null>(null);
   const [intentData, setIntentData] = useState<IntentData | null>(null);
   const [intentError, setIntentError] = useState<string | null>(null);
@@ -231,6 +232,8 @@ export default function PaymentPage() {
 
   function handleSuccess() {
     setSuccess(true);
+    queryClient.invalidateQueries({ queryKey: ["/api/my/dashboard"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/rentals"] });
     toast({ title: "Payment successful!", description: "Your security deposit has been received and your rental is now active." });
     setTimeout(() => navigate("/dashboard"), 3000);
   }

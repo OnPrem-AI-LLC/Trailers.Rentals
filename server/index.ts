@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import path from "path";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import rateLimit from "express-rate-limit";
 import cron from "node-cron";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -52,16 +53,30 @@ app.use(
       tableName: "session",
       createTableIfMissing: true,
     }),
-    secret: sessionSecret ?? "deluxe-dev-only-change-in-prod",
+    secret: sessionSecret ?? "deluxe-dev-only-not-for-prod",
     resave: false,
     saveUninitialized: false,
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
+      sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })
 );
+
+// ── Rate limiting on auth endpoints ──────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many attempts. Please try again later." },
+});
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/signup", authLimiter);
+app.use("/api/auth/forgot-password", authLimiter);
+app.use("/api/auth/reset-password", authLimiter);
 
 // ── Request logging ──────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -168,8 +183,8 @@ async function runReturnReminders() {
     const message = typeof err === "object" && err !== null && "message" in err
       ? (err as { message: string }).message
       : "Internal Server Error";
+    console.error("[error-handler]", err);
     res.status(status).json({ message });
-    throw err;
   });
 
   if (app.get("env") === "development") {

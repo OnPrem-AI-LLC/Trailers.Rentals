@@ -17,6 +17,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import type { RentalApplication } from "@shared/schema";
+import { COMPANY } from "@shared/constants";
 
 export default function ApplicationRespond() {
   const { renterToken } = useParams();
@@ -205,8 +206,8 @@ export default function ApplicationRespond() {
           <p className="text-xs text-muted-foreground text-center">
             Your response will be reviewed by our team within 24 hours.
             If you have an urgent question, email us at{" "}
-            <a href="mailto:info@deluxelogistics.com" className="text-primary hover:underline">
-              info@deluxelogistics.com
+            <a href={`mailto:${COMPANY.email}`} className="text-primary hover:underline">
+              {COMPANY.email}
             </a>.
           </p>
         </div>

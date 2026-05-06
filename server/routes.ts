@@ -32,11 +32,17 @@ import {
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
 import { logAuditEvent } from "./audit-service";
+import { COMPANY } from "@shared/constants";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+function getBaseUrl(req: Request): string {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  return `${req.protocol}://${req.get("host")}`;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ── Auth ────────────────────────────────────────────────────────────
@@ -1627,7 +1633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const signAgreementSchema = z.object({
     signedByName: z.string().min(2, "Please enter your full legal name"),
     agreed: z.boolean().refine(v => v === true, "You must agree to the terms"),
-    signatureImage: z.string().min(1, "A signature is required"), // base64 PNG data URL — required
+    signatureImage: z.string().min(1, "A signature is required").max(200000, "Signature image too large"), // base64 PNG data URL — required
     pickupDate: z.string().datetime("Please select a valid pickup date and time"), // ISO datetime — required
   });
 
@@ -1691,7 +1697,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 </head>
 <body>
 <h1>TRAILER RENTAL AGREEMENT</h1>
-<p><strong>Deluxe Logistics Inc.</strong><br>818 Corning Way, Martinsburg, WV 25401<br>info@deluxelogistics.com</p>
+<p><strong>${COMPANY.name}</strong><br>${COMPANY.fullAddress}<br>${COMPANY.email}</p>
 
 <h2>Rental Details</h2>
 <table>
@@ -1950,6 +1956,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const body = updateSchema.parse(req.body);
       const existingRental = await storage.getRental(req.params.id);
       if (!existingRental) return res.status(404).json({ message: "Rental not found" });
+
+      // Enforce rental status state machine
+      if (body.status) {
+        const VALID_TRANSITIONS: Record<string, string[]> = {
+          pending_agreement: ["pending_payment", "cancelled"],
+          pending_payment: ["active", "cancelled"],
+          active: ["active_in_use", "completed", "cancelled"],
+          active_in_use: ["active", "completed", "cancelled"],
+          completed: [],
+          cancelled: [],
+        };
+        const allowed = VALID_TRANSITIONS[existingRental.status] ?? [];
+        if (!allowed.includes(body.status)) {
+          return res.status(400).json({ message: `Cannot transition from '${existingRental.status}' to '${body.status}'` });
+        }
+      }
       const payload: UpdateRental = {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.monthlyRate !== undefined ? { monthlyRate: body.monthlyRate } : {}),
@@ -2170,6 +2192,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (rental.depositPaid) {
         return res.status(400).json({ message: "Deposit already paid" });
       }
+      if (!rental.monthlyRate || rental.monthlyRate <= 0) {
+        return res.status(400).json({ message: "Monthly rate not set on this rental. Contact admin." });
+      }
 
       const company = await storage.getCompany(rental.companyId);
       const stripe = await getUncachableStripeClient();
@@ -2196,10 +2221,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           // Retrieve and cast to Stripe.PaymentIntent (single narrowing cast from Response<PaymentIntent>)
           const existing = await stripe.paymentIntents.retrieve(rental.stripeDepositIntentId) as Stripe.PaymentIntent;
-          if (REUSABLE_STATUSES.includes(existing.status)) {
+          if (REUSABLE_STATUSES.includes(existing.status) && existing.amount === depositAmount) {
             paymentIntent = existing as typeof paymentIntent;
           } else {
-            throw new Error(`PI status ${existing.status} not reusable`);
+            // PI is either consumed, wrong amount, or not reusable — create new one
+            throw new Error(`PI not reusable (status: ${existing.status}, amount match: ${existing.amount === depositAmount})`);
           }
         } catch {
           // Existing PI is cancelled/consumed — fall through to create new one
@@ -2305,6 +2331,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (rental.depositPaid) {
         return res.status(400).json({ message: "Deposit already paid" });
       }
+      if (!rental.monthlyRate || rental.monthlyRate <= 0) {
+        return res.status(400).json({ message: "Monthly rate not set on this rental. Contact admin." });
+      }
 
       const trailer = await storage.getTrailer(rental.trailerId);
       const company = await storage.getCompany(rental.companyId);
@@ -2325,7 +2354,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = getBaseUrl(req);
 
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
@@ -2391,7 +2420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = getBaseUrl(req);
 
       // Create a recurring price on-the-fly
       const price = await stripe.prices.create({
@@ -2643,10 +2672,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get previous reading and enforce monotonically increasing readings
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
       const previousReading = prev?.currentReading ?? null;
+      if (currentReading > 100_000) {
+        return res.status(400).json({ message: "Reading exceeds maximum allowed value (100,000 hrs)." });
+      }
       if (previousReading != null && currentReading <= previousReading) {
         return res.status(400).json({
           message: `Reading must be greater than the previous reading (${previousReading} hrs). New reading: ${currentReading} hrs.`,
         });
+      }
+      if (previousReading != null && (currentReading - previousReading) > 1000) {
+        return res.status(400).json({ message: `Jump of ${currentReading - previousReading} hours seems too large. Max 1,000 hours per submission. Contact admin if correct.` });
       }
       const hoursUsed = previousReading != null ? currentReading - previousReading : null;
       const calculatedCharge = (hoursUsed != null && rateAtTime != null) ? hoursUsed * rateAtTime : null;
@@ -2715,6 +2750,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const prev = await storage.getLatestEngineHourEntry(req.params.id);
       const previousReading = prev?.currentReading ?? null;
+      if (currentReading > 100_000) {
+        return res.status(400).json({ message: "Reading exceeds maximum allowed value (100,000 hrs)." });
+      }
       if (previousReading != null && currentReading <= previousReading) {
         return res.status(400).json({
           message: `Reading must be greater than the previous reading (${previousReading} hrs). New reading: ${currentReading} hrs.`,
@@ -2869,7 +2907,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token = randomBytes(24).toString("hex");
         await storage.updateRental(rental.id, { pickupToken: token });
       }
-      const url = `${req.protocol}://${req.get("host")}/pickup/${token}`;
+      const url = `${getBaseUrl(req)}/pickup/${token}`;
       return res.json({ token, url });
     } catch (err: unknown) {
       console.error(err);
@@ -2887,7 +2925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         token = randomBytes(24).toString("hex");
         await storage.updateRental(rental.id, { returnToken: token });
       }
-      const url = `${req.protocol}://${req.get("host")}/return/${token}`;
+      const url = `${getBaseUrl(req)}/return/${token}`;
       return res.json({ token, url });
     } catch (err: unknown) {
       console.error(err);
@@ -3205,6 +3243,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         jobListingId: data.jobListingId ?? null,
         jobListingTitle: data.jobListingTitle ?? null,
       });
+      await logAuditEvent({
+        req,
+        actionType: "driver_application_submitted",
+        entityType: "driver_application",
+        entityId: app2.id,
+        description: `Driver application submitted by ${app2.fullName} (${app2.email})`,
+      });
+
       // Fire-and-forget emails
       const { sendDriverApplicationConfirmation, sendDriverApplicationAdmin } = await import("./email-service");
       const emailPayload = {
@@ -3262,8 +3308,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { status, adminNotes } = req.body as { status?: string; adminNotes?: string };
       const allowed = ["pending", "reviewed", "interview", "hired", "rejected"];
       if (status && !allowed.includes(status)) return res.status(400).json({ message: "Invalid status" });
+      if (adminNotes !== undefined && adminNotes.length > 2000) return res.status(400).json({ message: "Admin notes too long (max 2000 chars)" });
       const updated = await storage.updateDriverApplication(req.params.id, { ...(status ? { status } : {}), ...(adminNotes !== undefined ? { adminNotes } : {}) });
       if (!updated) return res.status(404).json({ message: "Not found" });
+      await logAuditEvent({
+        req,
+        userId: req.session.userId!,
+        actionType: "driver_application_updated",
+        entityType: "driver_application",
+        entityId: req.params.id,
+        description: `Driver application updated${status ? ` — status → ${status}` : ""}`,
+        isAdminEntry: true,
+      });
       return res.json(updated);
     } catch (err: unknown) {
       console.error(err);
@@ -3278,6 +3334,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contact = await storage.createContact(data);
       sendContactFormEmail(data).catch(() => {});
       await logAuditEvent({
+        req,
         actionType: "contact_form_submitted",
         entityType: "contact",
         entityId: contact.id,
@@ -3285,7 +3342,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       return res.status(201).json({ id: contact.id });
     } catch (err: unknown) {
-      if (err instanceof Error && err.constructor.name === "ZodError") return res.status(400).json({ message: "Invalid input" });
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
@@ -3309,6 +3366,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!allowed.includes(status)) return res.status(400).json({ message: "Invalid status" });
       const updated = await storage.updateContactStatus(req.params.id, status);
       if (!updated) return res.status(404).json({ message: "Not found" });
+      await logAuditEvent({
+        req,
+        userId: req.session.userId!,
+        actionType: "contact_status_updated",
+        entityType: "contact",
+        entityId: req.params.id,
+        description: `Contact status → ${status}`,
+        isAdminEntry: true,
+      });
       return res.json(updated);
     } catch (err: unknown) {
       console.error(err);
@@ -3341,6 +3407,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertTestimonialSchema.parse(req.body);
       const item = await storage.createTestimonial(data);
+      await logAuditEvent({
+        req, userId: req.session.userId!, actionType: "testimonial_created",
+        entityType: "testimonial", entityId: item.id,
+        description: `Testimonial created for ${data.customerName}`, isAdminEntry: true,
+      });
       return res.status(201).json(item);
     } catch (err: unknown) {
       console.error(err);
@@ -3353,6 +3424,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = insertTestimonialSchema.partial().parse(req.body);
       const updated = await storage.updateTestimonial(req.params.id, data);
       if (!updated) return res.status(404).json({ message: "Not found" });
+      await logAuditEvent({
+        req, userId: req.session.userId!, actionType: "testimonial_updated",
+        entityType: "testimonial", entityId: req.params.id,
+        description: `Testimonial updated: ${Object.keys(data).join(", ")}`, isAdminEntry: true,
+      });
       return res.json(updated);
     } catch (err: unknown) {
       console.error(err);
@@ -3363,6 +3439,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/admin/testimonials/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       await storage.deleteTestimonial(req.params.id);
+      await logAuditEvent({
+        req, userId: req.session.userId!, actionType: "testimonial_deleted",
+        entityType: "testimonial", entityId: req.params.id,
+        description: `Testimonial deleted`, isAdminEntry: true,
+      });
       return res.json({ ok: true });
     } catch (err: unknown) {
       console.error(err);

@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { db } from "./db";
 import { emailLogs } from "@shared/schema";
+import { COMPANY } from "@shared/constants";
 
 const FROM = "noreply@getonprem.com";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || "admin@deluxelogistics.com";
@@ -50,9 +51,9 @@ export function emailTemplate(title: string, body: string, accentColor = "#e6394
     ${body}
     <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
     <p style="color: #64748b; font-size: 13px;">
-      <strong>Deluxe Logistics Inc.</strong><br/>
-      818 Corning Way, Martinsburg, WV 25401<br/>
-      <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>
+      <strong>${COMPANY.name}</strong><br/>
+      ${COMPANY.fullAddress}<br/>
+      <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>
     </p>
   </div>
 </div>`;
@@ -69,6 +70,9 @@ interface MailPayload {
   replyTo?: string;
 }
 
+const MAX_EMAIL_RETRIES = 3;
+const RETRY_DELAYS = [1000, 3000, 8000]; // ms: 1s, 3s, 8s
+
 async function sendTracked(
   msg: MailPayload,
   opts: { template: string; entityType?: string; entityId?: string }
@@ -83,22 +87,31 @@ async function sendTracked(
     return;
   }
 
-  try {
-    const resend = getResend();
-    await resend.emails.send({
-      from: msg.from,
-      to: Array.isArray(msg.to) ? msg.to : [msg.to],
-      subject: msg.subject,
-      html: msg.html,
-      ...(msg.text ? { text: msg.text } : {}),
-      ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
-    });
-    logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
-    throw err;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_EMAIL_RETRIES; attempt++) {
+    try {
+      const resend = getResend();
+      await resend.emails.send({
+        from: msg.from,
+        to: Array.isArray(msg.to) ? msg.to : [msg.to],
+        subject: msg.subject,
+        html: msg.html,
+        ...(msg.text ? { text: msg.text } : {}),
+        ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+      });
+      logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
+      return; // success
+    } catch (err: unknown) {
+      lastErr = err;
+      if (attempt < MAX_EMAIL_RETRIES - 1) {
+        console.warn(`[email] Attempt ${attempt + 1} failed for ${opts.template}, retrying in ${RETRY_DELAYS[attempt]}ms...`);
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+      }
+    }
   }
+  const errMsg = lastErr instanceof Error ? (lastErr as Error).message : String(lastErr);
+  logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
+  throw lastErr;
 }
 
 interface ApplicationData {
@@ -211,7 +224,7 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
     from: FROM,
     subject: "Your Deluxe Logistics rental application has been received",
     html,
-    text: `Hi ${app.ownerName},\n\nWe've received your rental application. Our team will review it and contact you within 24 hours.\n\nDeluxe Logistics Inc.\n818 Corning Way, Martinsburg, WV`,
+    text: `Hi ${app.ownerName},\n\nWe've received your rental application. Our team will review it and contact you within 24 hours.\n\n${COMPANY.name}\n${COMPANY.fullAddress}`,
   }, { template: "renter_acknowledgment", entityType: "rental_application", entityId: rawApp.id });
 }
 
@@ -246,10 +259,10 @@ export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
       <p style="margin: 0 0 8px; font-weight: bold; color: #1e293b;">Certificate Holder Information:</p>
       <p style="margin: 0; font-family: monospace; font-size: 14px; line-height: 1.8; color: #334155;">
-        Deluxe Logistics Inc.<br/>818 Corning Way<br/>Martinsburg, WV 25401
+        ${COMPANY.name}<br/>${COMPANY.address}<br/>${COMPANY.city}, ${COMPANY.state} ${COMPANY.zip}
       </p>
     </div>
-    <p>Please reply to this email with your COI attached, or email it to <a href="mailto:info@deluxelogistics.com">info@deluxelogistics.com</a>. Once received, we will complete our review and get back to you within 24 hours.</p>
+    <p>Please reply to this email with your COI attached, or email it to <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>. Once received, we will complete our review and get back to you within 24 hours.</p>
   `);
 
   await sendTracked({
@@ -257,7 +270,7 @@ export async function sendCOIRequest(rawApp: ApplicationData): Promise<void> {
     from: FROM,
     subject: "Action required: Certificate of Insurance for your rental application",
     html,
-    text: `Hi ${app.ownerName},\n\nTo complete your rental application review, we require a Certificate of Insurance naming:\n\nDeluxe Logistics Inc.\n818 Corning Way\nMartinsburg, WV 25401\n\nPlease reply to this email with the COI attached.\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${app.ownerName},\n\nTo complete your rental application review, we require a Certificate of Insurance naming:\n\n${COMPANY.name}\n${COMPANY.address}\n${COMPANY.city}, ${COMPANY.state} ${COMPANY.zip}\n\nPlease reply to this email with the COI attached.\n\n${COMPANY.name}`,
   }, { template: "coi_request", entityType: "rental_application", entityId: rawApp.id });
 }
 
@@ -597,7 +610,7 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     from: FROM,
     subject: `Invoice for ${period} — ${safeType} rental (${safeVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? info@deluxelogistics.com\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? ${COMPANY.email}\n\n${COMPANY.name}`,
   }, { template: "monthly_invoice", entityType: data.rentalId ? "rental" : undefined, entityId: data.rentalId });
 }
 

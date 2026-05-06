@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import logoPath from "@assets/Deluxe Logo_1758417985453.jpg";
+import { COMPANY } from "@shared/constants";
 
 export default function Footer() {
   return (
@@ -46,10 +47,10 @@ export default function Footer() {
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact</div>
               <div className="space-y-1.5 text-sm text-muted-foreground">
-                <div>818 Corning Way</div>
-                <div>Martinsburg, WV</div>
-                <a href="mailto:info@deluxelogistics.com" className="block hover:text-foreground">
-                  info@deluxelogistics.com
+                <div>{COMPANY.address}</div>
+                <div>{COMPANY.city}, {COMPANY.state}</div>
+                <a href={`mailto:${COMPANY.email}`} className="block hover:text-foreground">
+                  {COMPANY.email}
                 </a>
               </div>
             </div>
@@ -61,8 +62,8 @@ export default function Footer() {
             © {new Date().getFullYear()} Deluxe Logistics Inc. All rights reserved.
           </p>
           <div className="flex gap-4 text-xs text-muted-foreground">
-            <span className="hover:text-foreground cursor-pointer">Privacy Policy</span>
-            <span className="hover:text-foreground cursor-pointer">Terms of Service</span>
+            <Link href="/privacy" className="hover:text-foreground">Privacy Policy</Link>
+            <Link href="/terms" className="hover:text-foreground">Terms of Service</Link>
           </div>
         </div>
       </div>

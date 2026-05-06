@@ -84,6 +84,7 @@ export default function Header() {
                     onClick={handleLogout}
                     className="text-muted-foreground hover:text-destructive h-8 w-8"
                     title="Sign out"
+                    aria-label="Sign out"
                   >
                     <LogOut className="w-4 h-4" />
                   </Button>
@@ -109,6 +110,7 @@ export default function Header() {
           <button
             className="md:hidden text-muted-foreground"
             onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>

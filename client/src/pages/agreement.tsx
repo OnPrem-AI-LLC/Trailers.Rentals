@@ -15,6 +15,7 @@ import {
   AlertCircle, Calendar
 } from "lucide-react";
 import type { Rental, Company } from "@shared/schema";
+import { COMPANY } from "@shared/constants";
 
 interface TrailerInfo {
   id: string;
@@ -349,9 +350,9 @@ export default function AgreementPage() {
           <div className="bg-primary/10 border-b border-border px-8 py-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
-                <p className="font-black text-lg tracking-tight">DELUXE LOGISTICS INC.</p>
-                <p className="text-sm text-muted-foreground">818 Corning Way, Martinsburg, WV 25401</p>
-                <p className="text-sm text-muted-foreground">info@deluxelogistics.com</p>
+                <p className="font-black text-lg tracking-tight">{COMPANY.name.toUpperCase()}</p>
+                <p className="text-sm text-muted-foreground">{COMPANY.fullAddress}</p>
+                <p className="text-sm text-muted-foreground">{COMPANY.email}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">Date: {today}</p>
@@ -369,9 +370,9 @@ export default function AgreementPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
               <div>
                 <p className="font-bold mb-1">LESSOR (Owner)</p>
-                <p>Deluxe Logistics Inc.</p>
-                <p className="text-muted-foreground">818 Corning Way</p>
-                <p className="text-muted-foreground">Martinsburg, WV 25401</p>
+                <p>{COMPANY.name}</p>
+                <p className="text-muted-foreground">{COMPANY.address}</p>
+                <p className="text-muted-foreground">{COMPANY.city}, {COMPANY.state} {COMPANY.zip}</p>
               </div>
               <div>
                 <p className="font-bold mb-1">LESSEE (Renter)</p>
@@ -544,7 +545,7 @@ export default function AgreementPage() {
             <label className="text-sm font-bold mb-2 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-primary" /> Preferred Pickup Date &amp; Time
             </label>
-            <p className="text-xs text-muted-foreground mb-3">Pick up from: 818 Corning Way, Martinsburg, WV 25401 · Mon–Fri 8am–5pm</p>
+            <p className="text-xs text-muted-foreground mb-3">Pick up from: {COMPANY.fullAddress} · {COMPANY.hours}</p>
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1">
                 <label className="text-xs text-muted-foreground block mb-1.5">Date</label>

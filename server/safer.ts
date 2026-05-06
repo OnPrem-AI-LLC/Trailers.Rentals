@@ -35,6 +35,22 @@ function apiKey(): string | undefined {
   return process.env.FMCSA_API_KEY;
 }
 
+// In-memory cache for FMCSA lookups — 24hr TTL
+const fmcsaCache = new Map<string, { result: SaferLookupResult; expiresAt: number }>();
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function getCached(key: string): SaferLookupResult | null {
+  const entry = fmcsaCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { fmcsaCache.delete(key); return null; }
+  return entry.result;
+}
+
+function setCache(key: string, result: SaferLookupResult): void {
+  // Only cache successful lookups
+  if (result.success) fmcsaCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL });
+}
+
 export async function lookupByDot(dotNumber: string): Promise<SaferLookupResult> {
   const key = apiKey();
 
@@ -47,6 +63,9 @@ export async function lookupByDot(dotNumber: string): Promise<SaferLookupResult>
   if (!cleanDot) {
     return { success: false, error: "Invalid DOT number format.", source: "unavailable" };
   }
+
+  const cached = getCached(`dot:${cleanDot}`);
+  if (cached) return cached;
 
   const url = `https://mobile.fmcsa.dot.gov/qc/services/carriers/${cleanDot}?webKey=${key}`;
 
@@ -90,7 +109,9 @@ export async function lookupByDot(dotNumber: string): Promise<SaferLookupResult>
       rawData: carrier,
     };
 
-    return { success: true, carrier: saferCarrier, source: "fmcsa_api" };
+    const result: SaferLookupResult = { success: true, carrier: saferCarrier, source: "fmcsa_api" };
+    setCache(`dot:${cleanDot}`, result);
+    return result;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.warn("[SAFER] Lookup failed:", message);
@@ -108,6 +129,9 @@ export async function lookupByMc(mcNumber: string): Promise<SaferLookupResult> {
   if (!cleanMc) {
     return { success: false, error: "Invalid MC number format.", source: "unavailable" };
   }
+
+  const cached = getCached(`mc:${cleanMc}`);
+  if (cached) return cached;
 
   const url = `https://mobile.fmcsa.dot.gov/qc/services/carriers/docket-number/${cleanMc}?webKey=${key}`;
 
@@ -146,7 +170,9 @@ export async function lookupByMc(mcNumber: string): Promise<SaferLookupResult> {
       entityType: carrier.entityType ? String(carrier.entityType) : undefined,
       rawData: carrier,
     };
-    return { success: true, carrier: saferCarrier, source: "fmcsa_api" };
+    const result: SaferLookupResult = { success: true, carrier: saferCarrier, source: "fmcsa_api" };
+    setCache(`mc:${cleanMc}`, result);
+    return result;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return { success: false, error: `SAFER lookup failed: ${message}`, source: "fmcsa_api" };

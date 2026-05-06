@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -45,7 +45,7 @@ export const trailers = pgTable("trailers", {
   make: text("make"),
   model: text("model"),
   year: text("year"),
-  priceMonthly: integer("price_monthly").notNull(), // in cents
+  priceMonthly: integer("price_monthly").notNull().default(150000), // in cents ($1,500)
   engineHourRate: integer("engine_hour_rate"), // cents per hour, reefers only
   status: text("status").notNull().default("available"), // "available" | "rented" | "maintenance" | "inactive"
   description: text("description"),
@@ -53,7 +53,9 @@ export const trailers = pgTable("trailers", {
   location: text("location"), // yard/city location e.g. "Martinsburg, WV"
   registrationUrl: text("registration_url"), // admin-only document
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_trailers_status").on(table.status),
+]);
 
 // ── Trailer Photos ─────────────────────────────────────────────────────
 export const trailerPhotos = pgTable("trailer_photos", {
@@ -85,7 +87,9 @@ export const rentalApplications = pgTable("rental_applications", {
   adminToken: varchar("admin_token").unique(), // one-time admin email link token
   renterToken: varchar("renter_token").unique(), // token used for renter response page
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_rental_applications_status").on(table.status),
+]);
 
 // ── Rentals ────────────────────────────────────────────────────────────
 export const rentals = pgTable("rentals", {
@@ -113,7 +117,14 @@ export const rentals = pgTable("rentals", {
   stripeSubscriptionId: text("stripe_subscription_id"),
   stripeDepositIntentId: text("stripe_deposit_intent_id"), // active deposit PaymentIntent (reused to prevent duplicates)
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  // Prevent double-booking: only one non-terminal rental per trailer
+  uniqueIndex("idx_rentals_one_active_per_trailer")
+    .on(table.trailerId)
+    .where(sql`status NOT IN ('completed', 'cancelled')`),
+  index("idx_rentals_status").on(table.status),
+  index("idx_rentals_company").on(table.companyId),
+]);
 
 // ── Engine Hour Entries ────────────────────────────────────────────────
 export const engineHourEntries = pgTable("engine_hour_entries", {
@@ -154,7 +165,9 @@ export const adminNotes = pgTable("admin_notes", {
   body: text("body").notNull(),
   isPinned: boolean("is_pinned").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("idx_admin_notes_entity").on(table.entityType, table.entityId),
+]);
 
 // ── Audit Logs ─────────────────────────────────────────────────────────
 export const auditLogs = pgTable("audit_logs", {
@@ -238,6 +251,7 @@ export const insertTrailerSchema = createInsertSchema(trailers).omit({
   vin: z.string().min(1, "VIN is required"),
   type: z.string().min(1, "Trailer type is required"),
   priceMonthly: z.number().min(1, "Price is required"),
+  engineHourRate: z.number().int().min(0).max(100000).nullable().optional(), // 0–$1000/hr in cents
 });
 
 export const insertTrailerPhotoSchema = createInsertSchema(trailerPhotos).omit({
@@ -340,12 +354,14 @@ export const testimonials = pgTable("testimonials", {
   companyName: text("company_name"),
   quote: text("quote").notNull(),
   videoUrl: text("video_url"),
-  rating: integer("rating").default(5),
+  rating: integer("rating").notNull().default(5),
   isActive: boolean("is_active").notNull().default(true),
-  displayOrder: integer("display_order").default(0),
+  displayOrder: integer("display_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-export const insertTestimonialSchema = createInsertSchema(testimonials).omit({ id: true, createdAt: true });
+export const insertTestimonialSchema = createInsertSchema(testimonials).omit({ id: true, createdAt: true }).extend({
+  rating: z.number().int().min(1).max(5).default(5),
+});
 export type InsertTestimonial = z.infer<typeof insertTestimonialSchema>;
 export type Testimonial = typeof testimonials.$inferSelect;
 

@@ -16,6 +16,7 @@ import {
   Receipt, Download, ClipboardList, MapPin, Calendar,
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
+import { COMPANY } from "@shared/constants";
 import { apiRequest } from "@/lib/queryClient";
 
 interface ApplicationTrailer {
@@ -666,10 +667,14 @@ export default function Dashboard() {
                               onClick={async () => {
                                 try {
                                   const res = await apiRequest("POST", "/api/stripe/create-subscription-session", { rentalId: rental.id });
+                                  if (!res.ok) {
+                                    const err = await res.json().catch(() => ({ message: "Subscription setup failed." })) as { message: string };
+                                    throw new Error(err.message);
+                                  }
                                   const data = await res.json() as { url: string };
                                   window.location.href = data.url;
-                                } catch {
-                                  toast({ title: "Error", description: "Could not start subscription setup.", variant: "destructive" });
+                                } catch (err) {
+                                  toast({ title: "Error", description: err instanceof Error ? err.message : "Could not start subscription setup.", variant: "destructive" });
                                 }
                               }}
                             >
@@ -808,8 +813,8 @@ export default function Dashboard() {
             <div className="bg-card border border-border rounded-xl p-5 text-sm">
               <h2 className="font-bold text-sm uppercase tracking-wider mb-3">Need Help?</h2>
               <p className="text-muted-foreground text-xs mb-3">Contact Deluxe Logistics for questions about your rental, documents, or payments.</p>
-              <a href="mailto:info@deluxelogistics.com" className="text-primary hover:underline text-xs flex items-center gap-1">
-                <Mail className="w-3 h-3" /> info@deluxelogistics.com
+              <a href={`mailto:${COMPANY.email}`} className="text-primary hover:underline text-xs flex items-center gap-1">
+                <Mail className="w-3 h-3" /> {COMPANY.email}
               </a>
             </div>
           </div>

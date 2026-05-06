@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { TrailerWithPhotos, Testimonial } from "@shared/schema";
+import { COMPANY } from "@shared/constants";
 
 const VALUE_PROPS = [
   {
@@ -376,8 +377,8 @@ export default function Home() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <Mail className="w-4 h-4 text-primary" />
                   </div>
-                  <a href="mailto:info@deluxelogistics.com" className="hover:text-primary transition-colors">
-                    info@deluxelogistics.com
+                  <a href={`mailto:${COMPANY.email}`} className="hover:text-primary transition-colors">
+                    {COMPANY.email}
                   </a>
                 </div>
                 <div className="flex items-center gap-3 text-sm">
@@ -392,7 +393,7 @@ export default function Home() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <MapPin className="w-4 h-4 text-primary" />
                   </div>
-                  <span className="text-muted-foreground">818 Corning Way, Martinsburg, WV 25401</span>
+                  <span className="text-muted-foreground">{COMPANY.fullAddress}</span>
                 </div>
               </div>
             </div>
