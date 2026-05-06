@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import path from "path";
+import helmet from "helmet";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import rateLimit from "express-rate-limit";
@@ -18,6 +19,7 @@ if (!sessionSecret && process.env.NODE_ENV === "production") {
 
 const app = express();
 app.set("trust proxy", 1); // Required for Railway / reverse-proxy environments
+app.use(helmet());
 
 // ── Stripe webhook MUST be registered BEFORE express.json() ─────────────
 // Webhook needs raw Buffer, not parsed JSON
