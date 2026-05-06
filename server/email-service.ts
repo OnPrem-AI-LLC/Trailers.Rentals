@@ -116,6 +116,7 @@ interface ApplicationData {
   authorizedUser?: string | null;
   trailerVin?: string;
   trailerType?: string;
+  trailerName?: string;
   priceMonthly?: number;
 }
 
@@ -147,6 +148,7 @@ function escApp(app: ApplicationData): ApplicationData {
     authorizedUser: app.authorizedUser ? esc(app.authorizedUser) : app.authorizedUser,
     trailerVin: app.trailerVin ? esc(app.trailerVin) : app.trailerVin,
     trailerType: app.trailerType ? esc(app.trailerType) : app.trailerType,
+    trailerName: app.trailerName ? esc(app.trailerName) : app.trailerName,
   };
 }
 
@@ -167,7 +169,7 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
       <tr><td style="padding: 8px 0; color: #64748b;">Phone</td><td style="padding: 8px 0;">${app.phone}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">DOT Number</td><td style="padding: 8px 0; font-weight: bold;">${app.dotNumber}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">MC Number</td><td style="padding: 8px 0;">${app.mcNumber || "Not provided"}</td></tr>
-      <tr><td style="padding: 8px 0; color: #64748b;">Trailer</td><td style="padding: 8px 0;">${app.trailerVin ? `${app.trailerType} — ${app.trailerVin}` : "N/A"}</td></tr>
+      <tr><td style="padding: 8px 0; color: #64748b;">Trailer</td><td style="padding: 8px 0;">${app.trailerName || app.trailerType || "N/A"}${app.trailerVin ? ` — VIN: ${app.trailerVin}` : ""}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Monthly Rate</td><td style="padding: 8px 0;">${price}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Intended Use</td><td style="padding: 8px 0;">${app.intendedUse}</td></tr>
       ${app.intendedUseDetails ? `<tr><td style="padding: 8px 0; color: #64748b;">Details</td><td style="padding: 8px 0;">${app.intendedUseDetails}</td></tr>` : ""}
@@ -194,7 +196,7 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
 
   const html = emailTemplate("Application Received", `
     <p>Hi ${app.ownerName},</p>
-    <p>We've received your rental application for <strong>${app.trailerVin ? `trailer VIN ${app.trailerVin}` : "your requested trailer"}</strong>.</p>
+    <p>We've received your rental application for <strong>${app.trailerName || "your requested trailer"}</strong>.</p>
     <p><strong>What happens next:</strong></p>
     <ul>
       <li>Our team will review your application and DOT/MC information</li>

@@ -474,12 +474,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch trailer for email context
       let trailerVin: string | undefined;
       let trailerType: string | undefined;
+      let trailerName: string | undefined;
       let priceMonthly: number | undefined;
       try {
         const trailer = await storage.getTrailer(application.trailerId);
-        trailerVin = trailer?.vin;
+        trailerVin = trailer?.vin ?? undefined;
         trailerType = trailer?.type;
         priceMonthly = trailer?.priceMonthly;
+        if (trailer) {
+          const typeLabels: Record<string, string> = {
+            dry_van: "Dry Van", reefer: "Refrigerated", flatbed: "Flatbed",
+            chassis: "Chassis", specialized: "Specialized", tractor: "Tractor",
+            box_truck: "Box Truck", trailer_jockey: "Trailer Jockey",
+          };
+          trailerName = trailer.make && trailer.model
+            ? `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim()
+            : `${typeLabels[trailer.type] || trailer.type} Trailer`;
+        }
       } catch { /* non-fatal */ }
 
       const appData = {
@@ -497,6 +508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         authorizedUser: application.authorizedUser,
         trailerVin,
         trailerType,
+        trailerName,
         priceMonthly,
       };
 
