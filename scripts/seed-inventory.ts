@@ -61,7 +61,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("IN USE"),
     description: "2023 Kenworth T680 — currently in service.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "4659",
@@ -72,7 +72,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Find Driver"),
     description: "2023 Kenworth T680 — available, seeking driver assignment.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "9007",
@@ -83,7 +83,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2020 Kenworth T680 sleeper — striking orange finish. Full sleeper cab with upper/lower bunks, leather seats, fold-out table, storage cabinets. Gauge cluster in good condition. Currently needs battery. Available for sale.",
     features: ["T680 sleeper cab", "Upper & lower bunks", "Leather interior", "Fold-out table", "Full storage", "Needs battery"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/9007/9007-1.jpg",
       "/attached_assets/9007/9007-2.jpg",
@@ -105,7 +105,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or find driver"),
     description: "2022 Kenworth — needs $10-15K repair.",
     features: ["Needs repair ($10–15K)"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "9012",
@@ -116,7 +116,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell for parts"),
     description: "2019 Kenworth T660 sleeper — available for parts. Cab interior stripped (dash removed, wiring exposed). Sleeper bunk intact. Engine present and accessible. Good source for drivetrain and sleeper components.",
     features: ["T660 sleeper cab", "Engine present", "Sleeper bunk intact", "Stripped interior — parts only"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/9012/9012-1.jpg",
       "/attached_assets/9012/9012-2.jpg",
@@ -136,7 +136,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or use"),
     description: "2009 Dodge Sprinter box truck — needs alternator, currently not running.",
     features: ["Needs alternator"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   // ── Trailer Jockey ────────────────────────────────────────
   {
@@ -148,7 +148,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2011 Trailer Jockey yard spotter — usable condition. Simple cab interior with manual controls and fifth wheel coupling. Surface rust on body panels. 11R22.5 tires. Available for sale.",
     features: ["Yard spotter / hostler", "Fifth wheel coupling", "Manual controls", "11R22.5 tires", "Usable condition"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/unit4/unit4-1.jpg",
       "/attached_assets/unit4/unit4-2.jpg",
@@ -167,7 +167,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or rent"),
     description: "2007 Utility reefer — usable, decent condition.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5062",
@@ -178,7 +178,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("IN USE"),
     description: "2007 Utility 3000R reefer — Carrier Precedent refrigeration unit. Decent condition, interior in working order. Currently in service.",
     features: ["Utility 3000R", "Carrier Precedent reefer unit", "Interior liner intact"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/5062/5062-1.jpg",
       "/attached_assets/5062/5062-2.jpg",
@@ -195,7 +195,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or rent"),
     description: "2010 Utility reefer — reefer unit not cooling, does not start.",
     features: ["Reefer unit needs service", "Does not start"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5086",
@@ -206,7 +206,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2011 Utility reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5120",
@@ -217,7 +217,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2016 Utility reefer — air ride suspension.",
     features: ["Air Ride"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5201",
@@ -228,7 +228,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or rent"),
     description: "2014 Utility reefer — needs reefer unit replacement.",
     features: ["Needs reefer unit"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5202",
@@ -239,7 +239,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("In Use"),
     description: "2015 Utility 3000R reefer — Thermo King reefer unit. Clean interior with aluminum T-floor. Currently in service.",
     features: ["Utility 3000R", "Thermo King reefer unit", "Aluminum T-floor", "Clean interior"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/5202/5202-1.jpg",
       "/attached_assets/5202/5202-2.jpg",
@@ -255,7 +255,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or rent"),
     description: "2011 WANC reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "8",
@@ -266,7 +266,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2013 Utility reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "11",
@@ -277,7 +277,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell or Rent"),
     description: "2014 Hyundai reefer — roll-up doors.",
     features: ["Roll-up doors"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "2",
@@ -288,7 +288,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2012 Utility reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "5",
@@ -299,7 +299,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2010 Wabash reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   {
     unitNumber: "14",
@@ -310,7 +310,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2015 Great Dane reefer.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
   // ── Wabash Dry Vans (photos on file) ────────────────────────
   {
@@ -322,7 +322,7 @@ const inventory: EquipmentRow[] = [
     status: "available",
     description: "Wabash National 53' dry van — Unit #5821. FMCSA inspected June 2024.",
     features: ["53 ft", "FMCSA inspected June 2024"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/5821/5821-1.jpg",
       "/attached_assets/5821/5821-2.jpg",
@@ -338,7 +338,7 @@ const inventory: EquipmentRow[] = [
     status: "available",
     description: "Wabash National Duraplate dry van — Unit #5686. Good condition.",
     features: ["Duraplate sidewalls"],
-    priceMonthly: 0,
+    priceMonthly: 150000,
     photos: [
       "/attached_assets/5686/5686-1.jpg",
       "/attached_assets/5686/5686-2.jpg",
@@ -356,7 +356,7 @@ const inventory: EquipmentRow[] = [
     status: mapStatus("Sell"),
     description: "2009 Great Dane dry van.",
     features: [],
-    priceMonthly: 0,
+    priceMonthly: 150000,
   },
 ];
 
@@ -382,6 +382,7 @@ async function main() {
           status: item.status,
           description: item.description,
           features: JSON.stringify(item.features),
+          priceMonthly: item.priceMonthly,
         })
         .where(eq(trailers.id, trailerId));
       console.log(`  Updated: Unit #${item.unitNumber} (${item.vin})`);
