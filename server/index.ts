@@ -13,8 +13,8 @@ import { WebhookHandlers } from "./webhookHandlers";
 const PgSession = connectPgSimple(session);
 
 const sessionSecret = process.env.SESSION_SECRET;
-if (!sessionSecret && process.env.NODE_ENV === "production") {
-  throw new Error("SESSION_SECRET environment variable is required in production");
+if (!sessionSecret && process.env.NODE_ENV !== "development") {
+  throw new Error("SESSION_SECRET environment variable is required (set NODE_ENV=development to use a dev fallback)");
 }
 
 const app = express();
@@ -79,6 +79,34 @@ app.use("/api/auth/login", authLimiter);
 app.use("/api/auth/signup", authLimiter);
 app.use("/api/auth/forgot-password", authLimiter);
 app.use("/api/auth/reset-password", authLimiter);
+
+// ── CSRF protection: require JSON content-type on state-changing API requests ─
+app.use((req, res, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && req.path.startsWith("/api/")) {
+    // Skip webhook (raw body) and file uploads (multipart)
+    if (req.path === "/api/stripe/webhook") return next();
+    if (req.is("multipart/form-data")) return next();
+    // Logout has no body — allow empty requests
+    if (req.path === "/api/auth/logout") return next();
+    const ct = req.headers["content-type"] || "";
+    if (!ct.includes("application/json")) {
+      return res.status(415).json({ message: "Content-Type must be application/json" });
+    }
+  }
+  next();
+});
+
+// ── Rate limiting on public form endpoints ──────────────────────────────
+const publicFormLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 submissions per hour per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many submissions. Please try again later." },
+});
+app.use("/api/applications", publicFormLimiter);
+app.use("/api/driver-applications", publicFormLimiter);
+app.use("/api/contact", publicFormLimiter);
 
 // ── Request logging ──────────────────────────────────────────────────────
 app.use((req, res, next) => {

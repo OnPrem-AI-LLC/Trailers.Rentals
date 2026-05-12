@@ -16,6 +16,9 @@
  */
 
 import { storage } from './storage';
+import { db } from './db';
+import { rentals, trailers } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 import { getUncachableStripeClient } from './stripeClient';
 import { randomBytes } from 'crypto';
 
@@ -43,22 +46,25 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   // Resolve Stripe customer ID — prefer what's on the rental already
   const customerId = rental.stripeCustomerId ?? opts.stripeCustomerId ?? null;
 
-  // ── 1. Activate rental (idempotent) ────────────────────────────────────────
+  // ── 1. Activate rental (idempotent, transactional) ─────────────────────────
   const wasAlreadyActive = rental.depositPaid;
   if (!wasAlreadyActive) {
     const pickupToken = rental.pickupToken ?? randomBytes(32).toString('hex');
     const returnToken = rental.returnToken ?? randomBytes(32).toString('hex');
-    await storage.updateRental(rentalId, {
-      depositPaid: true,
-      status: 'active',
-      startDate: new Date(),
-      ...(customerId && !rental.stripeCustomerId ? { stripeCustomerId: customerId } : {}),
-      ...(!rental.pickupToken ? { pickupToken } : {}),
-      ...(!rental.returnToken ? { returnToken } : {}),
-    });
 
-    // Mark trailer as rented — allow any error to propagate so finalization fails and retries safely
-    await storage.updateTrailer(rental.trailerId, { status: 'rented' });
+    // Wrap activation + trailer status update in a transaction for atomicity
+    await db.transaction(async (tx) => {
+      await tx.update(rentals).set({
+        depositPaid: true,
+        status: 'active',
+        startDate: new Date(),
+        ...(customerId && !rental.stripeCustomerId ? { stripeCustomerId: customerId } : {}),
+        ...(!rental.pickupToken ? { pickupToken } : {}),
+        ...(!rental.returnToken ? { returnToken } : {}),
+      }).where(eq(rentals.id, rentalId));
+
+      await tx.update(trailers).set({ status: 'rented' }).where(eq(trailers.id, rental.trailerId));
+    });
   } else if (customerId && !rental.stripeCustomerId) {
     // Rental already active but missing customer ID — patch it
     await storage.updateRental(rentalId, { stripeCustomerId: customerId });

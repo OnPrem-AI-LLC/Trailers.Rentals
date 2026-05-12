@@ -53,12 +53,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user || !user.isActive) return res.status(401).json({ message: "Invalid credentials" });
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return res.status(401).json({ message: "Invalid credentials" });
-      req.session.userId = user.id;
-      req.session.userRole = user.role;
       const payload = { id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role };
-      req.session.save((err) => {
-        if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
-        return res.json(payload);
+      req.session.regenerate((err) => {
+        if (err) { console.error("[session] regenerate error:", err); return res.status(500).json({ message: "Session error" }); }
+        req.session.userId = user.id;
+        req.session.userRole = user.role;
+        req.session.save((err) => {
+          if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+          return res.json(payload);
+        });
       });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
@@ -101,11 +104,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (existing) return res.status(409).json({ message: "An account with this email already exists" });
       const hashed = await bcrypt.hash(password, 10);
       const user = await storage.createUser({ username, password: hashed, firstName, lastName, role: "renter", isActive: true });
-      req.session.userId = user.id;
-      req.session.userRole = user.role;
-      req.session.save((err) => {
-        if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
-        return res.status(201).json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
+      req.session.regenerate((err) => {
+        if (err) { console.error("[session] regenerate error:", err); return res.status(500).json({ message: "Session error" }); }
+        req.session.userId = user.id;
+        req.session.userRole = user.role;
+        req.session.save((err) => {
+          if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+          return res.status(201).json({ id: user.id, email: user.username, firstName: user.firstName, lastName: user.lastName, role: user.role });
+        });
       });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
@@ -1337,9 +1343,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isAdminEntry: true,
       });
 
-      req.session.userId = updated.id;
-      req.session.userRole = updated.role;
-      return res.json({ id: updated.id, email: updated.username, firstName: updated.firstName, lastName: updated.lastName, role: updated.role });
+      const adminPayload = { id: updated.id, email: updated.username, firstName: updated.firstName, lastName: updated.lastName, role: updated.role };
+      req.session.regenerate((err) => {
+        if (err) { console.error("[session] regenerate error:", err); return res.status(500).json({ message: "Session error" }); }
+        req.session.userId = updated.id;
+        req.session.userRole = updated.role;
+        req.session.save((err) => {
+          if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+          return res.json(adminPayload);
+        });
+      });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
@@ -1413,10 +1426,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isAdminEntry: false,
       });
 
-      // Auto log in
-      req.session.userId = updatedUser.id;
-      req.session.userRole = updatedUser.role;
-      return res.json({ id: updatedUser.id, email: updatedUser.username, firstName: updatedUser.firstName, lastName: updatedUser.lastName, role: updatedUser.role });
+      // Auto log in with session regeneration
+      const invitePayload = { id: updatedUser.id, email: updatedUser.username, firstName: updatedUser.firstName, lastName: updatedUser.lastName, role: updatedUser.role };
+      req.session.regenerate((err) => {
+        if (err) { console.error("[session] regenerate error:", err); return res.status(500).json({ message: "Session error" }); }
+        req.session.userId = updatedUser.id;
+        req.session.userRole = updatedUser.role;
+        req.session.save((err) => {
+          if (err) { console.error("[session] save error:", err); return res.status(500).json({ message: "Session error" }); }
+          return res.json(invitePayload);
+        });
+      });
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
@@ -1936,6 +1956,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(rental);
     } catch (err: unknown) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
+      // Catch unique constraint violation (double-booking)
+      if (err instanceof Error && err.message?.includes("idx_rentals_one_active_per_trailer")) {
+        return res.status(409).json({ message: "This trailer already has an active rental. It cannot be rented again until the current rental is completed or cancelled." });
+      }
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
     }
@@ -1984,6 +2008,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const rental = await storage.updateRental(req.params.id, payload);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
+
+      // Side effects for terminal status transitions
+      if (body.status === "completed" || body.status === "cancelled") {
+        // Set trailer to maintenance (completed) or available (cancelled)
+        const trailerStatus = body.status === "completed" ? "maintenance" : "available";
+        await storage.updateTrailer(existingRental.trailerId, { status: trailerStatus }).catch(
+          (e: unknown) => console.error(`[admin] Failed to update trailer status:`, e)
+        );
+
+        // Cancel Stripe subscription if active
+        if (existingRental.stripeSubscriptionId) {
+          try {
+            const stripe = await getUncachableStripeClient();
+            await stripe.subscriptions.cancel(existingRental.stripeSubscriptionId);
+            await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+          } catch (subErr) {
+            console.error(`[admin] Failed to cancel subscription ${existingRental.stripeSubscriptionId}:`, subErr);
+          }
+        }
+
+        // Flag deposit refund if rental was completed and deposit was paid
+        if (body.status === "completed" && existingRental.depositPaid) {
+          await logAuditEvent({
+            req,
+            userId: null,
+            actionType: "deposit_refund_needed",
+            entityType: "rental",
+            entityId: rental.id,
+            description: `ACTION REQUIRED: Security deposit refund needed for completed rental. Process via Stripe dashboard.`,
+            isAdminEntry: true,
+          });
+        }
+      }
+
       const changedFields = Object.keys(body);
       const rentalBefore: Record<string, unknown> = {};
       const rentalAfter: Record<string, unknown> = {};
@@ -3114,29 +3172,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/return/:token/confirm — public
-  app.post("/api/return/:token/confirm", async (req: Request, res: Response) => {
+  // POST /api/return/:token/confirm — authenticated (renter or admin)
+  app.post("/api/return/:token/confirm", requireAuth, async (req: Request, res: Response) => {
     try {
       const rental = await storage.getRentalByReturnToken(req.params.token);
       if (!rental) return res.status(404).json({ message: "Invalid or expired return link" });
+
+      // Verify caller is admin or belongs to the rental's company
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      if (user.role !== "admin" && user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "You are not authorized to confirm this return" });
+      }
+
       if (rental.returnConfirmedAt) {
         return res.json({ success: true, alreadyConfirmed: true, confirmedAt: rental.returnConfirmedAt });
       }
+
+      // Only allow return on active rentals
+      if (!["active", "active_in_use"].includes(rental.status)) {
+        return res.status(400).json({ message: `Cannot confirm return for a rental in '${rental.status}' status` });
+      }
+
       const now = new Date();
       await storage.updateRental(rental.id, {
         returnConfirmedAt: now,
         status: "completed",
       });
+
+      // Set trailer to maintenance — admin reactivates after processing
+      await storage.updateTrailer(rental.trailerId, { status: "maintenance" });
+
+      // Cancel Stripe subscription if active
+      if (rental.stripeSubscriptionId) {
+        try {
+          const stripe = await getUncachableStripeClient();
+          await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
+          await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+        } catch (subErr) {
+          console.error(`[return] Failed to cancel subscription ${rental.stripeSubscriptionId}:`, subErr);
+        }
+      }
+
       await logAuditEvent({
         req,
-        userId: null,
+        userId: req.session.userId!,
         actionType: "return_confirmed",
         entityType: "rental",
         entityId: rental.id,
-        description: "Return confirmed via QR code scan",
-        metadata: { method: "qr_scan" },
+        description: `Return confirmed via QR code scan. Trailer set to maintenance. ${rental.stripeSubscriptionId ? "Subscription cancelled." : ""} Deposit refund requires admin action.`,
+        metadata: { method: "qr_scan", confirmedBy: user.username },
         isAdminEntry: false,
       });
+
+      // Flag deposit refund needed (only if deposit was actually paid)
+      if (rental.depositPaid) {
+        await logAuditEvent({
+          req,
+          userId: null,
+          actionType: "deposit_refund_needed",
+          entityType: "rental",
+          entityId: rental.id,
+          description: `ACTION REQUIRED: Security deposit refund needed for completed rental. Process via Stripe dashboard.`,
+          isAdminEntry: true,
+        });
+      }
+
       // Send return confirmation emails (fire and forget)
       const trailer2 = await storage.getTrailer(rental.trailerId);
       const company2 = rental.companyId ? await storage.getCompany(rental.companyId) : null;
