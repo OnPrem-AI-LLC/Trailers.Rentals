@@ -177,7 +177,7 @@ async function runReturnReminders() {
           renterEmail: user.username,
           renterName: `${user.firstName} ${user.lastName}`.trim() || user.username,
           companyName: company.name,
-          trailerVin: trailer.vin,
+          trailerVin: trailer.vin ?? '',
           trailerType: trailer.type,
           endDate,
           daysUntilReturn: daysUntil,

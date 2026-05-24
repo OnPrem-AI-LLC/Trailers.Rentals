@@ -275,7 +275,7 @@ export default function AdminInventory() {
                       variant="outline"
                       size="sm"
                       className="gap-1.5 text-xs"
-                      onClick={() => downloadQR(trailer.id, trailer.vin)}
+                      onClick={() => downloadQR(trailer.id, trailer.vin ?? trailer.id)}
                     >
                       <QrCode className="w-3 h-3" />
                       QR

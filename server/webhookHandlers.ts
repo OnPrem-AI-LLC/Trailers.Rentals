@@ -6,6 +6,13 @@ import type Stripe from 'stripe';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+/** Extract subscription ID from an Invoice (Stripe v20+ moved it to parent.subscription_details) */
+function getInvoiceSubscriptionId(inv: Stripe.Invoice): string | null {
+  const sub = inv.parent?.subscription_details?.subscription;
+  if (!sub) return null;
+  return typeof sub === 'string' ? sub : sub.id;
+}
+
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
     if (!Buffer.isBuffer(payload)) {
@@ -50,14 +57,13 @@ export class WebhookHandlers {
       // ── Recurring invoice paid ───────────────────────────────────────────────
       } else if (event.type === 'invoice.paid') {
         const inv = event.data.object as Stripe.Invoice;
-        console.log(`[webhook] Invoice ${inv.id} paid (subscription: ${inv.subscription ?? 'none'})`);
+        const subId = getInvoiceSubscriptionId(inv);
+        console.log(`[webhook] Invoice ${inv.id} paid (subscription: ${subId ?? 'none'})`);
 
-        if (!inv.subscription) {
+        if (!subId) {
           console.log(`[webhook] Skipping non-subscription invoice ${inv.id}`);
           return;
         }
-
-        const subId = typeof inv.subscription === 'string' ? inv.subscription : inv.subscription?.id;
         const rental = subId ? await storage.getRentalBySubscriptionId(subId) : null;
 
         if (rental) {
@@ -82,7 +88,7 @@ export class WebhookHandlers {
       // ── Invoice finalized ──────────────────────────────────────────────────
       } else if (event.type === 'invoice.finalized') {
         const inv = event.data.object as Stripe.Invoice;
-        const subId = typeof inv.subscription === 'string' ? inv.subscription : inv.subscription?.id;
+        const subId = getInvoiceSubscriptionId(inv);
         if (subId) {
           const rental = await storage.getRentalBySubscriptionId(subId);
           if (rental) {
@@ -113,10 +119,10 @@ export class WebhookHandlers {
                   renterName: displayName,
                   companyName: company?.name ?? displayName,
                   trailerType: trailer.type,
-                  trailerVin: trailer.vin,
+                  trailerVin: trailer.vin ?? '',
                   amount: inv.amount_due,
-                  invoiceUrl: inv.hosted_invoice_url,
-                  pdfUrl: inv.invoice_pdf,
+                  invoiceUrl: inv.hosted_invoice_url ?? null,
+                  pdfUrl: inv.invoice_pdf ?? null,
                   billingPeriod,
                 });
               } else {
@@ -131,9 +137,8 @@ export class WebhookHandlers {
       // ── Invoice payment failed ───────────────────────────────────────────────
       } else if (event.type === 'invoice.payment_failed') {
         const inv = event.data.object as Stripe.Invoice;
-        console.warn(`[webhook] Invoice payment FAILED: ${inv.id} (subscription: ${inv.subscription ?? 'none'})`);
-
-        const subId = typeof inv.subscription === 'string' ? inv.subscription : inv.subscription?.id;
+        const subId = getInvoiceSubscriptionId(inv);
+        console.warn(`[webhook] Invoice payment FAILED: ${inv.id} (subscription: ${subId ?? 'none'})`);
         const rental = subId ? await storage.getRentalBySubscriptionId(subId) : null;
 
         if (rental) {

@@ -13,7 +13,7 @@ export function formatTypeLabel(type: string): string {
   return TYPE_LABELS[type] || type.replace("_", " ");
 }
 
-export function formatTrailerName(trailer: { type: string; make?: string | null; model?: string | null; year?: number | null }): string {
+export function formatTrailerName(trailer: { type: string; make?: string | null; model?: string | null; year?: string | number | null }): string {
   if (trailer.make && trailer.model) {
     return `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim();
   }

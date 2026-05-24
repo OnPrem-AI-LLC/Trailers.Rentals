@@ -3125,7 +3125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             renterEmail: pickupCompany.email,
             renterName: pickupCompany.ownerName,
             companyName: pickupCompany.name,
-            trailerVin: pickupTrailer.vin,
+            trailerVin: pickupTrailer.vin ?? '',
             trailerType: pickupTrailer.type,
             registrationUrl: pickupTrailer.registrationUrl,
           }).catch(console.error);

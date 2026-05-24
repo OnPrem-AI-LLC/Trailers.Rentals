@@ -180,7 +180,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
           sendDepositReceivedAdminEmail({
             rentalId,
             companyName: company.name,
-            trailerVin: trailer.vin,
+            trailerVin: trailer.vin ?? '',
             trailerType: trailer.type,
             monthlyRate: rental.monthlyRate,
             paymentIntentId,
@@ -195,7 +195,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
             companyName: company.name,
             renterEmail: company.email,
             renterName: company.ownerName,
-            trailerVin: trailer.vin,
+            trailerVin: trailer.vin ?? '',
             trailerType: trailer.type,
             monthlyRate: rental.monthlyRate,
           })
