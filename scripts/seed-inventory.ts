@@ -62,6 +62,7 @@ const inventory: EquipmentRow[] = [
     description: "2023 Kenworth T680 — currently in service.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/9007/9007-1.jpg"],
   },
   {
     unitNumber: "4659",
@@ -73,6 +74,7 @@ const inventory: EquipmentRow[] = [
     description: "2023 Kenworth T680 — available, seeking driver assignment.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/9007/9007-1.jpg"],
   },
   {
     unitNumber: "9007",
@@ -106,6 +108,7 @@ const inventory: EquipmentRow[] = [
     description: "2022 Kenworth — needs $10-15K repair.",
     features: ["Needs repair ($10–15K)"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/9007/9007-1.jpg"],
   },
   {
     unitNumber: "9012",
@@ -137,6 +140,7 @@ const inventory: EquipmentRow[] = [
     description: "2009 Dodge Sprinter box truck — needs alternator, currently not running.",
     features: ["Needs alternator"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   // ── Trailer Jockey ────────────────────────────────────────
   {
@@ -168,6 +172,7 @@ const inventory: EquipmentRow[] = [
     description: "2007 Utility reefer — usable, decent condition.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5062",
@@ -198,6 +203,7 @@ const inventory: EquipmentRow[] = [
     description: "2010 Utility reefer — reefer unit not cooling, does not start.",
     features: ["Reefer unit needs service", "Does not start"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5086",
@@ -209,6 +215,7 @@ const inventory: EquipmentRow[] = [
     description: "2011 Utility reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5120",
@@ -220,6 +227,7 @@ const inventory: EquipmentRow[] = [
     description: "2016 Utility reefer — air ride suspension.",
     features: ["Air Ride"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5201",
@@ -231,6 +239,7 @@ const inventory: EquipmentRow[] = [
     description: "2014 Utility reefer — needs reefer unit replacement.",
     features: ["Needs reefer unit"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5202",
@@ -265,6 +274,7 @@ const inventory: EquipmentRow[] = [
     description: "2011 WANC reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "8",
@@ -276,6 +286,7 @@ const inventory: EquipmentRow[] = [
     description: "2013 Utility reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "11",
@@ -287,6 +298,7 @@ const inventory: EquipmentRow[] = [
     description: "2014 Hyundai reefer — roll-up doors.",
     features: ["Roll-up doors"],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "2",
@@ -298,6 +310,7 @@ const inventory: EquipmentRow[] = [
     description: "2012 Utility reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "5",
@@ -309,6 +322,7 @@ const inventory: EquipmentRow[] = [
     description: "2010 Wabash reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   {
     unitNumber: "14",
@@ -320,6 +334,7 @@ const inventory: EquipmentRow[] = [
     description: "2015 Great Dane reefer.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5213/5213-1.jpg"],
   },
   // ── Wabash Dry Vans (photos on file) ────────────────────────
   {
@@ -451,6 +466,7 @@ const inventory: EquipmentRow[] = [
     description: "2009 Great Dane dry van.",
     features: [],
     priceMonthly: 150000,
+    photos: ["/attached_assets/5686/5686-1.jpg"],
   },
 ];
 
