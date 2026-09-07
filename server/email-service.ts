@@ -832,7 +832,7 @@ export async function sendDriverApplicationConfirmation(data: DriverApplicationE
         <tr><td style="padding: 4px 0; color: #64748b;">Endorsements</td><td style="padding: 4px 0;">${endorsements}</td></tr>
       </table>
     </div>
-    <p style="font-size: 13px; color: #64748b;">Questions? Reply to this email or contact us at jobs@deluxelogistics.com.</p>
+    <p style="font-size: 13px; color: #64748b;">Questions? Reply to this email or contact us at jobs@trailers.rentals.</p>
     <p style="font-size: 13px; color: #64748b;">— The Deluxe Logistics Team</p>
   `);
 
@@ -841,7 +841,7 @@ export async function sendDriverApplicationConfirmation(data: DriverApplicationE
     from: FROM,
     subject: "We received your driver application — Deluxe Logistics",
     html,
-    text: `Hi ${data.fullName},\n\nThank you for applying to drive for Deluxe Logistics. We'll review your application within 2 business days.\n\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} year(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nQuestions? Email jobs@deluxelogistics.com\n\n— Deluxe Logistics Inc.`,
+    text: `Hi ${data.fullName},\n\nThank you for applying to drive for Deluxe Logistics. We'll review your application within 2 business days.\n\nCDL: Class ${data.cdlClass} (${data.cdlState})\nExperience: ${data.yearsExperience} year(s)\nPosition: ${positionLabel}\nEndorsements: ${endorsements}\n\nQuestions? Email jobs@trailers.rentals\n\n— Deluxe Logistics Inc.`,
   }, { template: "driver_application_confirmation", entityType: "driver_application", entityId: data.applicationId });
 }
 

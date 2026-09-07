@@ -5,7 +5,7 @@ export const COMPANY = {
   city: "Martinsburg",
   state: "WV",
   zip: "25401",
-  email: "info@deluxelogistics.com",
+  email: "info@trailers.rentals",
   fullAddress: "818 Corning Way, Martinsburg, WV 25401",
   hours: "Mon–Fri 8am–5pm",
 } as const;
