@@ -134,7 +134,7 @@ interface ApplicationData {
 }
 
 function domain(): string {
-  return process.env.APP_URL || "https://deluxelogistics.com";
+  return process.env.APP_URL || "https://trailers.rentals";
 }
 
 function esc(str: string | null | undefined): string {

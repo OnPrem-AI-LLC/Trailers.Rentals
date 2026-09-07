@@ -19,6 +19,15 @@ if (!sessionSecret && process.env.NODE_ENV !== "development") {
 
 const app = express();
 app.set("trust proxy", 1); // Required for Railway / reverse-proxy environments
+
+// Canonical host: send www.* to the bare domain (trailers.rentals)
+app.use((req, res, next) => {
+  const host = req.hostname;
+  if (host && host.startsWith("www.")) {
+    return res.redirect(301, `${req.protocol}://${host.slice(4)}${req.originalUrl}`);
+  }
+  next();
+});
 app.use(helmet());
 
 // ── Stripe webhook MUST be registered BEFORE express.json() ─────────────

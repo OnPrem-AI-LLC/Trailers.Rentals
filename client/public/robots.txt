@@ -13,4 +13,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://deluxelogistics.com/sitemap.xml
+Sitemap: https://trailers.rentals/sitemap.xml
