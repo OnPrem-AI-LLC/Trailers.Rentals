@@ -43,8 +43,10 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
 }> {
   const { rentalId, paymentIntentId, triggeredBy, userId, ipAddress } = opts;
 
-  const rental = await storage.getRental(rentalId);
-  if (!rental) throw new Error(`Rental ${rentalId} not found`);
+  const rentalRow = await storage.getRental(rentalId);
+  if (!rentalRow) throw new Error(`Rental ${rentalId} not found`);
+  // Declared non-null so the hoisted finish() below sees the narrowed type.
+  const rental = rentalRow;
 
   // Resolve Stripe customer ID — prefer what's on the rental already
   const customerId = rental.stripeCustomerId ?? opts.stripeCustomerId ?? null;
@@ -84,21 +86,8 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   const freshRental = await storage.getRental(rentalId);
   const effectiveCustomerId = freshRental?.stripeCustomerId ?? customerId;
 
-  // Always ensure the payment method is set as the customer default — decoupled from
-  // subscription creation so it works regardless of which finalization path ran first.
-  if (opts.paymentMethodId && effectiveCustomerId) {
-    try {
-      const stripe = await getUncachableStripeClient();
-      await stripe.customers.update(effectiveCustomerId, {
-        invoice_settings: { default_payment_method: opts.paymentMethodId },
-      });
-      console.log(`[deposit] Set default payment method ${opts.paymentMethodId} for customer ${effectiveCustomerId}`);
-    } catch (pmErr) {
-      console.warn('[deposit] Could not set default payment method:', pmErr);
-    }
-  }
-
   const wantsSubscription = !freshRental?.stripeSubscriptionId && !!effectiveCustomerId && rental.monthlyRate > 0;
+  let paymentMethodId = opts.paymentMethodId;
 
   // Consent is recorded when the renter ticks the box on the payment page,
   // before the PaymentIntent exists, so a record on file is bound to a card
@@ -116,6 +105,11 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
         const stripe = await getUncachableStripeClient();
         const pi = await stripe.paymentIntents.retrieve(freshRental.stripeDepositIntentId);
         consentBoundToPayment = pi.status === 'succeeded' && pi.metadata?.rentalId === rentalId;
+        // The card that paid the deposit (saved by setup_future_usage) is the
+        // one the subscription bills; the admin path has no other source for it.
+        if (consentBoundToPayment && !paymentMethodId && typeof pi.payment_method === 'string') {
+          paymentMethodId = pi.payment_method;
+        }
       } catch (piErr) {
         console.warn(`[deposit] Rental ${rentalId}: could not verify deposit intent ${freshRental.stripeDepositIntentId}:`, piErr);
       }
@@ -123,6 +117,20 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     if (!consentBoundToPayment) {
       await storage.updateRental(rentalId, { renewalConsentAt: null, renewalTermsVersion: null });
       console.warn(`[deposit] Rental ${rentalId}: manual confirmation; stale renewal consent (no succeeded deposit payment) discarded.`);
+    }
+  }
+
+  // Always ensure the payment method is set as the customer default — decoupled from
+  // subscription creation so it works regardless of which finalization path ran first.
+  if (paymentMethodId && effectiveCustomerId) {
+    try {
+      const stripe = await getUncachableStripeClient();
+      await stripe.customers.update(effectiveCustomerId, {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      });
+      console.log(`[deposit] Set default payment method ${paymentMethodId} for customer ${effectiveCustomerId}`);
+    } catch (pmErr) {
+      console.warn('[deposit] Could not set default payment method:', pmErr);
     }
   }
 
@@ -183,9 +191,15 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
         { idempotencyKey: `price_rental_${rentalId}` },
       );
 
-      // trial_end = 30 days from now: the deposit covers the first month,
-      // so recurring billing should not start until the next billing cycle.
-      const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+      // trial_end = 30 days after activation: the deposit covers the first
+      // month. Anchored on the stored start date, not the clock, so the
+      // webhook and the client callback send byte-identical parameters under
+      // the shared idempotency key (a different trial_end would make Stripe
+      // reject the replay instead of returning the cached subscription). The
+      // floor keeps a late manual confirmation inside Stripe's "trial_end must
+      // be in the future" rule.
+      const activatedAtMs = freshRental?.startDate ? new Date(freshRental.startDate).getTime() : Date.now();
+      const trialEnd = Math.floor(Math.max(activatedAtMs + 30 * 24 * 60 * 60 * 1000, Date.now() + 60 * 60 * 1000) / 1000);
 
       // Idempotency key ensures webhook + callback race produces only one subscription.
       // Stripe returns the cached result if the same key is replayed within 24 h.
@@ -217,6 +231,18 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       console.log(`[deposit] Monthly subscription ${subscription.id} created for rental ${rentalId}`);
       subscriptionCreated = true;
     } catch (err) {
+      const code = (err as { code?: string }).code;
+      const type = (err as { type?: string }).type;
+      if (code === 'idempotency_error' || type === 'StripeIdempotencyError') {
+        // The concurrent caller's request under the same key is the one that
+        // created it; give its DB write a moment and check before alarming.
+        await new Promise((r) => setTimeout(r, 1500));
+        const again = await storage.getRental(rentalId);
+        if (again?.stripeSubscriptionId) {
+          console.log(`[deposit] Rental ${rentalId}: subscription ${again.stripeSubscriptionId} was created by the concurrent caller`);
+          return finish();
+        }
+      }
       console.error(`[deposit] Subscription creation failed for rental ${rentalId}:`, err);
       // Surface to audit log so admin can see the failure and retry via billing controls
       try {
@@ -235,76 +261,83 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     }
   }
 
-  // ── 3. Audit log ────────────────────────────────────────────────────────────
-  try {
-    const verb = wasAlreadyActive ? 'subscription ensured after prior activation' : 'rental activated';
-    await storage.createAuditLog({
-      userId: userId ?? null,
-      actionType: `deposit_finalized_${triggeredBy}`,
-      entityType: 'rental',
-      entityId: rentalId,
-      description: `Deposit finalized (${triggeredBy})${paymentIntentId ? ` — PI: ${paymentIntentId}` : ''} — ${verb}${subscriptionCreated ? ', subscription created' : ''}${subscriptionBlockedNoConsent ? ', subscription withheld (no renewal consent)' : ''}`,
-      isAdminEntry: triggeredBy === 'admin_manual',
-      ipAddress: ipAddress ?? null,
-    });
-  } catch (err) {
-    console.error('[deposit] Audit log write failed:', err);
-  }
+  return finish();
 
-  // ── 4. Emails ───────────────────────────────────────────────────────────────
-  try {
-    const company = await storage.getCompany(rental.companyId);
-    const trailer = await storage.getTrailer(rental.trailerId);
-    if (company && trailer) {
-      const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import('./email-service');
-      const emailJobs: Promise<void>[] = [];
-      // Only send emails on first activation — skip on idempotent replays to prevent duplicates
-      if (!wasAlreadyActive) {
-        emailJobs.push(
-          sendDepositReceivedAdminEmail({
-            rentalId,
-            companyName: company.name,
-            trailerVin: trailer.vin ?? '',
-            trailerType: trailer.type,
-            monthlyRate: rental.monthlyRate,
-            paymentIntentId,
-          })
-        );
-      }
-      // Only send renter email on first activation to avoid duplicate
-      if (!wasAlreadyActive) {
-        const latest = await storage.getRental(rentalId);
-        emailJobs.push(
-          sendDepositConfirmedEmail({
-            rentalId,
-            companyName: company.name,
-            renterEmail: company.email,
-            renterName: company.ownerName,
-            trailerVin: trailer.vin ?? '',
-            trailerType: trailer.type,
-            monthlyRate: rental.monthlyRate,
-            subscriptionStarted: !!latest?.stripeSubscriptionId,
-          })
-        );
-      }
-      await Promise.allSettled(emailJobs);
+  async function finish() {
+    // ── 3. Audit log ────────────────────────────────────────────────────────────
+    try {
+      const verb = wasAlreadyActive ? 'subscription ensured after prior activation' : 'rental activated';
+      await storage.createAuditLog({
+        userId: userId ?? null,
+        actionType: `deposit_finalized_${triggeredBy}`,
+        entityType: 'rental',
+        entityId: rentalId,
+        description: `Deposit finalized (${triggeredBy})${paymentIntentId ? ` — PI: ${paymentIntentId}` : ''} — ${verb}${subscriptionCreated ? ', subscription created' : ''}${subscriptionBlockedNoConsent ? ', subscription withheld (no renewal consent)' : ''}`,
+        isAdminEntry: triggeredBy === 'admin_manual',
+        ipAddress: ipAddress ?? null,
+      });
+    } catch (err) {
+      console.error('[deposit] Audit log write failed:', err);
     }
-  } catch (err) {
-    console.error('[deposit] Email dispatch failed:', err);
-  }
 
-  // Flag if rental is active but subscription failed — needs admin attention.
-  // The no-consent case is not a failure: the renter's dashboard path resolves it.
-  const needsSubscriptionRetry = !wasAlreadyActive && !subscriptionCreated && !subscriptionBlockedNoConsent && rental.monthlyRate > 0;
-  if (needsSubscriptionRetry) {
-    console.warn(`[deposit] ALERT: Rental ${rentalId} activated but subscription NOT created. Needs admin intervention.`);
-  }
+    // ── 4. Emails ───────────────────────────────────────────────────────────────
+    try {
+      const company = await storage.getCompany(rental.companyId);
+      const trailer = await storage.getTrailer(rental.trailerId);
+      if (company && trailer) {
+        const { sendDepositConfirmedEmail, sendDepositReceivedAdminEmail } = await import('./email-service');
+        const emailJobs: Promise<void>[] = [];
+        // Only send emails on first activation — skip on idempotent replays to prevent duplicates
+        if (!wasAlreadyActive) {
+          emailJobs.push(
+            sendDepositReceivedAdminEmail({
+              rentalId,
+              companyName: company.name,
+              trailerVin: trailer.vin ?? '',
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+              paymentIntentId,
+            })
+          );
+        }
+        // Only send renter email on first activation to avoid duplicate
+        if (!wasAlreadyActive) {
+          const latest = await storage.getRental(rentalId);
+          emailJobs.push(
+            sendDepositConfirmedEmail({
+              rentalId,
+              companyName: company.name,
+              renterEmail: company.email,
+              renterName: company.ownerName,
+              trailerVin: trailer.vin ?? '',
+              trailerType: trailer.type,
+              monthlyRate: rental.monthlyRate,
+              subscriptionStarted: !!latest?.stripeSubscriptionId,
+            })
+          );
+        }
+        await Promise.allSettled(emailJobs);
+      }
+    } catch (err) {
+      console.error('[deposit] Email dispatch failed:', err);
+    }
 
-  return {
-    activated: !wasAlreadyActive,
-    subscriptionCreated,
-    subscriptionBlockedNoConsent,
-    alreadyDone: wasAlreadyActive && !subscriptionCreated,
-    needsSubscriptionRetry,
-  };
+    // Flag if rental is active but subscription failed — needs admin attention.
+    // The no-consent case is not a failure: the renter's dashboard path resolves it.
+    // Decided from the row, not this caller's bookkeeping: the concurrent caller
+    // may be the one that created the subscription.
+    const latestRow = await storage.getRental(rentalId);
+    const needsSubscriptionRetry = !wasAlreadyActive && !latestRow?.stripeSubscriptionId && !subscriptionBlockedNoConsent && rental.monthlyRate > 0;
+    if (needsSubscriptionRetry) {
+      console.warn(`[deposit] ALERT: Rental ${rentalId} activated but subscription NOT created. Needs admin intervention.`);
+    }
+
+    return {
+      activated: !wasAlreadyActive,
+      subscriptionCreated,
+      subscriptionBlockedNoConsent,
+      alreadyDone: wasAlreadyActive && !subscriptionCreated,
+      needsSubscriptionRetry,
+    };
+  }
 }

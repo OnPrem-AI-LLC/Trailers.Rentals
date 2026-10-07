@@ -26,6 +26,9 @@ import {
   consentAtFromMetadata,
   findLiveSubscriptionForRental,
   expireOpenCheckoutSessions,
+  isLiveSubscription,
+  markSubscriptionEnded,
+  cancelSubscriptionNow,
 } from "./subscription-service";
 import { uploadToCloudinary, uploadRawToCloudinary, isCloudinaryConfigured } from "./cloudinary";
 import {
@@ -2090,12 +2093,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (e: unknown) => console.error(`[admin] Failed to update trailer status:`, e)
         );
 
-        // Cancel Stripe subscription if active
+        // Cancel Stripe subscription if active (and revoke the consent that covered it)
         if (existingRental.stripeSubscriptionId) {
           try {
-            const stripe = await getUncachableStripeClient();
-            await stripe.subscriptions.cancel(existingRental.stripeSubscriptionId);
-            await storage.updateRental(rental.id, { stripeSubscriptionId: null, subscriptionCancelRequestedAt: null, subscriptionEndsAt: null });
+            await cancelSubscriptionNow(existingRental, { how: `admin set rental ${body.status}`, userId: req.session.userId!, isAdminEntry: true, ipAddress: req.ip });
           } catch (subErr) {
             console.error(`[admin] Failed to cancel subscription ${existingRental.stripeSubscriptionId}:`, subErr);
           }
@@ -2285,24 +2286,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No active subscription for this rental" });
       }
 
-      const stripe = await getUncachableStripeClient();
-      await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
-
-      await storage.updateRental(rental.id, {
-        stripeSubscriptionId: null,
-        subscriptionCancelRequestedAt: null,
-        subscriptionEndsAt: null,
-      });
-
-      await logAuditEvent({
-        req,
-        userId: req.session.userId!,
-        actionType: "subscription_cancelled",
-        entityType: "rental",
-        entityId: rental.id,
-        description: `Admin cancelled Stripe subscription ${rental.stripeSubscriptionId}`,
-        isAdminEntry: true,
-      });
+      // Cancels in Stripe (tolerating one Stripe already ended), clears the
+      // id, keeps the end date for the dashboard and revokes the renewal
+      // consent, so the Create Subscription button cannot re-enrol the
+      // renter on the old agreement.
+      await cancelSubscriptionNow(rental, { how: "admin cancel", userId: req.session.userId!, isAdminEntry: true, ipAddress: req.ip });
 
       return res.json({ success: true });
     } catch (err: unknown) {
@@ -2341,10 +2329,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         current = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
       } catch (stripeErr: unknown) {
         const code = (stripeErr as { code?: string }).code;
-        if (code === "resource_missing") return res.status(409).json({ message: ALREADY_ENDED });
+        if (code === "resource_missing") {
+          // The row is stale (a .deleted webhook was missed): record the end
+          // so the dashboard stops showing a subscription that is gone.
+          await markSubscriptionEnded(rental, { subscriptionId: rental.stripeSubscriptionId, endedAt: new Date(), how: "found missing in Stripe when the renter tried to cancel" });
+          return res.status(409).json({ message: ALREADY_ENDED });
+        }
         throw stripeErr;
       }
-      if (current.status === "canceled") {
+      if (!isLiveSubscription(current)) {
+        await markSubscriptionEnded(rental, { subscriptionId: rental.stripeSubscriptionId, endedAt: current.ended_at ? new Date(current.ended_at * 1000) : new Date(), how: "found already ended in Stripe when the renter tried to cancel" });
         return res.status(409).json({ message: ALREADY_ENDED });
       }
 
@@ -2714,8 +2708,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental.depositPaid) {
         return res.status(400).json({ message: "Deposit must be paid first" });
       }
+      if (rental.status !== "active" && rental.status !== "active_in_use") {
+        return res.status(400).json({ message: "This rental is not active" });
+      }
+      const stripe = await getUncachableStripeClient();
       if (rental.stripeSubscriptionId) {
-        return res.status(400).json({ message: "Monthly billing is already set up for this rental" });
+        // The row says billing exists; Stripe decides. A recorded subscription
+        // that has already ended (its .deleted webhook was missed) is recorded
+        // as ended here and billing can be set up again.
+        let existingLive = true;
+        let endedAt = new Date();
+        try {
+          const existing = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
+          existingLive = isLiveSubscription(existing);
+          if (existing.ended_at) endedAt = new Date(existing.ended_at * 1000);
+        } catch (stripeErr: unknown) {
+          if ((stripeErr as { code?: string }).code !== "resource_missing") throw stripeErr;
+          existingLive = false;
+        }
+        if (existingLive) {
+          return res.status(400).json({ message: "Monthly billing is already set up for this rental" });
+        }
+        await markSubscriptionEnded(rental, { subscriptionId: rental.stripeSubscriptionId, endedAt, how: "found already ended in Stripe when the renter started billing again" });
       }
 
       // The consent (this moment, this terms version) travels in the Checkout
@@ -2726,7 +2740,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const trailer = await storage.getTrailer(rental.trailerId);
       const company = await storage.getCompany(rental.companyId);
-      const stripe = await getUncachableStripeClient();
 
       let customerId = rental.stripeCustomerId;
       if (!customerId) {
@@ -2746,12 +2759,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const live = await findLiveSubscriptionForRental(stripe, customerId, rentalId);
       if (live) {
         const fresh = (await storage.getRental(rentalId)) ?? rental;
+        // A subscription without consent metadata (deposit-service or an
+        // admin retry created it) is covered by the consent the renter just
+        // gave in this request, not by a moment they never saw.
         await attachSubscriptionToRental({
           rental: fresh,
           subscriptionId: live.id,
           customerId,
-          renewalTermsVersion: live.metadata?.renewalTermsVersion ?? null,
-          renewalConsentAt: consentAtFromMetadata(live.metadata, live.created),
+          renewalTermsVersion: live.metadata?.renewalTermsVersion || RENEWAL_TERMS_VERSION,
+          renewalConsentAt: live.metadata?.renewalConsentAt ? consentAtFromMetadata(live.metadata, live.created) : consentAt,
           source: "stripe_lookup",
         });
         return res.json({ alreadyActive: true });
@@ -2822,24 +2838,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(401).json({ message: "Not authenticated" });
 
+      // One answer for "no such session", "not a billing session" and "not
+      // your rental", so the endpoint cannot be used to probe session ids.
+      const NOT_FOUND = "Checkout session not found";
       const stripe = await getUncachableStripeClient();
       let session: Stripe.Checkout.Session;
       try {
         session = await stripe.checkout.sessions.retrieve(sessionId);
       } catch (stripeErr: unknown) {
         if ((stripeErr as { code?: string }).code === "resource_missing") {
-          return res.status(404).json({ message: "Checkout session not found" });
+          return res.status(404).json({ message: NOT_FOUND });
         }
         throw stripeErr;
       }
       const rentalId = session.metadata?.rentalId;
       if (!rentalId || session.mode !== "subscription") {
-        return res.status(400).json({ message: "Not a monthly billing session" });
+        return res.status(404).json({ message: NOT_FOUND });
       }
       const rental = await storage.getRental(rentalId);
-      if (!rental) return res.status(404).json({ message: "Rental not found" });
-      if (user.companyId !== rental.companyId) {
-        return res.status(403).json({ message: "Access denied" });
+      if (!rental || user.companyId !== rental.companyId) {
+        return res.status(404).json({ message: NOT_FOUND });
       }
       if (session.status !== "complete") {
         return res.json({ outcome: "not_complete", status: session.status });
@@ -3558,12 +3576,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Set trailer to maintenance — admin reactivates after processing
       await storage.updateTrailer(rental.trailerId, { status: "maintenance" });
 
-      // Cancel Stripe subscription if active
+      // Cancel Stripe subscription if active (and revoke the consent that covered it)
       if (rental.stripeSubscriptionId) {
         try {
-          const stripe = await getUncachableStripeClient();
-          await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
-          await storage.updateRental(rental.id, { stripeSubscriptionId: null, subscriptionCancelRequestedAt: null, subscriptionEndsAt: null });
+          await cancelSubscriptionNow(rental, { how: "trailer returned", ipAddress: req.ip });
         } catch (subErr) {
           console.error(`[return] Failed to cancel subscription ${rental.stripeSubscriptionId}:`, subErr);
         }

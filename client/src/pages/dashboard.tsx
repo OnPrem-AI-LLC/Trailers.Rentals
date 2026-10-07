@@ -491,6 +491,9 @@ function MonthlyBillingStatus({ rental }: { rental: DashboardRental }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [endsAt, setEndsAt] = useState<string | null>(rental.subscriptionEndsAt ?? null);
+  // The optimistic value set on cancel gives way to whatever the next refetch
+  // says (a schedule reversed in the Stripe dashboard clears it).
+  useEffect(() => { setEndsAt(rental.subscriptionEndsAt ?? null); }, [rental.subscriptionEndsAt]);
   const cancelRequested = !!rental.subscriptionCancelRequestedAt || !!endsAt;
   // Only show an end date for a subscription that still exists; a stale date on a
   // rental whose subscription was cleared would be misleading.

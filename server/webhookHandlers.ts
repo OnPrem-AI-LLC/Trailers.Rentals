@@ -2,7 +2,7 @@ import { getStripeClient } from './stripeClient';
 import { finalizeDepositPayment } from './deposit-service';
 import { storage } from './storage';
 import { sendMonthlyInvoiceEmail } from './email-service';
-import { attachSubscriptionToRental, consentAtFromMetadata } from './subscription-service';
+import { attachSubscriptionToRental, consentAtFromMetadata, markSubscriptionEnded } from './subscription-service';
 import { COMPANY } from '@shared/constants';
 import type Stripe from 'stripe';
 
@@ -212,26 +212,9 @@ export class WebhookHandlers {
         const rental = await storage.getRentalBySubscriptionId(sub.id);
         if (rental) {
           const endedAt = sub.ended_at ? new Date(sub.ended_at * 1000) : new Date();
-          // The request date stays and the end date becomes the actual end, so
-          // the dashboard can say "monthly billing ended <date>" instead of
-          // offering to set billing up again. The consent covered the
-          // subscription that just ended: starting billing again needs a fresh
-          // agreement, so no admin path can re-enrol the renter silently.
-          await storage.updateRental(rental.id, {
-            stripeSubscriptionId: null,
-            subscriptionEndsAt: endedAt,
-            renewalConsentAt: null,
-            renewalTermsVersion: null,
-          });
-          await storage.createAuditLog({
-            userId: null,
-            actionType: 'subscription_cancelled',
-            entityType: 'rental',
-            entityId: rental.id,
-            description: `Stripe subscription ${sub.id} ended ${endedAt.toISOString()} (webhook event)${rental.subscriptionCancelRequestedAt ? ` following renter cancellation request of ${rental.subscriptionCancelRequestedAt.toISOString()}` : ''}${rental.subscriptionEndsAt ? `; scheduled end was ${rental.subscriptionEndsAt.toISOString()}` : ''}.`,
-            isAdminEntry: false,
-            ipAddress: null,
-          });
+          // Same end state as every app-initiated cancellation: id cleared,
+          // actual end kept for the dashboard, renewal consent revoked.
+          await markSubscriptionEnded(rental, { subscriptionId: sub.id, endedAt, how: 'webhook event' });
         }
 
       } else if (event.type === 'customer.subscription.updated') {

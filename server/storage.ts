@@ -47,7 +47,7 @@ import {
   marketingSuppressions,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, ne, gte, lte, sql } from "drizzle-orm";
+import { eq, desc, and, or, ne, gte, lte, sql, isNull } from "drizzle-orm";
 
 // Inferred insert types from Drizzle (include all columns, auto-gen fields are optional)
 type InsertRentalApplication = typeof rentalApplications.$inferInsert;
@@ -101,6 +101,14 @@ export interface IStorage {
   listRentals(companyId?: string): Promise<Rental[]>;
   createRental(rental: InsertRental): Promise<Rental>;
   updateRental(id: string, data: UpdateRental): Promise<Rental | undefined>;
+  /**
+   * Attach a subscription only if the rental has none (or already this one):
+   * a compare-and-set so the webhook and the dashboard's return call cannot
+   * both "win". Returns the row when this call attached it, else undefined.
+   */
+  attachSubscriptionIfUnset(id: string, subscriptionId: string, data: UpdateRental): Promise<Rental | undefined>;
+  /** Update only while the rental still records this subscription id. */
+  updateRentalIfSubscription(id: string, subscriptionId: string, data: UpdateRental): Promise<Rental | undefined>;
 
   // Documents
   createDocument(doc: InsertDocument): Promise<Document>;
@@ -394,6 +402,25 @@ export class DatabaseStorage implements IStorage {
 
   async updateRental(id: string, data: UpdateRental): Promise<Rental | undefined> {
     const [row] = await db.update(rentals).set(data).where(eq(rentals.id, id)).returning();
+    return row ?? undefined;
+  }
+
+  async attachSubscriptionIfUnset(id: string, subscriptionId: string, data: UpdateRental): Promise<Rental | undefined> {
+    const [row] = await db.update(rentals)
+      .set({ ...data, stripeSubscriptionId: subscriptionId })
+      .where(and(
+        eq(rentals.id, id),
+        or(isNull(rentals.stripeSubscriptionId), eq(rentals.stripeSubscriptionId, subscriptionId)),
+      ))
+      .returning();
+    return row ?? undefined;
+  }
+
+  async updateRentalIfSubscription(id: string, subscriptionId: string, data: UpdateRental): Promise<Rental | undefined> {
+    const [row] = await db.update(rentals)
+      .set(data)
+      .where(and(eq(rentals.id, id), eq(rentals.stripeSubscriptionId, subscriptionId)))
+      .returning();
     return row ?? undefined;
   }
 

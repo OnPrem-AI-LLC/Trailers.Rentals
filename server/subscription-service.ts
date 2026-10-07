@@ -91,33 +91,120 @@ export async function expireOpenCheckoutSessions(stripe: Stripe, customerId: str
   return expired;
 }
 
+/**
+ * Record that a subscription has ended, whoever ended it: the id is cleared
+ * (only while the row still carries it, so a newer attach is never clobbered),
+ * the actual end is kept so the dashboard can say "monthly billing ended
+ * <date>", and the renewal consent is revoked, because it covered the
+ * subscription that just ended: starting billing again needs a fresh
+ * agreement, so no admin path can re-enrol the renter silently.
+ */
+export async function markSubscriptionEnded(rental: Rental, opts: {
+  subscriptionId: string;
+  endedAt: Date;
+  how: string;
+  userId?: string | null;
+  isAdminEntry?: boolean;
+  ipAddress?: string | null;
+}): Promise<boolean> {
+  const row = await storage.updateRentalIfSubscription(rental.id, opts.subscriptionId, {
+    stripeSubscriptionId: null,
+    subscriptionEndsAt: opts.endedAt,
+    renewalConsentAt: null,
+    renewalTermsVersion: null,
+  });
+  if (!row) return false; // the row no longer records this subscription; nothing to end
+  await storage.createAuditLog({
+    userId: opts.userId ?? null,
+    actionType: 'subscription_cancelled',
+    entityType: 'rental',
+    entityId: rental.id,
+    description: `Stripe subscription ${opts.subscriptionId} ended ${opts.endedAt.toISOString()} (${opts.how})`
+      + (rental.subscriptionCancelRequestedAt ? ` following renter cancellation request of ${rental.subscriptionCancelRequestedAt.toISOString()}` : '')
+      + (rental.subscriptionEndsAt ? `; scheduled end was ${rental.subscriptionEndsAt.toISOString()}` : '')
+      + '. Renewal consent cleared; billing can only restart from the renter dashboard with a fresh agreement.',
+    isAdminEntry: !!opts.isAdminEntry,
+    ipAddress: opts.ipAddress ?? null,
+  });
+  return true;
+}
+
+/**
+ * Cancel the rental's subscription in Stripe now and record the end state.
+ * Tolerates a subscription Stripe has already ended (the row is still
+ * cleared). Used by every app-initiated cancellation so none of them leaves
+ * consent on file for a subscription that no longer exists.
+ */
+export async function cancelSubscriptionNow(rental: Rental, opts: {
+  how: string;
+  userId?: string | null;
+  isAdminEntry?: boolean;
+  ipAddress?: string | null;
+}): Promise<{ endedAt: Date } | null> {
+  const subId = rental.stripeSubscriptionId;
+  if (!subId) return null;
+  const stripe = await getUncachableStripeClient();
+  let endedAt = new Date();
+  try {
+    const sub = await stripe.subscriptions.cancel(subId);
+    if (sub.ended_at) endedAt = new Date(sub.ended_at * 1000);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    const msg = err instanceof Error ? err.message : '';
+    if (code !== 'resource_missing' && !/canceled subscription/i.test(msg)) throw err;
+    // Already ended in Stripe: fall through and clear the row.
+  }
+  await markSubscriptionEnded(rental, { subscriptionId: subId, endedAt, ...opts });
+  return { endedAt };
+}
+
 export async function attachSubscriptionToRental(input: AttachInput): Promise<AttachResult> {
   const { rental, subscriptionId: subId, source } = input;
   if (rental.stripeSubscriptionId === subId) return { outcome: 'already_attached' };
 
-  const stripe = await getUncachableStripeClient();
+  const termsVersion = input.renewalTermsVersion ?? rental.renewalTermsVersion ?? null;
+  const data = {
+    ...(input.customerId && !rental.stripeCustomerId ? { stripeCustomerId: input.customerId } : {}),
+    renewalConsentAt: input.renewalConsentAt,
+    renewalTermsVersion: termsVersion,
+    // A fresh subscription has no pending cancellation and no past end.
+    subscriptionCancelRequestedAt: null,
+    subscriptionEndsAt: null,
+  };
 
-  if (rental.stripeSubscriptionId && rental.stripeSubscriptionId !== subId) {
+  // Compare-and-set: the webhook and the dashboard's return call race each
+  // other, and only the one whose UPDATE lands on an empty row attaches,
+  // audits and emails. The loser re-reads and finds either this id (done)
+  // or another one (duplicate handling below).
+  let won = await storage.attachSubscriptionIfUnset(rental.id, subId, data);
+  if (!won) {
+    const now = await storage.getRental(rental.id);
+    if (!now || now.stripeSubscriptionId === subId) return { outcome: 'already_attached' };
+    const existingId = now.stripeSubscriptionId!;
+
     // Never silently replace a live subscription: the one dropped from the
     // rental would keep invoicing with nothing pointing at it. Only a
     // subscription Stripe says has ended may be replaced (its .deleted
     // webhook was missed).
+    const stripe = await getUncachableStripeClient();
     let existingLive = false;
+    let existingEndedAt = new Date();
     try {
-      const existing = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
+      const existing = await stripe.subscriptions.retrieve(existingId);
       existingLive = isLiveSubscription(existing);
+      if (existing.ended_at) existingEndedAt = new Date(existing.ended_at * 1000);
     } catch (err) {
       if ((err as { code?: string }).code !== 'resource_missing') throw err;
     }
     if (existingLive) {
       const where = `${source}${input.checkoutSessionId ? `, Checkout session ${input.checkoutSessionId}` : ''}`;
-      console.error(`[subscription] rental ${rental.id}: duplicate subscription ${subId} (${where}); keeping ${rental.stripeSubscriptionId}`);
+      console.error(`[subscription] rental ${rental.id}: duplicate subscription ${subId} (${where}); keeping ${existingId}`);
       await storage.createAuditLog({
         userId: rental.userId ?? null,
         actionType: 'duplicate_subscription_detected',
         entityType: 'rental',
         entityId: rental.id,
-        description: `ACTION REQUIRED: Stripe subscription ${subId} (${where}) was created for a rental that already has live subscription ${rental.stripeSubscriptionId}. The existing one was kept; ${subId} is NOT attached and must be cancelled, and any charge refunded, in the Stripe dashboard.`,
+        description: `ACTION REQUIRED: Stripe subscription ${subId} (${where}) was created for a rental that already has live subscription ${existingId}. The existing one was kept; ${subId} is NOT attached and must be cancelled, and any charge refunded, in the Stripe dashboard.`,
         isAdminEntry: false,
         ipAddress: null,
       });
@@ -127,26 +214,20 @@ export async function attachSubscriptionToRental(input: AttachInput): Promise<At
         await sendDuplicateSubscriptionAdminEmail({
           rentalId: rental.id,
           companyName: company?.name ?? rental.companyId,
-          keptSubscriptionId: rental.stripeSubscriptionId,
+          keptSubscriptionId: existingId,
           duplicateSubscriptionId: subId,
         });
       } catch (emailErr) {
         console.error('[subscription] duplicate-subscription admin email failed:', emailErr);
       }
-      return { outcome: 'duplicate_kept_existing', existingSubscriptionId: rental.stripeSubscriptionId };
+      return { outcome: 'duplicate_kept_existing', existingSubscriptionId: existingId };
     }
+    // The recorded subscription is over: record that, then attach this one.
+    await markSubscriptionEnded(now, { subscriptionId: existingId, endedAt: existingEndedAt, how: `found already ended in Stripe while attaching ${subId} (${source})` });
+    won = await storage.attachSubscriptionIfUnset(rental.id, subId, data);
+    if (!won) return { outcome: 'already_attached' }; // another caller got there in between
   }
 
-  const termsVersion = input.renewalTermsVersion ?? rental.renewalTermsVersion ?? null;
-  await storage.updateRental(rental.id, {
-    stripeSubscriptionId: subId,
-    ...(input.customerId && !rental.stripeCustomerId ? { stripeCustomerId: input.customerId } : {}),
-    renewalConsentAt: input.renewalConsentAt,
-    renewalTermsVersion: termsVersion,
-    // A fresh subscription has no pending cancellation and no past end.
-    subscriptionCancelRequestedAt: null,
-    subscriptionEndsAt: null,
-  });
   await storage.createAuditLog({
     userId: rental.userId ?? null,
     actionType: 'subscription_created_by_checkout',
