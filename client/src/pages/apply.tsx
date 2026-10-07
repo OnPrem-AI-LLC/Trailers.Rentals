@@ -6,6 +6,7 @@ import Footer from "@/components/footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -25,6 +26,20 @@ import type { Company } from "@shared/schema";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
+}
+
+// apiRequest throws "<status>: <body>"; pull the server's own message out of the JSON body.
+function serverMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  try {
+    const body = JSON.parse(err.message.replace(/^\d{3}:\s*/, "")) as {
+      message?: string;
+      errors?: { message?: string }[];
+    };
+    return body.errors?.[0]?.message || body.message || fallback;
+  } catch {
+    return err.message || fallback;
+  }
 }
 
 interface ApplicationForm {
@@ -58,6 +73,7 @@ export default function Apply() {
   const { user } = useAuth();
   const [form, setForm] = useState<ApplicationForm>(EMPTY_FORM);
   const [submitted, setSubmitted] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
 
   // Fetch existing company for logged-in users who have one on file
   const { data: existingCompany, isLoading: companyLoading } = useQuery<Company>({
@@ -93,7 +109,7 @@ export default function Apply() {
   });
 
   const mutation = useMutation({
-    mutationFn: async (data: ApplicationForm & { trailerId: string }) => {
+    mutationFn: async (data: ApplicationForm & { trailerId: string; ageConfirmed: true }) => {
       const res = await apiRequest("POST", "/api/applications", data);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Submission failed" }));
@@ -105,8 +121,7 @@ export default function Apply() {
       setSubmitted(true);
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Something went wrong";
-      toast({ title: "Submission failed", description: message, variant: "destructive" });
+      toast({ title: "Submission failed", description: serverMessage(err, "Something went wrong"), variant: "destructive" });
     },
   });
 
@@ -125,7 +140,8 @@ export default function Apply() {
       return;
     }
     setIntendedUseError(null);
-    mutation.mutate({ ...form, trailerId });
+    if (!ageConfirmed) return;
+    mutation.mutate({ ...form, trailerId, ageConfirmed: true });
   };
 
   if (isLoading || (user?.companyId && companyLoading)) {
@@ -209,8 +225,10 @@ export default function Apply() {
   // Logged-in users with an existing company skip the form entirely
   if (existingCompany && trailer && !submitted) {
     const submitAsCompany = () => {
+      if (!ageConfirmed) return;
       mutation.mutate({
         trailerId: trailerId!,
+        ageConfirmed: true,
         companyName: existingCompany.name,
         ownerName: existingCompany.ownerName,
         authorizedUser: existingCompany.authorizedUser ?? "",
@@ -286,11 +304,24 @@ export default function Apply() {
             first month + deposit. No mileage fees, ever.
           </div>
 
+          {/* Age attestation */}
+          <div className="flex items-start gap-2.5">
+            <Checkbox
+              id="ageConfirmedCompany"
+              checked={ageConfirmed}
+              onCheckedChange={(v) => setAgeConfirmed(v === true)}
+              className="mt-0.5"
+            />
+            <Label htmlFor="ageConfirmedCompany" className="text-sm font-normal leading-snug cursor-pointer">
+              I confirm that I am 18 years of age or older
+            </Label>
+          </div>
+
           <Button
             size="lg"
             className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-12"
             onClick={submitAsCompany}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !ageConfirmed}
           >
             {mutation.isPending ? "Submitting..." : "Submit Rental Request"}
           </Button>
@@ -513,11 +544,24 @@ export default function Apply() {
             first month + deposit. No mileage fees, ever.
           </div>
 
+          {/* Age attestation */}
+          <div className="flex items-start gap-2.5">
+            <Checkbox
+              id="ageConfirmed"
+              checked={ageConfirmed}
+              onCheckedChange={(v) => setAgeConfirmed(v === true)}
+              className="mt-0.5"
+            />
+            <Label htmlFor="ageConfirmed" className="text-sm font-normal leading-snug cursor-pointer">
+              I confirm that I am 18 years of age or older
+            </Label>
+          </div>
+
           <Button
             type="submit"
             size="lg"
             className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-12"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !ageConfirmed}
           >
             {mutation.isPending ? "Submitting..." : "Submit Application"}
           </Button>

@@ -4,11 +4,25 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import logoPath from "@assets/Deluxe Logo_1758417985453.jpg";
 import { Lock, Mail, User, ArrowLeft } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+
+// apiRequest throws "<status>: <body>"; pull the server's own message out of the JSON body.
+function serverMessage(err: Error, fallback: string): string {
+  try {
+    const body = JSON.parse(err.message.replace(/^\d{3}:\s*/, "")) as {
+      message?: string;
+      errors?: { message?: string }[];
+    };
+    return body.errors?.[0]?.message || body.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export default function Signup() {
   const { user } = useAuth();
@@ -23,6 +37,7 @@ export default function Signup() {
     password: "",
     confirmPassword: "",
   });
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) {
@@ -40,6 +55,7 @@ export default function Signup() {
       toast({ title: "Passwords don't match", variant: "destructive" });
       return;
     }
+    if (!ageConfirmed) return;
     setLoading(true);
     try {
       const res = await apiRequest("POST", "/api/auth/signup", {
@@ -47,6 +63,7 @@ export default function Signup() {
         lastName: form.lastName,
         username: form.username,
         password: form.password,
+        ageConfirmed: true,
       });
       const data = await res.json();
       queryClient.setQueryData(["/api/auth/me"], data);
@@ -55,7 +72,9 @@ export default function Signup() {
       const message =
         err instanceof Error && err.message.includes("409")
           ? "An account with this email already exists."
-          : "Something went wrong. Please try again.";
+          : err instanceof Error && err.message.startsWith("400:")
+            ? serverMessage(err, "Please check the form and try again.")
+            : "Something went wrong. Please try again.";
       toast({ title: "Sign up failed", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -175,10 +194,22 @@ export default function Signup() {
                 </div>
               </div>
 
+              <div className="flex items-start gap-2.5 pt-1">
+                <Checkbox
+                  id="ageConfirmed"
+                  checked={ageConfirmed}
+                  onCheckedChange={(v) => setAgeConfirmed(v === true)}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="ageConfirmed" className="text-sm font-normal leading-snug cursor-pointer">
+                  I confirm that I am 18 years of age or older
+                </Label>
+              </div>
+
               <Button
                 type="submit"
                 className="w-full bg-primary hover:bg-primary/90 text-white font-bold h-11"
-                disabled={loading}
+                disabled={loading || !ageConfirmed}
               >
                 {loading ? "Creating account..." : "Create Account"}
               </Button>

@@ -9,7 +9,9 @@
  *  1. Verify rental exists
  *  2. Activate rental (if not already active)
  *  3. Mark trailer as rented (if not already)
- *  4. Create monthly Stripe subscription (if not already created)
+ *  4. Create monthly Stripe subscription (if not already created AND the
+ *     rental carries renewal consent; without consent the rental stays active
+ *     and the dashboard consent path starts billing later)
  *  5. Write audit log
  *  6. Send renter confirmation email (once)
  *  7. Send admin notification email
@@ -18,7 +20,7 @@
 import { storage } from './storage';
 import { db } from './db';
 import { rentals, trailers } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getUncachableStripeClient } from './stripeClient';
 import { randomBytes } from 'crypto';
 
@@ -35,6 +37,7 @@ export interface FinalizeDepositOptions {
 export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Promise<{
   activated: boolean;
   subscriptionCreated: boolean;
+  subscriptionBlockedNoConsent: boolean;
   alreadyDone: boolean;
   needsSubscriptionRetry: boolean;
 }> {
@@ -46,32 +49,38 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   // Resolve Stripe customer ID — prefer what's on the rental already
   const customerId = rental.stripeCustomerId ?? opts.stripeCustomerId ?? null;
 
-  // ── 1. Activate rental (idempotent, transactional) ─────────────────────────
-  const wasAlreadyActive = rental.depositPaid;
-  if (!wasAlreadyActive) {
+  // ── 1. Activate rental (compare-and-set, transactional) ────────────────────
+  // The webhook and the client callback usually arrive within the same second
+  // and both read deposit_paid = false. The WHERE clause lets exactly one of
+  // them flip it, and only that caller sends the activation emails.
+  let activatedNow = false;
+  if (!rental.depositPaid) {
     const pickupToken = rental.pickupToken ?? randomBytes(32).toString('hex');
     const returnToken = rental.returnToken ?? randomBytes(32).toString('hex');
 
-    // Wrap activation + trailer status update in a transaction for atomicity
     await db.transaction(async (tx) => {
-      await tx.update(rentals).set({
+      const won = await tx.update(rentals).set({
         depositPaid: true,
         status: 'active',
         startDate: new Date(),
         ...(customerId && !rental.stripeCustomerId ? { stripeCustomerId: customerId } : {}),
         ...(!rental.pickupToken ? { pickupToken } : {}),
         ...(!rental.returnToken ? { returnToken } : {}),
-      }).where(eq(rentals.id, rentalId));
-
+      }).where(and(eq(rentals.id, rentalId), eq(rentals.depositPaid, false))).returning({ id: rentals.id });
+      if (won.length === 0) return; // the other caller activated first
+      activatedNow = true;
       await tx.update(trailers).set({ status: 'rented' }).where(eq(trailers.id, rental.trailerId));
     });
-  } else if (customerId && !rental.stripeCustomerId) {
+  }
+  const wasAlreadyActive = !activatedNow;
+  if (wasAlreadyActive && customerId && !rental.stripeCustomerId) {
     // Rental already active but missing customer ID — patch it
     await storage.updateRental(rentalId, { stripeCustomerId: customerId });
   }
 
   // ── 2. Ensure monthly subscription exists (idempotent) ────────────────────
   let subscriptionCreated = false;
+  let subscriptionBlockedNoConsent = false;
   const freshRental = await storage.getRental(rentalId);
   const effectiveCustomerId = freshRental?.stripeCustomerId ?? customerId;
 
@@ -89,7 +98,73 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     }
   }
 
-  if (!freshRental?.stripeSubscriptionId && effectiveCustomerId && rental.monthlyRate > 0) {
+  const wantsSubscription = !freshRental?.stripeSubscriptionId && !!effectiveCustomerId && rental.monthlyRate > 0;
+
+  // Consent is recorded when the renter ticks the box on the payment page,
+  // before the PaymentIntent exists, so a record on file is bound to a card
+  // payment only if that payment actually succeeded. The webhook and client
+  // callback paths carry a succeeded deposit PaymentIntent by construction. An
+  // admin confirming by hand (check, wire, a repaired webhook) does not, so
+  // Stripe is asked whether the rental's deposit intent succeeded; if it did
+  // not, the consent came from an abandoned payment page and is discarded,
+  // and monthly billing can only start from the renter's dashboard, which
+  // collects consent and a card together.
+  let consentBoundToPayment = triggeredBy !== 'admin_manual';
+  if (!consentBoundToPayment && wantsSubscription && freshRental?.renewalConsentAt) {
+    if (freshRental.stripeDepositIntentId) {
+      try {
+        const stripe = await getUncachableStripeClient();
+        const pi = await stripe.paymentIntents.retrieve(freshRental.stripeDepositIntentId);
+        consentBoundToPayment = pi.status === 'succeeded' && pi.metadata?.rentalId === rentalId;
+      } catch (piErr) {
+        console.warn(`[deposit] Rental ${rentalId}: could not verify deposit intent ${freshRental.stripeDepositIntentId}:`, piErr);
+      }
+    }
+    if (!consentBoundToPayment) {
+      await storage.updateRental(rentalId, { renewalConsentAt: null, renewalTermsVersion: null });
+      console.warn(`[deposit] Rental ${rentalId}: manual confirmation; stale renewal consent (no succeeded deposit payment) discarded.`);
+    }
+  }
+
+  if (wantsSubscription && (!freshRental?.renewalConsentAt || !consentBoundToPayment)) {
+    // No usable consent to automatic renewal: never enroll silently. The
+    // rental stays active without a subscription; the dashboard consent path
+    // (create-subscription-session) records consent and starts billing.
+    subscriptionBlockedNoConsent = true;
+    console.warn(`[deposit] Rental ${rentalId}: deposit confirmed but no renewal consent on file; subscription NOT created.`);
+    try {
+      await storage.createAuditLog({
+        userId: userId ?? null,
+        actionType: 'subscription_blocked_no_consent',
+        entityType: 'rental',
+        entityId: rentalId,
+        description: triggeredBy === 'admin_manual' && freshRental?.renewalConsentAt
+          ? `Deposit confirmed manually (${triggeredBy}); the renewal consent on file was not tied to a successful card payment, so it was discarded and no monthly subscription was created. Renter must start billing from the dashboard.`
+          : `Deposit finalized (${triggeredBy}) but the rental has no renewal consent recorded; monthly subscription not created. Renter must start billing from the dashboard.`,
+        isAdminEntry: triggeredBy === 'admin_manual',
+        ipAddress: ipAddress ?? null,
+      });
+    } catch (logErr) {
+      console.error('[deposit] Could not write no-consent audit log:', logErr);
+    }
+    // Only alert the admin once, on first activation; replays would duplicate it.
+    if (!wasAlreadyActive) {
+      try {
+        const company = await storage.getCompany(rental.companyId);
+        const trailer = await storage.getTrailer(rental.trailerId);
+        const { sendSubscriptionBlockedNoConsentAdminEmail } = await import('./email-service');
+        await sendSubscriptionBlockedNoConsentAdminEmail({
+          rentalId,
+          companyName: company?.name ?? rental.companyId,
+          trailerType: trailer?.type ?? 'Trailer',
+          trailerVin: trailer?.vin ?? '',
+          monthlyRate: rental.monthlyRate,
+        });
+      } catch (emailErr) {
+        console.error('[deposit] Could not send no-consent admin email:', emailErr);
+      }
+    }
+  } else if (wantsSubscription && effectiveCustomerId) {
     try {
       const stripe = await getUncachableStripeClient();
 
@@ -118,7 +193,11 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
         {
           customer: effectiveCustomerId,
           items: [{ price: price.id }],
-          metadata: { rentalId, type: 'monthly_rental' },
+          metadata: {
+            rentalId,
+            type: 'monthly_rental',
+            renewalTermsVersion: freshRental?.renewalTermsVersion ?? '',
+          },
           payment_settings: {
             payment_method_types: ['card'],
             save_default_payment_method: 'on_subscription',
@@ -129,7 +208,12 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
         { idempotencyKey: `sub_create_rental_${rentalId}` },
       );
 
-      await storage.updateRental(rentalId, { stripeSubscriptionId: subscription.id });
+      // A fresh subscription has no pending cancellation; clear any stale schedule.
+      await storage.updateRental(rentalId, {
+        stripeSubscriptionId: subscription.id,
+        subscriptionCancelRequestedAt: null,
+        subscriptionEndsAt: null,
+      });
       console.log(`[deposit] Monthly subscription ${subscription.id} created for rental ${rentalId}`);
       subscriptionCreated = true;
     } catch (err) {
@@ -159,7 +243,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       actionType: `deposit_finalized_${triggeredBy}`,
       entityType: 'rental',
       entityId: rentalId,
-      description: `Deposit finalized (${triggeredBy})${paymentIntentId ? ` — PI: ${paymentIntentId}` : ''} — ${verb}${subscriptionCreated ? ', subscription created' : ''}`,
+      description: `Deposit finalized (${triggeredBy})${paymentIntentId ? ` — PI: ${paymentIntentId}` : ''} — ${verb}${subscriptionCreated ? ', subscription created' : ''}${subscriptionBlockedNoConsent ? ', subscription withheld (no renewal consent)' : ''}`,
       isAdminEntry: triggeredBy === 'admin_manual',
       ipAddress: ipAddress ?? null,
     });
@@ -189,6 +273,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       }
       // Only send renter email on first activation to avoid duplicate
       if (!wasAlreadyActive) {
+        const latest = await storage.getRental(rentalId);
         emailJobs.push(
           sendDepositConfirmedEmail({
             rentalId,
@@ -198,6 +283,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
             trailerVin: trailer.vin ?? '',
             trailerType: trailer.type,
             monthlyRate: rental.monthlyRate,
+            subscriptionStarted: !!latest?.stripeSubscriptionId,
           })
         );
       }
@@ -207,8 +293,9 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     console.error('[deposit] Email dispatch failed:', err);
   }
 
-  // Flag if rental is active but subscription failed — needs admin attention
-  const needsSubscriptionRetry = !wasAlreadyActive && !subscriptionCreated && rental.monthlyRate > 0;
+  // Flag if rental is active but subscription failed — needs admin attention.
+  // The no-consent case is not a failure: the renter's dashboard path resolves it.
+  const needsSubscriptionRetry = !wasAlreadyActive && !subscriptionCreated && !subscriptionBlockedNoConsent && rental.monthlyRate > 0;
   if (needsSubscriptionRetry) {
     console.warn(`[deposit] ALERT: Rental ${rentalId} activated but subscription NOT created. Needs admin intervention.`);
   }
@@ -216,6 +303,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
   return {
     activated: !wasAlreadyActive,
     subscriptionCreated,
+    subscriptionBlockedNoConsent,
     alreadyDone: wasAlreadyActive && !subscriptionCreated,
     needsSubscriptionRetry,
   };

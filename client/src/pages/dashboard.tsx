@@ -9,6 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Truck, FileText, Clock, CircleDollarSign, LogOut, Upload, CheckCircle,
   AlertCircle, ExternalLink, Trash2, Shield, FileCheck, CreditCard,
@@ -17,7 +22,8 @@ import {
 } from "lucide-react";
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
-import { apiRequest } from "@/lib/queryClient";
+import { CANCELLATION_POLICY, RENEWAL_TERMS_VERSION, renewalTerms } from "@shared/renewal";
+import { apiRequest, serverMessage } from "@/lib/queryClient";
 
 interface ApplicationTrailer {
   id: string; vin: string; type: string; make: string | null; model: string | null;
@@ -42,9 +48,15 @@ interface DashboardApplication {
   auditHistory: ApplicationAuditEntry[];
 }
 
+// Rental row as /api/dashboard serializes it: timestamps arrive as ISO strings.
+type DashboardRental = Omit<Rental, "subscriptionEndsAt" | "subscriptionCancelRequestedAt"> & {
+  subscriptionEndsAt?: string | null;
+  subscriptionCancelRequestedAt?: string | null;
+};
+
 interface DashboardData {
   user: { id: string; email: string; firstName: string; lastName: string; role: string; companyId: string | null | undefined };
-  rentals: Rental[];
+  rentals: DashboardRental[];
   documents: Document[];
   company: Company | null;
   applications: DashboardApplication[];
@@ -400,6 +412,158 @@ function ApplicationCard({ app, currentUserId }: { app: DashboardApplication; cu
   );
 }
 
+// Same zone as the emails (COMPANY.timeZone), so the renter sees one date everywhere.
+function formatEndDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: COMPANY.timeZone });
+}
+
+// Renewal terms + consent checkbox directly above the Stripe Checkout button.
+// The consent and the terms version travel with the request so the server can
+// record what the renter agreed to before the subscription is created.
+function MonthlyBillingSetup({ rental }: { rental: DashboardRental }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [agreed, setAgreed] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  async function start() {
+    if (!agreed) return;
+    setStarting(true);
+    try {
+      const res = await apiRequest("POST", "/api/stripe/create-subscription-session", {
+        rentalId: rental.id,
+        renewalConsent: true,
+        renewalTermsVersion: RENEWAL_TERMS_VERSION,
+      });
+      const data = await res.json() as { url?: string; alreadyActive?: boolean };
+      if (data.alreadyActive || !data.url) {
+        // Stripe already had a live subscription for this rental (its webhook
+        // had not landed yet); the server attached it, so just refresh.
+        toast({ title: "Monthly billing is already active", description: "Your earlier setup went through. No second subscription was created." });
+        qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+        setStarting(false);
+        return;
+      }
+      window.location.href = data.url;
+    } catch (err) {
+      toast({ title: "Error", description: serverMessage(err, "Could not start subscription setup."), variant: "destructive" });
+      setStarting(false);
+    }
+  }
+
+  const checkboxId = `renewal-consent-${rental.id}`;
+  return (
+    <div className="mt-4 border border-border rounded-lg p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <CreditCard className="w-4 h-4 text-primary" />
+        <span className="text-sm font-semibold">Monthly billing</span>
+      </div>
+      {/* Terms at normal size and colour so the consent is conspicuous, not fine print */}
+      <div className="border border-border rounded-lg p-3 space-y-3 text-sm text-foreground">
+        <p className="leading-relaxed">
+          <span className="font-bold">Automatic monthly billing.</span> {renewalTerms(rental.monthlyRate)}
+        </p>
+        <div className="flex items-start gap-2.5">
+          <Checkbox id={checkboxId} checked={agreed} onCheckedChange={v => setAgreed(v === true)} className="mt-0.5" />
+          <label htmlFor={checkboxId} className="leading-snug cursor-pointer">
+            I agree to these automatic renewal terms
+          </label>
+        </div>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-2 border-green-700 text-green-400"
+        disabled={!agreed || starting}
+        onClick={start}
+      >
+        {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />} Set Up Monthly Billing
+      </Button>
+    </div>
+  );
+}
+
+// Shown once a subscription exists: the renewal cadence plus a confirm-first cancel.
+// A cancellation is immediate and binding; rent stops after the later of the end
+// of the current billing month and 30 days from the request (the signed agreement
+// is month-to-month with 30 days' written notice), so the server decides the date.
+function MonthlyBillingStatus({ rental }: { rental: DashboardRental }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [endsAt, setEndsAt] = useState<string | null>(rental.subscriptionEndsAt ?? null);
+  const cancelRequested = !!rental.subscriptionCancelRequestedAt || !!endsAt;
+  // Only show an end date for a subscription that still exists; a stale date on a
+  // rental whose subscription was cleared would be misleading.
+  const showsEndDate = !!rental.stripeSubscriptionId && !!endsAt;
+
+  const cancelMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/rentals/${rental.id}/cancel-subscription`);
+      return res.json() as Promise<{ endsAt: string }>;
+    },
+    onSuccess: (data) => {
+      setEndsAt(data.endsAt);
+      qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({
+        title: "Monthly billing cancelled",
+        description: `Monthly rent stops after ${formatEndDate(data.endsAt)}. Return the trailer by that date under your rental agreement.`,
+      });
+    },
+    onError: (err) => toast({ title: "Could not cancel billing", description: serverMessage(err, "Please try again or contact us."), variant: "destructive" }),
+  });
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <Calendar className="w-3.5 h-3.5" />
+      {showsEndDate ? (
+        <span>Monthly billing ends {formatEndDate(endsAt!)}</span>
+      ) : cancelRequested ? (
+        <span>Monthly billing cancellation requested</span>
+      ) : (
+        <>
+          <span>Monthly billing: renews on the same day each month</span>
+          <span aria-hidden>·</span>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button className="text-primary hover:underline" disabled={cancelMut.isPending}>
+                {cancelMut.isPending ? "Cancelling…" : "Cancel monthly billing"}
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Cancel monthly billing?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This request is immediate and binding. {CANCELLATION_POLICY}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep billing</AlertDialogCancel>
+                <AlertDialogAction onClick={() => cancelMut.mutate()}>Cancel monthly billing</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
+    </div>
+  );
+}
+
+// After the subscription has actually ended (Stripe's customer.subscription.deleted),
+// say so instead of silently offering to set billing up again; a renter who
+// changed their mind can still restart, which collects a fresh consent.
+function MonthlyBillingEnded({ rental }: { rental: DashboardRental }) {
+  const [restart, setRestart] = useState(false);
+  if (restart) return <MonthlyBillingSetup rental={rental} />;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <Calendar className="w-3.5 h-3.5" />
+      <span>Monthly billing ended {formatEndDate(rental.subscriptionEndsAt!)}. Return the trailer by that date under your rental agreement.</span>
+      <span aria-hidden>·</span>
+      <button className="text-primary hover:underline" onClick={() => setRestart(true)}>Set up monthly billing again</button>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
@@ -419,9 +583,31 @@ export default function Dashboard() {
       toast({ title: "Payment cancelled", description: "Your payment was not completed.", variant: "destructive" });
       window.history.replaceState({}, "", "/dashboard");
     } else if (params.get("subscription") === "success") {
-      toast({ title: "Subscription active!", description: "Your monthly rental subscription has been set up." });
-      qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      const sessionId = params.get("session_id");
       window.history.replaceState({}, "", "/dashboard");
+      // Attach the subscription now rather than waiting for Stripe's webhook,
+      // so the setup box does not reappear for the next few seconds.
+      (async () => {
+        let outcome: string | null = null;
+        if (sessionId) {
+          try {
+            const res = await apiRequest("POST", "/api/stripe/subscription-session-complete", { sessionId });
+            outcome = ((await res.json()) as { outcome?: string }).outcome ?? null;
+          } catch {
+            // The webhook attaches it; the dashboard refreshes below either way.
+          }
+        }
+        qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+        if (outcome === "duplicate_kept_existing") {
+          toast({
+            title: "Monthly billing was already active",
+            description: "This rental already had monthly billing, so we kept the existing one and alerted our team to cancel and refund the duplicate.",
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: "Monthly billing set up", description: "Your monthly rental billing is now active." });
+        }
+      })();
     }
   }, []);
 
@@ -482,7 +668,7 @@ export default function Dashboard() {
     );
   }
 
-  const rentals: Rental[] = dashData?.rentals ?? [];
+  const rentals: DashboardRental[] = dashData?.rentals ?? [];
   const docs: Document[] = dashData?.documents ?? [];
   const company: Company | null = dashData?.company ?? null;
   const applications: DashboardApplication[] = dashData?.applications ?? [];
@@ -659,28 +845,6 @@ export default function Dashboard() {
                               <CircleDollarSign className="w-4 h-4" /> Pay Security Deposit
                             </Button>
                           )}
-                          {rental.depositPaid && rental.status !== "completed" && rental.status !== "cancelled" && !rental.stripeSubscriptionId && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-2 border-green-700 text-green-400"
-                              onClick={async () => {
-                                try {
-                                  const res = await apiRequest("POST", "/api/stripe/create-subscription-session", { rentalId: rental.id });
-                                  if (!res.ok) {
-                                    const err = await res.json().catch(() => ({ message: "Subscription setup failed." })) as { message: string };
-                                    throw new Error(err.message);
-                                  }
-                                  const data = await res.json() as { url: string };
-                                  window.location.href = data.url;
-                                } catch (err) {
-                                  toast({ title: "Error", description: err instanceof Error ? err.message : "Could not start subscription setup.", variant: "destructive" });
-                                }
-                              }}
-                            >
-                              <CreditCard className="w-4 h-4" /> Set Up Monthly Billing
-                            </Button>
-                          )}
                           {(rental.status === "active" || rental.status === "active_in_use") && (
                             <Button
                               size="sm"
@@ -692,6 +856,16 @@ export default function Dashboard() {
                             </Button>
                           )}
                         </div>
+                        {/* Monthly billing: consent + setup before a subscription exists, status + cancel while
+                            one is live, the end date once it has ended */}
+                        {rental.depositPaid && rental.status !== "completed" && rental.status !== "cancelled" && !rental.stripeSubscriptionId && (
+                          rental.subscriptionEndsAt
+                            ? <MonthlyBillingEnded rental={rental} />
+                            : <MonthlyBillingSetup rental={rental} />
+                        )}
+                        {rental.stripeSubscriptionId && rental.status !== "completed" && rental.status !== "cancelled" && (
+                          <MonthlyBillingStatus rental={rental} />
+                        )}
                         {/* Message thread for each rental */}
                         <RentalMessageThread rentalId={rental.id} currentUserId={user.id} />
                         {/* Payment history (only if stripe customer exists) */}

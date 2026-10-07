@@ -44,6 +44,7 @@ import {
   driverApplications,
   checkinPhotos,
   jobListings,
+  marketingSuppressions,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, ne, gte, lte, sql } from "drizzle-orm";
@@ -60,6 +61,7 @@ export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByEmailInsensitive(email: string): Promise<User | undefined>;
   getUserByInviteToken(token: string): Promise<User | undefined>;
   listUsers(role?: string): Promise<User[]>;
   createUser(user: typeof users.$inferInsert): Promise<User>;
@@ -132,6 +134,11 @@ export interface IStorage {
   createCheckinPhoto(data: typeof checkinPhotos.$inferInsert): Promise<CheckinPhoto>;
   getCheckinPhotos(rentalId: string): Promise<CheckinPhoto[]>;
 
+  // Marketing suppressions (unsubscribe list, keyed by lowercased email)
+  /** Returns true when the address was not already suppressed. */
+  addMarketingSuppression(email: string, source: string): Promise<boolean>;
+  isMarketingSuppressed(email: string): Promise<boolean>;
+
   // Contacts
   createContact(data: InsertContact): Promise<Contact>;
   listContacts(status?: string): Promise<Contact[]>;
@@ -177,6 +184,13 @@ export class DatabaseStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.username, email));
+    return user ?? undefined;
+  }
+
+  // Unsubscribe tokens carry a lowercased address while usernames keep the
+  // case they were typed in, so the opt-out lookup has to ignore case.
+  async getUserByEmailInsensitive(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(sql`lower(${users.username}) = lower(${email})`);
     return user ?? undefined;
   }
 
@@ -699,6 +713,23 @@ export class DatabaseStorage implements IStorage {
 
   async deleteJobListing(id: string): Promise<void> {
     await db.delete(jobListings).where(eq(jobListings.id, id));
+  }
+
+  // ── Marketing suppressions ─────────────────────────────────────────
+  // Upsert: repeated unsubscribes keep the first created_at and source.
+  async addMarketingSuppression(email: string, source: string): Promise<boolean> {
+    const inserted = await db.insert(marketingSuppressions)
+      .values({ email: email.trim().toLowerCase(), source })
+      .onConflictDoNothing()
+      .returning({ email: marketingSuppressions.email });
+    return inserted.length > 0;
+  }
+
+  async isMarketingSuppressed(email: string): Promise<boolean> {
+    const [row] = await db.select({ email: marketingSuppressions.email })
+      .from(marketingSuppressions)
+      .where(eq(marketingSuppressions.email, email.trim().toLowerCase()));
+    return !!row;
   }
 }
 

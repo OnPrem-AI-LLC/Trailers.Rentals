@@ -38,6 +38,7 @@ import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import AdminEmailLogsPage from "@/pages/admin/email-logs";
 import AdminJobsPage from "@/pages/admin/jobs";
+import LegalPage from "@/pages/legal";
 
 function Router() {
   return (
@@ -77,6 +78,7 @@ function Router() {
       <Route path="/reset-password/:token" component={ResetPasswordPage} />
       <Route path="/admin/email-logs" component={AdminEmailLogsPage} />
       <Route path="/admin/jobs" component={AdminJobsPage} />
+      <Route path="/legal" component={LegalPage} />
       <Route component={NotFound} />
     </Switch>
   );

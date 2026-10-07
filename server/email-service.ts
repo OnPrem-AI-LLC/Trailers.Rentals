@@ -1,7 +1,10 @@
 import { Resend } from "resend";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db";
-import { emailLogs } from "@shared/schema";
+import { emailLogs, users, marketingSuppressions } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
+import { CANCELLATION_POLICY, RENEWAL_TERMS_VERSION, formatMonthly, renewalTerms } from "@shared/renewal";
+import { makeUnsubscribeToken } from "./unsubscribe";
 
 const FROM = "noreply@getonprem.com";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || "admin@deluxelogistics.com";
@@ -51,8 +54,7 @@ export function emailTemplate(title: string, body: string, accentColor = "#e6394
     ${body}
     <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
     <p style="color: #64748b; font-size: 13px;">
-      <strong>${COMPANY.name}</strong><br/>
-      ${COMPANY.fullAddress}<br/>
+      <strong>${COMPANY.name}</strong> &middot; ${COMPANY.fullAddress}<br/>
       <a href="mailto:${COMPANY.email}">${COMPANY.email}</a>
     </p>
   </div>
@@ -68,6 +70,7 @@ interface MailPayload {
   html: string;
   text?: string;
   replyTo?: string;
+  headers?: Record<string, string>; // List-Unsubscribe etc.; only sendMarketing sets these
 }
 
 const MAX_EMAIL_RETRIES = 3;
@@ -98,6 +101,7 @@ async function sendTracked(
         html: msg.html,
         ...(msg.text ? { text: msg.text } : {}),
         ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+        ...(msg.headers ? { headers: msg.headers } : {}),
       });
       logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "sent" });
       return; // success
@@ -112,6 +116,58 @@ async function sendTracked(
   const errMsg = lastErr instanceof Error ? (lastErr as Error).message : String(lastErr);
   logEmail({ recipient: to, sender, subject, template: opts.template, entityType: opts.entityType, entityId: opts.entityId, status: "failed", error: errMsg });
   throw lastErr;
+}
+
+// ── Marketing sends ──────────────────────────────────────────────────────────
+// Nothing sends marketing today. This exists so any future campaign is
+// compliant by construction: it refuses opted-out recipients, appends an
+// unsubscribe link and the postal address, and sets the one-click
+// List-Unsubscribe headers (RFC 2369 / RFC 8058). Transactional senders above
+// and below deliberately do NOT go through here: they are service messages
+// about an active rental or application and carry no unsubscribe link.
+export interface MarketingEmail {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  template: string;
+}
+
+export async function sendMarketing(msg: MarketingEmail): Promise<void> {
+  const to = msg.to.trim().toLowerCase();
+  // The suppression table is the primary opt-out record (it outlives the user
+  // row); users.marketing_opt_out_at is kept for the account view. Usernames
+  // keep their typed case, so that lookup ignores case.
+  const [suppressed] = await db.select({ email: marketingSuppressions.email }).from(marketingSuppressions).where(eq(marketingSuppressions.email, to));
+  const [user] = suppressed
+    ? [undefined]
+    : await db.select({ optOut: users.marketingOptOutAt }).from(users).where(sql`lower(${users.username}) = ${to}`);
+  if (suppressed || user?.optOut) {
+    console.log(`[email] recipient opted out of marketing — skipping ${msg.template}`);
+    logEmail({ recipient: to, sender: FROM, subject: msg.subject, template: msg.template, status: "skipped", error: "recipient opted out of marketing" });
+    return;
+  }
+
+  const unsubscribeUrl = `${domain()}/unsubscribe/${makeUnsubscribeToken(to)}`;
+  const html = `${msg.html}
+<p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+  You are receiving this because you have an account with ${COMPANY.name}.
+  <a href="${unsubscribeUrl}" style="color: #64748b;">Unsubscribe</a> from marketing email.<br/>
+  ${COMPANY.name} &middot; ${COMPANY.fullAddress}
+</p>`;
+  const text = `${msg.text ?? ""}\n\nUnsubscribe from marketing email: ${unsubscribeUrl}\n${COMPANY.name} · ${COMPANY.fullAddress}`;
+
+  await sendTracked({
+    to,
+    from: FROM,
+    subject: msg.subject,
+    html,
+    text,
+    headers: {
+      "List-Unsubscribe": `<mailto:${COMPANY.email}?subject=unsubscribe>, <${unsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  }, { template: msg.template });
 }
 
 interface ApplicationData {
@@ -145,6 +201,22 @@ function esc(str: string | null | undefined): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// Renewal terms + cancellation policy, repeated in every billing email so an
+// enrolled renter always has a retainable copy (ROSCA / state auto-renewal
+// laws). The wording comes from shared/renewal.ts; only the layout lives here.
+function renewalTermsHtml(monthlyRateCents: number, dashboardUrl: string): string {
+  return `
+    <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px; color: #1e293b; line-height: 1.6;">
+      <p style="margin: 0 0 8px;"><strong>Automatic monthly billing</strong></p>
+      <p style="margin: 0 0 8px;">${esc(renewalTerms(monthlyRateCents))}</p>
+      <p style="margin: 0;">Manage or cancel monthly billing in your <a href="${dashboardUrl}" style="color: #e63946;">dashboard</a>. Terms version ${RENEWAL_TERMS_VERSION}.</p>
+    </div>`;
+}
+
+function renewalTermsText(monthlyRateCents: number, dashboardUrl: string): string {
+  return `Automatic monthly billing: ${renewalTerms(monthlyRateCents)}\nManage or cancel monthly billing: ${dashboardUrl}\nTerms version ${RENEWAL_TERMS_VERSION}`;
 }
 
 function escApp(app: ApplicationData): ApplicationData {
@@ -522,6 +594,9 @@ export interface DepositConfirmedData {
   trailerVin: string;
   trailerType: string;
   monthlyRate: number; // cents
+  // false when the deposit was taken without recorded renewal consent, so the
+  // renter still has to start monthly billing from the dashboard
+  subscriptionStarted?: boolean;
 }
 
 export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Promise<void> {
@@ -531,7 +606,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
   const safeType = esc(data.trailerType);
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
   const dashboardUrl = `${domain()}/dashboard`;
-
+  const subscriptionStarted = data.subscriptionStarted !== false;
 
   const html = emailTemplate("Your Rental is Now Active!", `
     <p>Hi ${safeName},</p>
@@ -547,9 +622,12 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
     <p><strong>What's next:</strong></p>
     <ul style="color: #374151; font-size: 14px; padding-left: 20px; line-height: 2;">
       <li>Coordinate pickup timing with our team</li>
-      <li>Your monthly billing will begin on your pickup date</li>
+      ${subscriptionStarted
+        ? `<li>Your first monthly charge of ${monthlyStr.replace("/month", "")} is due 30 days from today, then on the same day each month</li>`
+        : `<li>Monthly billing is not set up yet: start it from your dashboard before pickup</li>`}
       <li>Track your rental status and documents in your dashboard</li>
     </ul>
+    ${renewalTermsHtml(data.monthlyRate, dashboardUrl)}
     <a href="${dashboardUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Your Dashboard →
     </a>
@@ -558,10 +636,204 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
   await sendTracked({
     to: data.renterEmail,
     from: FROM,
-    subject: `Your Deluxe Logistics rental is now active — ${safeType} (${safeVin})`,
+    subject: `Your Deluxe Logistics rental is now active — ${data.trailerType} (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\n${subscriptionStarted ? "Your first monthly charge is due 30 days from today, then on the same day each month." : "Monthly billing is not set up yet: start it from your dashboard before pickup."}\n\n${renewalTermsText(data.monthlyRate, dashboardUrl)}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "deposit_confirmed", entityType: "rental", entityId: data.rentalId });
+}
+
+// ── Renter requested subscription cancellation ───────────────────────────────
+export interface SubscriptionCancelRequestedData {
+  rentalId: string;
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerType: string;
+  trailerVin: string;
+  monthlyRate: number; // cents
+  endsAt: Date;        // later of the Stripe period end and 30 days from the request
+}
+
+export async function sendSubscriptionCancelRequestedEmails(data: SubscriptionCancelRequestedData): Promise<void> {
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
+  // Same zone as the dashboard, so the renter is told one date everywhere.
+  const endStr = data.endsAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: COMPANY.timeZone });
+  const dashboardUrl = `${domain()}/dashboard`;
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+
+  const renterHtml = emailTemplate("Cancellation Received", `
+    <p>Hi ${safeName},</p>
+    <p>We received your request to stop monthly billing. Your request is binding and your subscription is now set to end on <strong>${endStr}</strong>, the later of the end of the current billing month and 30 days from your request.</p>
+    <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Billing Ends</td><td style="padding: 6px 0; font-weight: bold; color: #ea580c;">${endStr}</td></tr>
+      </table>
+    </div>
+    <p><strong>What this means:</strong></p>
+    <ul style="color: #374151; font-size: 14px; padding-left: 20px; line-height: 2;">
+      <li>Monthly rent stops after ${endStr}. A monthly renewal that falls before that date is billed in full; nothing is charged after it.</li>
+      <li>The trailer must be returned by ${endStr} under your rental agreement.</li>
+      <li>Amounts owed under the agreement, such as late fees, engine-hour charges or damage, may still apply.</li>
+      <li>Your security deposit is handled as described in your rental agreement.</li>
+    </ul>
+    <p style="color: #374151; font-size: 14px;">${esc(CANCELLATION_POLICY)}</p>
+    <p style="color: #64748b; font-size: 13px;">Questions? Reply to this email or contact ${COMPANY.email}.</p>
+    <a href="${dashboardUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Your Dashboard →
+    </a>
+  `, "#f59e0b");
+
+  const adminHtml = emailTemplate("Renter Requested Cancellation", `
+    <p>A renter has asked to stop monthly billing. The Stripe subscription is set to cancel on the date below (the later of the period end and 30 days from the request); the rental stays active until then.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${safeCompany}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Renter</td><td style="padding: 5px 0;">${safeName} (${esc(data.renterEmail)})</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Billing Ends</td><td style="padding: 5px 0; font-weight: bold; color: #ea580c;">${endStr}</td></tr>
+    </table>
+    <p style="color: #374151; font-size: 14px;">Arrange the return for ${endStr} and process the deposit refund after inspection.</p>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
+      View Rental →
+    </a>
+  `, "#f59e0b");
+
+  await Promise.allSettled([
+    sendTracked({
+      to: data.renterEmail,
+      from: FROM,
+      subject: `Cancellation received — billing ends ${endStr} (${data.trailerType} ${data.trailerVin})`,
+      html: renterHtml,
+      text: `Hi ${data.renterName},\n\nWe received your request to stop monthly billing. Your request is binding and your subscription ends on ${endStr}, the later of the end of the current billing month and 30 days from your request.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nMonthly rent stops after ${endStr}. The trailer must be returned by ${endStr} under your rental agreement. Amounts owed under the agreement, such as late fees, engine-hour charges or damage, may still apply. Your security deposit is handled as described in your rental agreement.\n\n${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
+    }, { template: "subscription_cancel_requested", entityType: "rental", entityId: data.rentalId }),
+    sendTracked({
+      to: ADMIN_EMAIL,
+      from: FROM,
+      subject: `[Cancellation] ${data.companyName} — ${data.trailerType} billing ends ${endStr}`,
+      html: adminHtml,
+      text: `Renter requested cancellation.\n\nCompany: ${data.companyName}\nRenter: ${data.renterName} (${data.renterEmail})\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nBilling ends: ${endStr}\n\nView: ${adminUrl}`,
+    }, { template: "admin_subscription_cancel_requested", entityType: "rental", entityId: data.rentalId }),
+  ]);
+}
+
+// ── Monthly billing started (dashboard Checkout path) ────────────────────────
+// Sent from the checkout.session.completed webhook once the subscription the
+// renter set up from the dashboard exists. Acknowledgment the renter keeps:
+// the renewal terms they agreed to, the cancellation policy, dashboard link.
+export interface SubscriptionStartedData {
+  rentalId: string;
+  renterEmail: string;
+  renterName: string;
+  companyName: string;
+  trailerType: string;
+  trailerVin: string;
+  monthlyRate: number; // cents
+  renewalTermsVersion: string | null;
+}
+
+export async function sendSubscriptionStartedEmail(data: SubscriptionStartedData): Promise<void> {
+  const safeName = esc(data.renterName);
+  const safeCompany = esc(data.companyName);
+  const safeVin = esc(data.trailerVin);
+  const safeType = esc(data.trailerType);
+  const monthlyStr = `${formatMonthly(data.monthlyRate)}/month`;
+  const dashboardUrl = `${domain()}/dashboard`;
+  const versionNote = data.renewalTermsVersion ? ` You agreed to terms version ${esc(data.renewalTermsVersion)}.` : "";
+
+  const html = emailTemplate("Monthly Billing Started", `
+    <p>Hi ${safeName},</p>
+    <p>Monthly billing for your trailer rental is now set up. This email is your copy of the terms you agreed to.${versionNote}</p>
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
+      </table>
+    </div>
+    ${renewalTermsHtml(data.monthlyRate, dashboardUrl)}
+    <p><strong>Cancellation policy:</strong> ${esc(CANCELLATION_POLICY)}</p>
+    <a href="${dashboardUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
+      View Your Dashboard →
+    </a>
+  `);
+
+  await sendTracked({
+    to: data.renterEmail,
+    from: FROM,
+    subject: `Monthly billing started — ${data.trailerType} (${data.trailerVin})`,
+    html,
+    text: `Hi ${data.renterName},\n\nMonthly billing for your trailer rental is now set up. This email is your copy of the terms you agreed to.${data.renewalTermsVersion ? ` Terms version ${data.renewalTermsVersion}.` : ""}\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\n${renewalTermsText(data.monthlyRate, dashboardUrl)}\n\nCancellation policy: ${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
+  }, { template: "subscription_started", entityType: "rental", entityId: data.rentalId });
+}
+
+// ── Admin: subscription not auto-created because consent is missing ─────────
+export async function sendSubscriptionBlockedNoConsentAdminEmail(data: {
+  rentalId: string;
+  companyName: string;
+  trailerType: string;
+  trailerVin: string;
+  monthlyRate: number; // cents
+}): Promise<void> {
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const monthlyStr = `${formatMonthly(data.monthlyRate)}/month`;
+
+  const html = emailTemplate("Subscription Not Started: No Renewal Consent", `
+    <p>The deposit for this rental was confirmed, but the rental has no recorded consent to automatic monthly renewal, so no Stripe subscription was created. The rental is active without monthly billing.</p>
+    <p>The renter can start monthly billing from their dashboard (that path records consent first). Do not create the subscription by hand until consent is on file.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${esc(data.trailerType)} — VIN: ${esc(data.trailerVin)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>
+    </table>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
+      View Rental →
+    </a>
+  `, "#f59e0b");
+
+  await sendTracked({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    subject: `[Action] ${data.companyName} — deposit paid, no renewal consent, subscription not started`,
+    html,
+    text: `Deposit confirmed but no renewal consent is recorded, so no subscription was created.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}\n\nThe renter can start monthly billing from their dashboard.\n\nView: ${adminUrl}`,
+  }, { template: "admin_subscription_blocked_no_consent", entityType: "rental", entityId: data.rentalId });
+}
+
+// ── Admin: a second live subscription was created for a rental ──────────────
+export async function sendDuplicateSubscriptionAdminEmail(data: {
+  rentalId: string;
+  companyName: string;
+  keptSubscriptionId: string;
+  duplicateSubscriptionId: string;
+}): Promise<void> {
+  const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
+  const html = emailTemplate("Duplicate Subscription Needs Attention", `
+    <p>A second Stripe subscription was created for a rental that already had a live one. The app kept the existing subscription and did <strong>not</strong> attach the new one, so the new one is billing with nothing in the app pointing at it.</p>
+    <p>In the Stripe dashboard: cancel the duplicate and refund any charge it made.</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
+      <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Kept</td><td style="padding: 5px 0; font-family: monospace;">${esc(data.keptSubscriptionId)}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Duplicate (cancel + refund)</td><td style="padding: 5px 0; font-family: monospace; color: #b91c1c;">${esc(data.duplicateSubscriptionId)}</td></tr>
+    </table>
+    <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
+      View Rental →
+    </a>
+  `, "#b91c1c");
+
+  await sendTracked({
+    to: ADMIN_EMAIL,
+    from: FROM,
+    subject: `[Action] ${data.companyName} — duplicate Stripe subscription ${data.duplicateSubscriptionId}`,
+    html,
+    text: `A second Stripe subscription was created for a rental that already had a live one.\n\nCompany: ${data.companyName}\nKept: ${data.keptSubscriptionId}\nDuplicate (cancel + refund in Stripe): ${data.duplicateSubscriptionId}\n\nView: ${adminUrl}`,
+  }, { template: "admin_duplicate_subscription", entityType: "rental", entityId: data.rentalId });
 }
 
 // ── Monthly invoice email ─────────────────────────────────────────────────────
@@ -573,6 +845,7 @@ export interface MonthlyInvoiceEmailData {
   trailerType: string;
   trailerVin: string;
   amount: number;         // cents
+  monthlyRate: number;    // cents; the recurring rate the renewal terms quote
   invoiceUrl: string | null;
   pdfUrl: string | null;
   billingPeriod?: string; // e.g. "May 2026"
@@ -603,14 +876,16 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     </div>
     ${data.invoiceUrl ? `<a href="${esc(data.invoiceUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">View &amp; Pay Invoice →</a>` : ""}
     <p style="color: #64748b; font-size: 13px;">You can also view your payment history in your <a href="${dashUrl}" style="color: #e63946;">dashboard</a>.</p>
+    ${renewalTermsHtml(data.monthlyRate, dashUrl)}
   `, "#f59e0b");
 
+  const rawPeriod = data.billingPeriod ?? "this month";
   await sendTracked({
     to: data.renterEmail,
     from: FROM,
-    subject: `Invoice for ${period} — ${safeType} rental (${safeVin})`,
+    subject: `Invoice for ${rawPeriod} — ${data.trailerType} rental (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${period} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}Questions? ${COMPANY.email}\n\n${COMPANY.name}`,
+    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${rawPeriod} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}${renewalTermsText(data.monthlyRate, dashUrl)}\n\nQuestions? ${COMPANY.email}\n\n${COMPANY.name}`,
   }, { template: "monthly_invoice", entityType: data.rentalId ? "rental" : undefined, entityId: data.rentalId });
 }
 
@@ -748,7 +1023,7 @@ export async function sendEngineHoursRequest(data: EngineHoursRequestData): Prom
   await sendTracked({
     to: data.renterEmail,
     from: FROM,
-    subject: `Engine hour reading requested — ${safeType} VIN ${safeVin}`,
+    subject: `Engine hour reading requested — ${data.trailerType} VIN ${data.trailerVin}`,
     html,
     text: `Hi ${data.renterName},\n\nDeluxe Logistics is requesting your current reefer engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nLast Reading: ${prevReading} hours\n\nSubmit here: ${submitUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "engine_hours_request", entityType: "rental", entityId: data.rentalId });
@@ -790,7 +1065,7 @@ export async function sendEngineHoursReceivedAdmin(data: EngineHoursSubmittedDat
   await sendTracked({
     to: ADMIN_EMAIL,
     from: FROM,
-    subject: `[Engine Hours] ${safeCompany} submitted reading — ${chargeStr} due`,
+    subject: `[Engine Hours] ${data.companyName} submitted reading — ${chargeStr} due`,
     html,
     text: `${data.companyName} submitted an engine hour reading.\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nReading: ${data.currentReading} hrs\nHours Used: ${data.hoursUsed ?? "N/A"}\nCharge: ${chargeStr}\n\nView: ${adminUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "engine_hours_received_admin", entityType: "rental", entityId: data.rentalId });
@@ -947,7 +1222,7 @@ export async function sendRegistrationEmail(data: RegistrationEmailData): Promis
   await sendTracked({
     to: data.renterEmail,
     from: FROM,
-    subject: `Trailer registration — ${safeType} VIN ${safeVin}`,
+    subject: `Trailer registration — ${data.trailerType} VIN ${data.trailerVin}`,
     html,
     text: `Hi ${data.renterName},\n\nYour trailer pickup has been confirmed. Here is your electronic registration:\n\n${data.registrationUrl}\n\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nCompany: ${data.companyName}\n\nKeep a copy in your cab at all times.\n\nDeluxe Logistics Inc.`,
   }, { template: "registration_email" });

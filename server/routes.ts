@@ -14,10 +14,19 @@ import {
   insertAdminNoteSchema,
   insertContactSchema,
   insertTestimonialSchema,
+  ageConfirmedSchema,
   type RentalApplication,
   type Rental,
 } from "@shared/schema";
+import { RENEWAL_TERMS_VERSION, CANCELLATION_NOTICE_DAYS, renewalSummary } from "@shared/renewal";
 import { requireAuth, requireAdmin, requireRenter } from "./auth";
+import { verifyUnsubscribeToken, renderUnsubscribePage } from "./unsubscribe";
+import {
+  attachSubscriptionToRental,
+  consentAtFromMetadata,
+  findLiveSubscriptionForRental,
+  expireOpenCheckoutSessions,
+} from "./subscription-service";
 import { uploadToCloudinary, uploadRawToCloudinary, isCloudinaryConfigured } from "./cloudinary";
 import {
   sendAdminApplicationAlert,
@@ -29,6 +38,7 @@ import {
   sendAgreementSignedEmails,
   sendContactFormEmail,
   sendPasswordResetEmail,
+  sendSubscriptionCancelRequestedEmails,
 } from "./email-service";
 import { lookupByDot, lookupByMc } from "./safer";
 import { logAuditEvent } from "./audit-service";
@@ -95,6 +105,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     password: z.string().min(8, "Password must be at least 8 characters"),
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
+    ageConfirmed: ageConfirmedSchema,
   });
 
   app.post("/api/auth/signup", async (req: Request, res: Response) => {
@@ -103,7 +114,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existing = await storage.getUserByEmail(username);
       if (existing) return res.status(409).json({ message: "An account with this email already exists" });
       const hashed = await bcrypt.hash(password, 10);
-      const user = await storage.createUser({ username, password: hashed, firstName, lastName, role: "renter", isActive: true });
+      // ageConfirmed validated as literal true above; record when they attested
+      const user = await storage.createUser({ username, password: hashed, firstName, lastName, role: "renter", isActive: true, ageConfirmedAt: new Date() });
       req.session.regenerate((err) => {
         if (err) { console.error("[session] regenerate error:", err); return res.status(500).json({ message: "Session error" }); }
         req.session.userId = user.id;
@@ -117,6 +129,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Marketing unsubscribe (public, server-rendered, no client route) ──
+  // Token is signed with SESSION_SECRET (see server/unsubscribe.ts). GET only
+  // renders a confirmation page with a single POST button, because link
+  // scanners and mail-client prefetchers follow GETs. POST performs the
+  // opt-out: it always upserts the lowercased address into
+  // marketing_suppressions and, when a user row matches (case-insensitively),
+  // also sets users.marketing_opt_out_at. RFC 8058 one-click unsubscribe (the
+  // List-Unsubscribe-Post header set by sendMarketing) has mail clients POST
+  // to this same URL. The page reads the same whether or not an account
+  // exists for the email, so the endpoint cannot be used to probe for accounts.
+  app.get("/unsubscribe/:token", (req: Request, res: Response) => {
+    const email = verifyUnsubscribeToken(req.params.token ?? "");
+    if (!email) {
+      return res.status(400).type("html").send(renderUnsubscribePage({ state: "invalid" }));
+    }
+    return res.type("html").send(renderUnsubscribePage({ state: "confirm", email, action: req.originalUrl }));
+  });
+  app.post("/unsubscribe/:token", async (req: Request, res: Response) => {
+    try {
+      const email = verifyUnsubscribeToken(req.params.token ?? "");
+      if (!email) {
+        return res.status(400).type("html").send(renderUnsubscribePage({ state: "invalid" }));
+      }
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const oneClick = body["List-Unsubscribe"] === "One-Click";
+      const inserted = await storage.addMarketingSuppression(email, oneClick ? "one_click_post" : "unsubscribe_page");
+
+      const user = await storage.getUserByEmailInsensitive(email);
+      let userUpdated = false;
+      if (user && !user.marketingOptOutAt) {
+        await storage.updateUser(user.id, { marketingOptOutAt: new Date() });
+        userUpdated = true;
+      }
+      // A token never expires (the link in an old email must keep working), so
+      // a replay is a no-op: only the first opt-out writes an audit row.
+      if (inserted || userUpdated) {
+        await logAuditEvent({
+          req,
+          userId: user?.id ?? null,
+          actionType: "marketing_opt_out",
+          entityType: user ? "user" : "email",
+          entityId: user?.id ?? email,
+          description: `Marketing opt-out recorded for ${email} via ${oneClick ? "one-click unsubscribe" : "unsubscribe page"}`,
+          isAdminEntry: false,
+        });
+      }
+      return res.type("html").send(renderUnsubscribePage({ state: "done", email }));
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).type("html").send(renderUnsubscribePage({ state: "invalid" }));
     }
   });
 
@@ -493,10 +558,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ── Rental Applications — public submission ──────────────────────────
   app.post("/api/applications", async (req: Request, res: Response) => {
     try {
-      const data = insertRentalApplicationSchema.parse(req.body);
+      // ageConfirmed is validated (must be true) and stored as a timestamp, not as the flag itself
+      const { ageConfirmed: _ageConfirmed, ...data } = insertRentalApplicationSchema.parse(req.body);
       const adminToken = randomBytes(32).toString("hex");
       const renterToken = randomBytes(32).toString("hex");
-      const application = await storage.createRentalApplication({ ...data, adminToken, renterToken, status: "pending" });
+      const application = await storage.createRentalApplication({ ...data, adminToken, renterToken, status: "pending", ageConfirmedAt: new Date() });
 
       // Fetch trailer for email context
       let trailerVin: string | undefined;
@@ -1308,6 +1374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     password: z.string().min(8, "Password must be at least 8 characters"),
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
+    ageConfirmed: ageConfirmedSchema,
   });
 
   app.post("/api/auth/admin-activate", async (req: Request, res: Response) => {
@@ -1330,6 +1397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
         inviteToken: null,
         inviteExpiry: null,
+        ageConfirmedAt: new Date(),
       });
       if (!updated) return res.status(500).json({ message: "Failed to activate account" });
 
@@ -1389,6 +1457,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
     driverLicenseNumber: z.string().min(1, "Driver's license number is required"),
+    ageConfirmed: ageConfirmedSchema,
   });
 
   app.post("/api/auth/register-invite", async (req: Request, res: Response) => {
@@ -1408,6 +1477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
         inviteToken: null,
         inviteExpiry: null,
+        ageConfirmedAt: new Date(),
       });
       if (!updatedUser) return res.status(500).json({ message: "Failed to activate account" });
 
@@ -2000,7 +2070,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.monthlyRate !== undefined ? { monthlyRate: body.monthlyRate } : {}),
         ...(body.depositPaid !== undefined ? { depositPaid: body.depositPaid } : {}),
-        ...(body.stripeSubscriptionId !== undefined ? { stripeSubscriptionId: body.stripeSubscriptionId } : {}),
+        // A new or removed subscription id invalidates any stored cancel schedule
+        ...(body.stripeSubscriptionId !== undefined
+          ? { stripeSubscriptionId: body.stripeSubscriptionId, subscriptionCancelRequestedAt: null, subscriptionEndsAt: null }
+          : {}),
         ...(body.startDate !== undefined ? { startDate: body.startDate ? new Date(body.startDate) : null } : {}),
         ...(body.endDate !== undefined ? { endDate: body.endDate ? new Date(body.endDate) : null } : {}),
         ...(body.pickupDate !== undefined ? { pickupDate: body.pickupDate ? new Date(body.pickupDate) : null } : {}),
@@ -2022,7 +2095,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             const stripe = await getUncachableStripeClient();
             await stripe.subscriptions.cancel(existingRental.stripeSubscriptionId);
-            await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+            await storage.updateRental(rental.id, { stripeSubscriptionId: null, subscriptionCancelRequestedAt: null, subscriptionEndsAt: null });
           } catch (subErr) {
             console.error(`[admin] Failed to cancel subscription ${existingRental.stripeSubscriptionId}:`, subErr);
           }
@@ -2131,6 +2204,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (rental.stripeSubscriptionId) {
         return res.status(400).json({ message: "Subscription already exists" });
       }
+      // Never enroll a renter who has not agreed to the renewal terms. The
+      // dashboard's "Set Up Monthly Billing" path records consent and creates
+      // the subscription through Checkout; this retry is only for rentals
+      // whose consent is on file but whose auto-creation failed.
+      if (!rental.renewalConsentAt) {
+        return res.status(409).json({
+          message: "No renewal consent on file for this rental. The renter must start monthly billing from their dashboard; it cannot be created for them.",
+        });
+      }
 
       const stripe = await getUncachableStripeClient();
       // Idempotency keys prevent duplicate price/subscription on concurrent admin retries
@@ -2160,7 +2242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         {
           customer: rental.stripeCustomerId,
           items: [{ price: price.id }],
-          metadata: { rentalId: rental.id, type: "monthly_rental" },
+          metadata: { rentalId: rental.id, type: "monthly_rental", renewalTermsVersion: rental.renewalTermsVersion ?? "" },
           payment_settings: {
             payment_method_types: ["card"],
             save_default_payment_method: "on_subscription",
@@ -2171,7 +2253,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { idempotencyKey: `sub_create_rental_${rental.id}` },
       );
 
-      await storage.updateRental(rental.id, { stripeSubscriptionId: subscription.id });
+      await storage.updateRental(rental.id, {
+        stripeSubscriptionId: subscription.id,
+        subscriptionCancelRequestedAt: null,
+        subscriptionEndsAt: null,
+      });
 
       await logAuditEvent({
         req,
@@ -2202,7 +2288,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stripe = await getUncachableStripeClient();
       await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
 
-      await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+      await storage.updateRental(rental.id, {
+        stripeSubscriptionId: null,
+        subscriptionCancelRequestedAt: null,
+        subscriptionEndsAt: null,
+      });
 
       await logAuditEvent({
         req,
@@ -2221,6 +2311,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── Renter cancels monthly billing (30 days notice, binding) ─────────
+  // The signed agreement is month-to-month with 30 days written notice to
+  // terminate, so an online request is immediate and binding and takes effect
+  // at the LATER of the current period end and 30 days from the request.
+  // Stripe keeps the subscription alive until then and the webhook's
+  // customer.subscription.deleted event marks the actual end; the rental
+  // itself stays active until the return. Idempotent: a repeat request returns
+  // the stored end date and sends nothing.
+  app.post("/api/rentals/:id/cancel-subscription", requireRenter, async (req: Request, res: Response) => {
+    const ALREADY_ENDED = "Monthly billing for this rental is no longer active in Stripe. Contact us if you need help.";
+    try {
+      const rental = await storage.getRental(req.params.id);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      const user = await storage.getUser(req.session.userId!);
+      if (!user || user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (!rental.stripeSubscriptionId) {
+        return res.status(400).json({ message: "No active subscription for this rental" });
+      }
+      if (rental.subscriptionCancelRequestedAt && rental.subscriptionEndsAt) {
+        return res.json({ endsAt: rental.subscriptionEndsAt.toISOString(), alreadyRequested: true });
+      }
+
+      const stripe = await getUncachableStripeClient();
+      let current: Stripe.Subscription;
+      try {
+        current = await stripe.subscriptions.retrieve(rental.stripeSubscriptionId);
+      } catch (stripeErr: unknown) {
+        const code = (stripeErr as { code?: string }).code;
+        if (code === "resource_missing") return res.status(409).json({ message: ALREADY_ENDED });
+        throw stripeErr;
+      }
+      if (current.status === "canceled") {
+        return res.status(409).json({ message: ALREADY_ENDED });
+      }
+
+      const now = new Date();
+      const noticeEnd = new Date(now.getTime() + CANCELLATION_NOTICE_DAYS * 24 * 60 * 60 * 1000);
+
+      // Stripe already has a cancellation scheduled (set in the Stripe
+      // dashboard, or by an earlier request whose DB write was lost): mirror
+      // its date, no new emails or audit.
+      if (current.cancel_at_period_end || current.cancel_at) {
+        const sec = current.cancel_at ?? current.items.data[0]?.current_period_end ?? null;
+        const endsAt = sec ? new Date(sec * 1000) : (rental.subscriptionEndsAt ?? noticeEnd);
+        await storage.updateRental(rental.id, {
+          subscriptionCancelRequestedAt: rental.subscriptionCancelRequestedAt ?? now,
+          subscriptionEndsAt: endsAt,
+        });
+        return res.json({ endsAt: endsAt.toISOString(), alreadyRequested: true });
+      }
+
+      // Stripe API 2025-03+ keeps the billing period on the subscription item.
+      // During the trial the period end is the trial end; if neither can be
+      // read, the 30-day notice alone sets the date.
+      const periodEndSec = current.items.data[0]?.current_period_end ?? current.trial_end ?? null;
+      const periodEnd = periodEndSec ? new Date(periodEndSec * 1000) : null;
+      const endsAt = periodEnd && periodEnd.getTime() >= noticeEnd.getTime() ? periodEnd : noticeEnd;
+      const atPeriodEnd = periodEnd !== null && endsAt.getTime() === periodEnd.getTime();
+
+      try {
+        await stripe.subscriptions.update(rental.stripeSubscriptionId, {
+          ...(atPeriodEnd
+            ? { cancel_at_period_end: true }
+            : { cancel_at: Math.floor(endsAt.getTime() / 1000) }),
+          metadata: { cancelRequestedBy: user.id, cancelRequestedAt: now.toISOString() },
+        });
+      } catch (stripeErr: unknown) {
+        const code = (stripeErr as { code?: string }).code;
+        const msg = stripeErr instanceof Error ? stripeErr.message : "";
+        if (code === "resource_missing" || /canceled subscription/i.test(msg)) {
+          return res.status(409).json({ message: ALREADY_ENDED });
+        }
+        throw stripeErr;
+      }
+
+      await storage.updateRental(rental.id, {
+        subscriptionCancelRequestedAt: now,
+        subscriptionEndsAt: endsAt,
+      });
+
+      await logAuditEvent({
+        req,
+        userId: user.id,
+        actionType: "subscription_cancel_requested",
+        entityType: "rental",
+        entityId: rental.id,
+        description: `Renter requested cancellation of subscription ${rental.stripeSubscriptionId}; billing ends ${endsAt.toISOString()} (${atPeriodEnd ? "period end" : `${CANCELLATION_NOTICE_DAYS}-day notice`})`,
+        metadata: {
+          stripeSubscriptionId: rental.stripeSubscriptionId,
+          endsAt: endsAt.toISOString(),
+          periodEnd: periodEnd?.toISOString() ?? null,
+          noticeEnd: noticeEnd.toISOString(),
+          mode: atPeriodEnd ? "cancel_at_period_end" : "cancel_at",
+        },
+        isAdminEntry: false,
+      });
+
+      // Acknowledge to renter, notify admin. Non-fatal if email fails.
+      try {
+        const [company, trailer] = await Promise.all([
+          storage.getCompany(rental.companyId),
+          storage.getTrailer(rental.trailerId),
+        ]);
+        await sendSubscriptionCancelRequestedEmails({
+          rentalId: rental.id,
+          renterEmail: user.username,
+          renterName: `${user.firstName} ${user.lastName}`.trim() || user.username,
+          companyName: company?.name ?? user.username,
+          trailerType: trailer?.type ?? "Trailer",
+          trailerVin: trailer?.vin ?? "",
+          monthlyRate: rental.monthlyRate,
+          endsAt,
+        });
+      } catch (emailErr) {
+        console.error("[cancel-subscription] email failed:", emailErr);
+      }
+
+      return res.json({ endsAt: endsAt.toISOString() });
+    } catch (err: unknown) {
+      console.error("Renter cancel subscription error:", err);
+      return res.status(500).json({ message: "Could not process the cancellation request. Please try again or contact us." });
+    }
+  });
+
   // ── Stripe Payment Routes ────────────────────────────────────────────
 
   // Get Stripe publishable key (for frontend)
@@ -2233,10 +2449,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create PaymentIntent for deposit (Stripe Elements flow)
+  // Create PaymentIntent for deposit (Stripe Elements flow). This is the real
+  // billing path: finalizeDepositPayment auto-creates the monthly subscription
+  // after the deposit succeeds, so the renewal consent is collected here.
+  const depositIntentSchema = z.object({
+    rentalId: z.string(),
+    // Explicit consent to automatic renewal (ROSCA / state auto-renewal laws).
+    // The version pins the consent to the wording the renter actually saw.
+    renewalConsent: z.literal(true, {
+      errorMap: () => ({ message: "Please agree to the monthly renewal terms" }),
+    }),
+    renewalTermsVersion: z.string(),
+  });
+
   app.post("/api/stripe/create-deposit-intent", requireRenter, async (req: Request, res: Response) => {
     try {
-      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const { rentalId, renewalTermsVersion } = depositIntentSchema.parse(req.body);
+      if (renewalTermsVersion !== RENEWAL_TERMS_VERSION) {
+        return res.status(400).json({ message: "Renewal terms changed; reload and review them" });
+      }
       const rental = await storage.getRental(rentalId);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
 
@@ -2253,6 +2484,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental.monthlyRate || rental.monthlyRate <= 0) {
         return res.status(400).json({ message: "Monthly rate not set on this rental. Contact admin." });
       }
+
+      // Record consent before anything is created in Stripe, so a PaymentIntent
+      // (and the subscription that follows it) can never exist without a
+      // matching consent record. Re-consent on every intent creation is fine.
+      await storage.updateRental(rentalId, {
+        renewalConsentAt: new Date(),
+        renewalTermsVersion: RENEWAL_TERMS_VERSION,
+      });
 
       const company = await storage.getCompany(rental.companyId);
       const stripe = await getUncachableStripeClient();
@@ -2319,7 +2558,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         monthlyRate: rental.monthlyRate,
       });
     } catch (err: unknown) {
-      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
+      // Surface the consent message itself so the payment page can show it
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0]?.message ?? "Invalid input" });
       console.error("PaymentIntent error:", err);
       return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create payment intent" });
     }
@@ -2448,9 +2688,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create monthly subscription checkout session
+  const subscriptionSessionSchema = z.object({
+    rentalId: z.string(),
+    // Explicit consent to automatic renewal (ROSCA / state auto-renewal laws).
+    // The version pins the consent to the wording the renter actually saw.
+    renewalConsent: z.literal(true, {
+      errorMap: () => ({ message: "Please agree to the monthly renewal terms" }),
+    }),
+    renewalTermsVersion: z.string(),
+  });
+
   app.post("/api/stripe/create-subscription-session", requireRenter, async (req: Request, res: Response) => {
     try {
-      const { rentalId } = z.object({ rentalId: z.string() }).parse(req.body);
+      const { rentalId, renewalTermsVersion } = subscriptionSessionSchema.parse(req.body);
+      if (renewalTermsVersion !== RENEWAL_TERMS_VERSION) {
+        return res.status(400).json({ message: "Renewal terms changed; reload and review them" });
+      }
       const rental = await storage.getRental(rentalId);
       if (!rental) return res.status(404).json({ message: "Rental not found" });
 
@@ -2461,6 +2714,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!rental.depositPaid) {
         return res.status(400).json({ message: "Deposit must be paid first" });
       }
+      if (rental.stripeSubscriptionId) {
+        return res.status(400).json({ message: "Monthly billing is already set up for this rental" });
+      }
+
+      // The consent (this moment, this terms version) travels in the Checkout
+      // session's metadata and is written to the rental when the subscription
+      // is attached (webhook or return call): a subscription never exists
+      // without its consent record, and an abandoned Checkout leaves none.
+      const consentAt = new Date();
 
       const trailer = await storage.getTrailer(rental.trailerId);
       const company = await storage.getCompany(rental.companyId);
@@ -2476,6 +2738,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerId = customer.id;
         await storage.updateRental(rentalId, { stripeCustomerId: customerId });
       }
+
+      // Stripe, not the rental row, decides whether billing already exists: a
+      // subscription whose webhook has not landed yet (the renter is back on
+      // the dashboard seconds after paying) must not be created twice. If one
+      // is live, attach it now and tell the dashboard to refresh.
+      const live = await findLiveSubscriptionForRental(stripe, customerId, rentalId);
+      if (live) {
+        const fresh = (await storage.getRental(rentalId)) ?? rental;
+        await attachSubscriptionToRental({
+          rental: fresh,
+          subscriptionId: live.id,
+          customerId,
+          renewalTermsVersion: live.metadata?.renewalTermsVersion ?? null,
+          renewalConsentAt: consentAtFromMetadata(live.metadata, live.created),
+          source: "stripe_lookup",
+        });
+        return res.json({ alreadyActive: true });
+      }
+      // A Checkout page left open in another tab must not be completable once
+      // this one exists.
+      await expireOpenCheckoutSessions(stripe, customerId, rentalId);
 
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
       const baseUrl = getBaseUrl(req);
@@ -2496,8 +2779,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payment_method_types: ["card"],
         mode: "subscription",
         line_items: [{ price: price.id, quantity: 1 }],
-        metadata: { rentalId, type: "subscription" },
-        success_url: `${baseUrl}/dashboard?subscription=success&rentalId=${rentalId}`,
+        metadata: {
+          rentalId,
+          type: "subscription",
+          renewalTermsVersion: RENEWAL_TERMS_VERSION,
+          renewalConsentAt: consentAt.toISOString(),
+        },
+        // The subscription Checkout creates carries the same metadata as one
+        // created by deposit-service, so webhooks and Stripe searches treat
+        // both alike; checkout.session.completed attaches it to the rental.
+        subscription_data: {
+          metadata: {
+            rentalId,
+            type: "monthly_rental",
+            renewalTermsVersion: RENEWAL_TERMS_VERSION,
+            renewalConsentAt: consentAt.toISOString(),
+          },
+        },
+        // Repeat the renewal terms next to Stripe's own pay button
+        custom_text: { submit: { message: renewalSummary(rental.monthlyRate) } },
+        // session_id lets the dashboard attach the subscription on return,
+        // before the webhook lands, so the setup box does not reappear.
+        success_url: `${baseUrl}/dashboard?subscription=success&rentalId=${rentalId}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/dashboard?subscription=cancelled`,
       });
 
@@ -2506,6 +2809,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input", errors: err.errors });
       console.error("Stripe subscription session error:", err);
       return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to create subscription session" });
+    }
+  });
+
+  // Dashboard return from Checkout: attach the subscription synchronously so
+  // the renter never sees "Set Up Monthly Billing" again while the webhook is
+  // in flight (the client-side counterpart of checkout.session.completed, as
+  // /api/stripe/payment-succeeded is for deposits). Idempotent with the webhook.
+  app.post("/api/stripe/subscription-session-complete", requireRenter, async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = z.object({ sessionId: z.string().min(1).max(200) }).parse(req.body);
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(401).json({ message: "Not authenticated" });
+
+      const stripe = await getUncachableStripeClient();
+      let session: Stripe.Checkout.Session;
+      try {
+        session = await stripe.checkout.sessions.retrieve(sessionId);
+      } catch (stripeErr: unknown) {
+        if ((stripeErr as { code?: string }).code === "resource_missing") {
+          return res.status(404).json({ message: "Checkout session not found" });
+        }
+        throw stripeErr;
+      }
+      const rentalId = session.metadata?.rentalId;
+      if (!rentalId || session.mode !== "subscription") {
+        return res.status(400).json({ message: "Not a monthly billing session" });
+      }
+      const rental = await storage.getRental(rentalId);
+      if (!rental) return res.status(404).json({ message: "Rental not found" });
+      if (user.companyId !== rental.companyId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (session.status !== "complete") {
+        return res.json({ outcome: "not_complete", status: session.status });
+      }
+      const subId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null;
+      if (!subId) return res.json({ outcome: "no_subscription" });
+
+      const result = await attachSubscriptionToRental({
+        rental,
+        subscriptionId: subId,
+        customerId: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
+        renewalTermsVersion: session.metadata?.renewalTermsVersion ?? null,
+        renewalConsentAt: consentAtFromMetadata(session.metadata, session.created),
+        source: "client_return",
+        checkoutSessionId: session.id,
+      });
+      return res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: "Invalid input" });
+      console.error("subscription-session-complete error:", err);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
@@ -3208,7 +3563,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const stripe = await getUncachableStripeClient();
           await stripe.subscriptions.cancel(rental.stripeSubscriptionId);
-          await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+          await storage.updateRental(rental.id, { stripeSubscriptionId: null, subscriptionCancelRequestedAt: null, subscriptionEndsAt: null });
         } catch (subErr) {
           console.error(`[return] Failed to cancel subscription ${rental.stripeSubscriptionId}:`, subErr);
         }
@@ -3334,9 +3689,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { insertDriverApplicationSchema } = await import("@shared/schema");
       const parsed = insertDriverApplicationSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ message: "Validation failed", errors: parsed.error.errors });
-      const data = parsed.data;
+      // ageConfirmed is validated (must be true) and stored as a timestamp, not as the flag itself
+      const { ageConfirmed: _ageConfirmed, ...data } = parsed.data;
       const app2 = await storage.createDriverApplication({
         ...data,
+        ageConfirmedAt: new Date(),
         freightTypes: data.freightTypes ?? null,
         desiredPosition: data.desiredPosition ?? null,
         references: data.references ?? null,

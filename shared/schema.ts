@@ -17,6 +17,8 @@ export const users = pgTable("users", {
   inviteExpiry: timestamp("invite_expiry"),
   passwordResetToken: varchar("password_reset_token"),
   passwordResetExpiry: timestamp("password_reset_expiry"),
+  ageConfirmedAt: timestamp("age_confirmed_at"), // when the account holder attested to being 18+
+  marketingOptOutAt: timestamp("marketing_opt_out_at"), // set by /unsubscribe; blocks marketing email only
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -86,6 +88,7 @@ export const rentalApplications = pgTable("rental_applications", {
   saferData: text("safer_data"), // JSON string from FMCSA
   adminToken: varchar("admin_token").unique(), // one-time admin email link token
   renterToken: varchar("renter_token").unique(), // token used for renter response page
+  ageConfirmedAt: timestamp("age_confirmed_at"), // applicant attested to being 18+ at submission
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("idx_rental_applications_status").on(table.status),
@@ -116,6 +119,15 @@ export const rentals = pgTable("rentals", {
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   stripeDepositIntentId: text("stripe_deposit_intent_id"), // active deposit PaymentIntent (reused to prevent duplicates)
+  // Proof of consent to automatic monthly renewal, recorded before the Stripe
+  // Checkout session is created. The version ties the consent to the exact
+  // wording shown (shared/renewal.ts).
+  renewalConsentAt: timestamp("renewal_consent_at"),
+  renewalTermsVersion: text("renewal_terms_version"),
+  // Renter-initiated cancellation: billing continues to the period end, then stops.
+  // The rental is NOT ended when these are set; only when the period actually ends.
+  subscriptionCancelRequestedAt: timestamp("subscription_cancel_requested_at"),
+  subscriptionEndsAt: timestamp("subscription_ends_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   // Prevent double-booking: only one non-terminal rental per trailer
@@ -215,6 +227,7 @@ export const driverApplications = pgTable("driver_applications", {
   resumeUrl: text("resume_url"),
   status: text("status").notNull().default("pending"), // "pending" | "reviewed" | "interview" | "hired" | "rejected"
   adminNotes: text("admin_notes"),
+  ageConfirmedAt: timestamp("age_confirmed_at"), // applicant attested to being 18+ at submission
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -232,11 +245,20 @@ export const trailerPhotosRelations = relations(trailerPhotos, ({ one }) => ({
 }));
 
 // ── Insert Schemas ─────────────────────────────────────────────────────
+// Age attestation sent by signup, invite registration and the two public
+// application forms. The server turns a `true` into an age_confirmed_at
+// timestamp; the body field itself is never stored.
+export const ageConfirmedSchema = z.literal(true, {
+  errorMap: () => ({ message: "You must confirm you are 18 or older" }),
+});
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
   inviteToken: true,
   inviteExpiry: true,
+  ageConfirmedAt: true,
+  marketingOptOutAt: true,
 });
 
 export const loginSchema = z.object({
@@ -271,7 +293,9 @@ export const insertRentalApplicationSchema = createInsertSchema(rentalApplicatio
   adminNotes: true,
   saferData: true,
   adminToken: true,
+  ageConfirmedAt: true,
 }).extend({
+  ageConfirmed: ageConfirmedSchema,
   companyName: z.string().min(1, "Company name is required"),
   ownerName: z.string().min(1, "Owner name is required"),
   email: z.string().email("Valid email required"),
@@ -306,7 +330,9 @@ export const insertDriverApplicationSchema = createInsertSchema(driverApplicatio
   status: true,
   adminNotes: true,
   resumeUrl: true,
+  ageConfirmedAt: true,
 }).extend({
+  ageConfirmed: ageConfirmedSchema,
   fullName: z.string().min(2, "Full name required"),
   email: z.string().email("Valid email required"),
   phone: z.string().min(7, "Phone required"),
@@ -408,6 +434,22 @@ export const emailLogs = pgTable("email_logs", {
   sentAt: timestamp("sent_at").defaultNow().notNull(),
 });
 export type EmailLog = typeof emailLogs.$inferSelect;
+
+// ── Marketing Suppressions ───────────────────────────────────────────────
+// Every unsubscribe lands here, keyed by lowercased email, whether or not a
+// user row exists for the address. sendMarketing checks this table before
+// users.marketing_opt_out_at, so an opt-out survives account deletion and
+// covers addresses that only ever appeared on an application.
+export const marketingSuppressions = pgTable("marketing_suppressions", {
+  email: text("email").primaryKey(), // always stored lowercased
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  source: text("source"), // "unsubscribe_page" | "one_click_post" | "admin" | ...
+});
+export const insertMarketingSuppressionSchema = createInsertSchema(marketingSuppressions).omit({ createdAt: true }).extend({
+  email: z.string().email(),
+});
+export type InsertMarketingSuppression = z.infer<typeof insertMarketingSuppressionSchema>;
+export type MarketingSuppression = typeof marketingSuppressions.$inferSelect;
 
 // ── Types ──────────────────────────────────────────────────────────────
 export type InsertUser = z.infer<typeof insertUserSchema>;

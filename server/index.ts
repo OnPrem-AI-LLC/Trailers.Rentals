@@ -116,6 +116,16 @@ const publicFormLimiter = rateLimit({
 app.use("/api/applications", publicFormLimiter);
 app.use("/api/driver-applications", publicFormLimiter);
 app.use("/api/contact", publicFormLimiter);
+// Unsubscribe is public and must keep working for every recipient (CAN-SPAM),
+// and mail providers send RFC 8058 one-click POSTs from shared egress IPs, so
+// this limit is deliberately loose: it only stops a flood.
+app.use("/unsubscribe", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many requests. Please try again in a few minutes.",
+}));
 
 // ── Request logging ──────────────────────────────────────────────────────
 app.use((req, res, next) => {

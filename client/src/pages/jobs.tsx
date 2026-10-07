@@ -72,7 +72,21 @@ const formSchema = z.object({
   hasTanker: z.boolean().default(false),
   references: z.string().max(1000).optional(),
   coverLetter: z.string().max(2000).optional(),
+  ageConfirmed: z.boolean().refine((v) => v === true, { message: "You must confirm you are 18 or older" }),
 });
+
+// apiRequest throws "<status>: <body>"; pull the server's own message out of the JSON body.
+function serverMessage(err: Error, fallback: string): string {
+  try {
+    const body = JSON.parse(err.message.replace(/^\d{3}:\s*/, "")) as {
+      message?: string;
+      errors?: { message?: string }[];
+    };
+    return body.errors?.[0]?.message || body.message || fallback;
+  } catch {
+    return err.message || fallback;
+  }
+}
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -103,8 +117,10 @@ export default function Jobs() {
       hasTanker: false,
       references: "",
       coverLetter: "",
+      ageConfirmed: false,
     },
   });
+  const ageConfirmed = form.watch("ageConfirmed");
 
   const submitMut = useMutation({
     mutationFn: (values: FormValues) =>
@@ -115,7 +131,7 @@ export default function Jobs() {
     onError: (err: Error) => {
       toast({
         title: "Submission failed",
-        description: err.message || "Please try again.",
+        description: serverMessage(err, "Please try again."),
         variant: "destructive",
       });
     },
@@ -495,10 +511,25 @@ export default function Jobs() {
                           )} />
                         </div>
 
+                        {/* Age attestation */}
+                        <FormField control={form.control} name="ageConfirmed" render={({ field }) => (
+                          <FormItem>
+                            <div className="flex items-start gap-2.5">
+                              <FormControl>
+                                <Checkbox checked={field.value} onCheckedChange={(v) => field.onChange(v === true)} className="mt-0.5" />
+                              </FormControl>
+                              <FormLabel className="font-normal cursor-pointer leading-snug">
+                                I confirm that I am 18 years of age or older
+                              </FormLabel>
+                            </div>
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+
                         <Button
                           type="submit"
                           size="lg"
-                          disabled={submitMut.isPending}
+                          disabled={submitMut.isPending || !ageConfirmed}
                           className="bg-primary hover:bg-primary/90 text-white font-bold gap-2 h-12 px-10"
                         >
                           {submitMut.isPending ? (

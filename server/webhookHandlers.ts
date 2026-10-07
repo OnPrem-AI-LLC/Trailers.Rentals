@@ -2,6 +2,8 @@ import { getStripeClient } from './stripeClient';
 import { finalizeDepositPayment } from './deposit-service';
 import { storage } from './storage';
 import { sendMonthlyInvoiceEmail } from './email-service';
+import { attachSubscriptionToRental, consentAtFromMetadata } from './subscription-service';
+import { COMPANY } from '@shared/constants';
 import type Stripe from 'stripe';
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -11,6 +13,23 @@ function getInvoiceSubscriptionId(inv: Stripe.Invoice): string | null {
   const sub = inv.parent?.subscription_details?.subscription;
   if (!sub) return null;
   return typeof sub === 'string' ? sub : sub.id;
+}
+
+function idOf(ref: string | { id: string } | null | undefined): string | null {
+  if (!ref) return null;
+  return typeof ref === 'string' ? ref : ref.id;
+}
+
+/**
+ * The date a subscription is scheduled to stop, read from Stripe's own object.
+ * cancel_at covers both our 30-day-notice path (explicit cancel_at) and
+ * cancel_at_period_end (Stripe fills cancel_at in); the item period end is
+ * the fallback. Null means no cancellation is scheduled.
+ */
+function scheduledEnd(sub: Stripe.Subscription): Date | null {
+  if (!sub.cancel_at && !sub.cancel_at_period_end) return null;
+  const sec = sub.cancel_at ?? sub.items.data[0]?.current_period_end ?? null;
+  return sec ? new Date(sec * 1000) : null;
 }
 
 export class WebhookHandlers {
@@ -54,6 +73,35 @@ export class WebhookHandlers {
           );
         }
 
+      // ── Subscription set up from the dashboard (Checkout, mode=subscription) ──
+      } else if (event.type === 'checkout.session.completed') {
+        // The dashboard's return call may already have attached this
+        // subscription; attach() is idempotent and refuses duplicates. Consent
+        // (time and terms version) comes from the session metadata that
+        // create-subscription-session wrote when the renter ticked the box.
+        const session = event.data.object as Stripe.Checkout.Session;
+        const rentalId = session.metadata?.rentalId;
+        if (session.mode === 'subscription' && rentalId) {
+          const subId = idOf(session.subscription);
+          const rental = await storage.getRental(rentalId);
+          if (!rental) {
+            console.warn(`[webhook] checkout.session.completed: rental ${rentalId} not found`);
+          } else if (!subId) {
+            console.warn(`[webhook] checkout.session.completed: session ${session.id} has no subscription`);
+          } else {
+            const result = await attachSubscriptionToRental({
+              rental,
+              subscriptionId: subId,
+              customerId: idOf(session.customer),
+              renewalTermsVersion: session.metadata?.renewalTermsVersion ?? null,
+              renewalConsentAt: consentAtFromMetadata(session.metadata, session.created),
+              source: 'webhook',
+              checkoutSessionId: session.id,
+            });
+            console.log(`[webhook] checkout.session.completed: rental ${rentalId}, subscription ${subId}: ${result.outcome}`);
+          }
+        }
+
       // ── Recurring invoice paid ───────────────────────────────────────────────
       } else if (event.type === 'invoice.paid') {
         const inv = event.data.object as Stripe.Invoice;
@@ -70,7 +118,7 @@ export class WebhookHandlers {
           const periodEnd = inv.period_end
             ? new Date(inv.period_end * 1000)
             : new Date();
-          const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+          const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: COMPANY.timeZone });
 
           await storage.createAuditLog({
             userId: null,
@@ -93,7 +141,7 @@ export class WebhookHandlers {
           const rental = await storage.getRentalBySubscriptionId(subId);
           if (rental) {
             const periodEnd = inv.period_end ? new Date(inv.period_end * 1000) : new Date();
-            const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const billingPeriod = periodEnd.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: COMPANY.timeZone });
 
             await storage.createAuditLog({
               userId: null,
@@ -115,12 +163,14 @@ export class WebhookHandlers {
                   ? [user.firstName, user.lastName].filter(Boolean).join(' ') || user.username
                   : company?.name ?? renterEmail;
                 await sendMonthlyInvoiceEmail({
+                  rentalId: rental.id,
                   renterEmail,
                   renterName: displayName,
                   companyName: company?.name ?? displayName,
                   trailerType: trailer.type,
                   trailerVin: trailer.vin ?? '',
                   amount: inv.amount_due,
+                  monthlyRate: rental.monthlyRate,
                   invoiceUrl: inv.hosted_invoice_url ?? null,
                   pdfUrl: inv.invoice_pdf ?? null,
                   billingPeriod,
@@ -155,31 +205,82 @@ export class WebhookHandlers {
 
       // ── Subscription lifecycle ───────────────────────────────────────────────
       } else if (event.type === 'customer.subscription.deleted') {
+        // This is the only event that means billing has actually ended. For a
+        // renter-requested cancellation Stripe sends it at the scheduled end,
+        // after the earlier .updated event that merely scheduled it.
         const sub = event.data.object as Stripe.Subscription;
         const rental = await storage.getRentalBySubscriptionId(sub.id);
         if (rental) {
-          await storage.updateRental(rental.id, { stripeSubscriptionId: null });
+          const endedAt = sub.ended_at ? new Date(sub.ended_at * 1000) : new Date();
+          // The request date stays and the end date becomes the actual end, so
+          // the dashboard can say "monthly billing ended <date>" instead of
+          // offering to set billing up again. The consent covered the
+          // subscription that just ended: starting billing again needs a fresh
+          // agreement, so no admin path can re-enrol the renter silently.
+          await storage.updateRental(rental.id, {
+            stripeSubscriptionId: null,
+            subscriptionEndsAt: endedAt,
+            renewalConsentAt: null,
+            renewalTermsVersion: null,
+          });
           await storage.createAuditLog({
             userId: null,
             actionType: 'subscription_cancelled',
             entityType: 'rental',
             entityId: rental.id,
-            description: `Stripe subscription ${sub.id} was cancelled/deleted (webhook event).`,
+            description: `Stripe subscription ${sub.id} ended ${endedAt.toISOString()} (webhook event)${rental.subscriptionCancelRequestedAt ? ` following renter cancellation request of ${rental.subscriptionCancelRequestedAt.toISOString()}` : ''}${rental.subscriptionEndsAt ? `; scheduled end was ${rental.subscriptionEndsAt.toISOString()}` : ''}.`,
             isAdminEntry: false,
             ipAddress: null,
           });
         }
 
       } else if (event.type === 'customer.subscription.updated') {
-        const sub = event.data.object as Stripe.Subscription;
-        const rental = await storage.getRentalBySubscriptionId(sub.id);
+        const stale = event.data.object as Stripe.Subscription;
+        const rental = await storage.getRentalBySubscriptionId(stale.id);
         if (rental) {
+          // Webhooks can arrive out of order, so the event payload may describe
+          // an older state. Re-fetch and mirror cancel state only from the
+          // fresh object. If the subscription is gone, .deleted owns the update.
+          let sub: Stripe.Subscription;
+          try {
+            sub = await stripe.subscriptions.retrieve(stale.id);
+          } catch (fetchErr) {
+            console.warn(`[webhook] customer.subscription.updated: could not re-fetch ${stale.id}; skipping`, fetchErr);
+            return;
+          }
+          if (sub.status === 'canceled') {
+            console.log(`[webhook] customer.subscription.updated: ${sub.id} already canceled; leaving to .deleted`);
+            return;
+          }
+
+          // A scheduled cancellation keeps the subscription (and the rental)
+          // active until the end date; only .deleted ends it. Mirroring here
+          // also covers cancellations made in the Stripe dashboard, and clears
+          // a schedule that was reversed before it took effect.
+          const endsAt = scheduledEnd(sub);
+          let scheduleNote = '';
+          if (endsAt) {
+            await storage.updateRental(rental.id, {
+              subscriptionCancelRequestedAt: rental.subscriptionCancelRequestedAt ?? new Date(),
+              subscriptionEndsAt: endsAt,
+            });
+            scheduleNote = ` Scheduled to end ${endsAt.toISOString()}; billing continues until then.`;
+          } else if (sub.cancel_at_period_end || sub.cancel_at) {
+            // Scheduled, but Stripe gave no usable date; keep what we have.
+            scheduleNote = ' Scheduled to end at period end.';
+          } else if (rental.subscriptionCancelRequestedAt || rental.subscriptionEndsAt) {
+            await storage.updateRental(rental.id, {
+              subscriptionCancelRequestedAt: null,
+              subscriptionEndsAt: null,
+            });
+            scheduleNote = ' Pending cancellation was reversed; billing continues.';
+          }
           await storage.createAuditLog({
             userId: null,
             actionType: 'subscription_updated',
             entityType: 'rental',
             entityId: rental.id,
-            description: `Stripe subscription ${sub.id} updated — status: ${sub.status}.`,
+            description: `Stripe subscription ${sub.id} updated — status: ${sub.status}.${scheduleNote}`,
             isAdminEntry: false,
             ipAddress: null,
           });

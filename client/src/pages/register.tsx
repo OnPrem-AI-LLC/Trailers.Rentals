@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { CheckCircle, Loader2, AlertTriangle, Lock, CreditCard, User } from "lucide-react";
 import { COMPANY } from "@shared/constants";
@@ -19,12 +20,26 @@ const registerSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
   confirmPassword: z.string().min(1, "Please confirm your password"),
   driverLicenseNumber: z.string().min(1, "Driver's license number is required"),
+  ageConfirmed: z.boolean().refine(v => v === true, { message: "You must confirm you are 18 or older" }),
 }).refine(d => d.password === d.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"],
 });
 
 type RegisterForm = z.infer<typeof registerSchema>;
+
+// apiRequest throws "<status>: <body>"; pull the server's own message out of the JSON body.
+function serverMessage(err: Error, fallback: string): string {
+  try {
+    const body = JSON.parse(err.message.replace(/^\d{3}:\s*/, "")) as {
+      message?: string;
+      errors?: { message?: string }[];
+    };
+    return body.errors?.[0]?.message || body.message || fallback;
+  } catch {
+    return err.message || fallback;
+  }
+}
 
 interface InviteInfo {
   email: string;
@@ -62,8 +77,9 @@ export default function Register() {
 
   const form = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { firstName: "", lastName: "", password: "", confirmPassword: "", driverLicenseNumber: "" },
+    defaultValues: { firstName: "", lastName: "", password: "", confirmPassword: "", driverLicenseNumber: "", ageConfirmed: false },
   });
+  const ageConfirmed = form.watch("ageConfirmed");
 
   useEffect(() => {
     if (inviteInfo) {
@@ -80,6 +96,7 @@ export default function Register() {
         firstName: data.firstName,
         lastName: data.lastName,
         driverLicenseNumber: data.driverLicenseNumber,
+        ageConfirmed: true,
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["/api/auth/me"] });
@@ -87,7 +104,7 @@ export default function Register() {
       setTimeout(() => navigate("/dashboard"), 1500);
     },
     onError: (err: Error) => {
-      toast({ title: "Registration failed", description: err.message, variant: "destructive" });
+      toast({ title: "Registration failed", description: serverMessage(err, "Please try again."), variant: "destructive" });
     },
   });
 
@@ -243,10 +260,28 @@ export default function Register() {
               <p className="text-xs text-muted-foreground mt-2">You can upload these from your dashboard.</p>
             </div>
 
+            {/* Age attestation */}
+            <div>
+              <div className="flex items-start gap-2.5">
+                <Checkbox
+                  id="ageConfirmed"
+                  checked={ageConfirmed}
+                  onCheckedChange={v => form.setValue("ageConfirmed", v === true, { shouldValidate: true })}
+                  className="mt-0.5"
+                />
+                <Label htmlFor="ageConfirmed" className="text-sm font-normal leading-snug cursor-pointer">
+                  I confirm that I am 18 years of age or older
+                </Label>
+              </div>
+              {form.formState.errors.ageConfirmed && (
+                <p className="text-xs text-red-400 mt-1">{form.formState.errors.ageConfirmed.message}</p>
+              )}
+            </div>
+
             <Button
               type="submit"
               className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-3 gap-2"
-              disabled={registerMut.isPending}
+              disabled={registerMut.isPending || !ageConfirmed}
             >
               {registerMut.isPending ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Creating Account…</>
