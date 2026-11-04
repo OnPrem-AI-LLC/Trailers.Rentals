@@ -4,10 +4,11 @@
 // and every change is logged with the unit numbers it touched so it can be
 // reversed by hand from the admin inventory page if needed.
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { db } from "./db";
-import { trailers } from "@shared/schema";
+import { trailers, trailerPhotos } from "@shared/schema";
 import { storage } from "./storage";
+import { REPRESENTATIVE_PHOTO_PATH } from "@shared/trailer-format";
 
 interface DataFix {
   key: string;
@@ -109,9 +110,40 @@ async function listingCopy() {
   return { updated };
 }
 
+// ── 2026-11-04: representative photos ─────────────────────────────────────
+//
+// Five Utility-line reefers had no photos of their own and were showing unit
+// 5213's picture. Each now gets a labeled collage composed from the fleet's
+// own photos of the same model line (attached_assets/representative/), and
+// the borrowed 5213 photo row is removed. An admin can delete the collage
+// from the unit the moment real photos are uploaded.
+
+const REPRESENTATIVE_COLLAGES: Record<string, string> = {
+  "5061": `${REPRESENTATIVE_PHOTO_PATH}5061-fleet.jpg`, // composed from sister 2007 Utility 3000R (unit 5062)
+  "5225": `${REPRESENTATIVE_PHOTO_PATH}5225-fleet.jpg`,
+  "11": `${REPRESENTATIVE_PHOTO_PATH}11-fleet.jpg`,
+  "5074": `${REPRESENTATIVE_PHOTO_PATH}5074-fleet.jpg`,
+  "5201": `${REPRESENTATIVE_PHOTO_PATH}5201-fleet.jpg`,
+};
+
+async function representativePhotos() {
+  const updated: string[] = [];
+  for (const [unitNumber, url] of Object.entries(REPRESENTATIVE_COLLAGES)) {
+    const [t] = await db.select({ id: trailers.id }).from(trailers).where(eq(trailers.unitNumber, unitNumber));
+    if (!t) continue;
+    await db
+      .delete(trailerPhotos)
+      .where(and(eq(trailerPhotos.trailerId, t.id), like(trailerPhotos.url, "%/attached_assets/5213/%")));
+    await db.insert(trailerPhotos).values({ trailerId: t.id, url, isPrimary: true, displayOrder: 0 });
+    updated.push(unitNumber);
+  }
+  return { updated };
+}
+
 const FIXES: DataFix[] = [
   { key: "datafix:2026-11-04-reprice-and-unlist", run: repriceAndUnlist },
   { key: "datafix:2026-11-04-listing-copy", run: listingCopy },
+  { key: "datafix:2026-11-04-representative-photos", run: representativePhotos },
 ];
 
 export async function runDataFixes(): Promise<void> {

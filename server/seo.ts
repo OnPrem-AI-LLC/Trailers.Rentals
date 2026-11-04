@@ -10,7 +10,13 @@
 import type { PublicTrailer } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
 import { FAQ } from "@shared/faq";
-import { formatTrailerName, formatTypeLabel, formatPrice } from "@shared/trailer-format";
+import {
+  formatTrailerName,
+  formatTypeLabel,
+  formatPrice,
+  isRepresentativePhoto,
+  REPRESENTATIVE_PHOTO_NOTE,
+} from "@shared/trailer-format";
 import { getPublicTrailers, getPublicTrailer } from "./public-trailers";
 
 const SITE = COMPANY.siteUrl;
@@ -174,11 +180,12 @@ function productLd(t: PublicTrailer) {
       ? [{ "@type": "PropertyValue", name: "Reefer engine hour rate (USD)", value: (t.engineHourRate / 100).toFixed(2) }]
       : []),
   ];
+  const photoNote = isRepresentativePhoto(photoUrls(t)[0]) ? ` ${REPRESENTATIVE_PHOTO_NOTE}` : "";
   return {
     "@context": "https://schema.org",
     "@type": "Product",
     name: formatTrailerName(t),
-    description: `${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}`,
+    description: `${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}${photoNote}`,
     image: photoUrls(t),
     sku: t.unitNumber ?? undefined,
     brand: t.make ? { "@type": "Brand", name: t.make } : undefined,
@@ -285,7 +292,9 @@ export function trailerBody(t: PublicTrailer): string {
     : "";
   const urls = photoUrls(t);
   const hero = urls[0] ? `<img class="hero" src="${escapeHtml(urls[0])}" alt="${name}" width="640" height="480" />` : "";
-  const photos = urls.length ? `<p class="muted">${urls.length} photo${urls.length === 1 ? "" : "s"} on the listing.</p>` : "";
+  const photos = urls.length
+    ? `<p class="muted">${urls.length} photo${urls.length === 1 ? "" : "s"} on the listing.${isRepresentativePhoto(urls[0]) ? ` ${escapeHtml(REPRESENTATIVE_PHOTO_NOTE)}` : ""}</p>`
+    : "";
   return `<div id="ssr">
 ${PRERENDER_CSS}
 <p class="muted"><a href="/">← All available trailers</a></p>

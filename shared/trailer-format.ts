@@ -45,6 +45,17 @@ export function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US")}`;
 }
 
+// Collages composed from other units of the same model line in the fleet live
+// under this path. Every surface that shows one labels it, so nobody mistakes
+// it for a photo of the listed unit.
+export const REPRESENTATIVE_PHOTO_PATH = "/attached_assets/representative/";
+export const REPRESENTATIVE_PHOTO_NOTE =
+  "Representative photos from the Deluxe Logistics fleet. The listed unit may differ in details.";
+
+export function isRepresentativePhoto(url: string | null | undefined): boolean {
+  return !!url && url.includes(REPRESENTATIVE_PHOTO_PATH);
+}
+
 // Newest model year first; units with no year on file sort last; ties broken
 // by unit number so the order is stable. Used by the public listing, the
 // pre-rendered pages, llms.txt and the admin inventory.

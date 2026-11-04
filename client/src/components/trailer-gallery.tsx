@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Thermometer, Package, ChevronLeft, ChevronRight } from "lucide-react";
 import type { TrailerPhoto } from "@shared/schema";
+import { isRepresentativePhoto, REPRESENTATIVE_PHOTO_NOTE } from "@shared/trailer-format";
 
 interface TrailerGalleryProps {
   photos: TrailerPhoto[];
@@ -68,6 +69,10 @@ export default function TrailerGallery({ photos, name, type }: TrailerGalleryPro
           </>
         )}
       </div>
+
+      {active && isRepresentativePhoto(active.url) && (
+        <p className="text-xs text-muted-foreground leading-snug">{REPRESENTATIVE_PHOTO_NOTE}</p>
+      )}
 
       {sorted.length > 1 && (
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">

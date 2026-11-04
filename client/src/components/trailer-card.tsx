@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Thermometer, Package, ArrowRight, Clock, MapPin, Info } from "lucide-react";
 import type { PublicTrailer } from "@shared/schema";
 import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
+import { isRepresentativePhoto } from "@shared/trailer-format";
 
 function TrailerTypeBadge({ type }: { type: string }) {
   if (type === "reefer") {
@@ -71,6 +72,7 @@ export default function TrailerCard({ trailer, onQuickView }: TrailerCardProps) 
   const primaryPhoto = trailer.photos.find((p) => p.isPrimary) || trailer.photos[0];
   const isAvailable = trailer.status === "available";
   const name = formatTrailerName(trailer);
+  const representative = isRepresentativePhoto(primaryPhoto?.url);
   const openDetails = () => (onQuickView ? onQuickView(trailer) : navigate(`/trailers/${trailer.id}`));
 
   return (
@@ -86,7 +88,7 @@ export default function TrailerCard({ trailer, onQuickView }: TrailerCardProps) 
           {primaryPhoto ? (
             <img
               src={primaryPhoto.url}
-              alt={name}
+              alt={representative ? `${name}, representative fleet photo` : name}
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
             />
           ) : (
@@ -105,6 +107,11 @@ export default function TrailerCard({ trailer, onQuickView }: TrailerCardProps) 
           <div className="absolute top-3 right-3">
             <TrailerTypeBadge type={trailer.type} />
           </div>
+          {representative && (
+            <div className="absolute bottom-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded bg-black/60 text-white/90">
+              Representative fleet photo
+            </div>
+          )}
         </div>
 
         <div className="p-5 pb-0">
