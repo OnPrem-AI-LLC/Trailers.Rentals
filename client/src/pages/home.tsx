@@ -12,12 +12,14 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import TrailerCard from "@/components/trailer-card";
-import { ArrowDown, Zap, DollarSign, BadgeCheck, Truck, Star, Send, CheckCircle2, Phone, Mail, MapPin, Filter } from "lucide-react";
+import { ArrowDown, Zap, DollarSign, BadgeCheck, Truck, Star, Send, CheckCircle2, Clock, Mail, MapPin, Filter } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { TrailerWithPhotos, Testimonial } from "@shared/schema";
+import { formatTypeLabel } from "@/lib/trailer-utils";
+import type { PublicTrailer, Testimonial } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
+import { FAQ } from "@shared/faq";
 
 const VALUE_PROPS = [
   {
@@ -65,7 +67,7 @@ export default function Home() {
   const [filterType, setFilterType] = useState("all");
   const [filterLocation, setFilterLocation] = useState("all");
 
-  const { data: trailers = [], isLoading } = useQuery<TrailerWithPhotos[]>({
+  const { data: trailers = [], isLoading } = useQuery<PublicTrailer[]>({
     queryKey: ["/api/trailers"],
     queryFn: async () => {
       const res = await fetch("/api/trailers");
@@ -83,21 +85,25 @@ export default function Home() {
     },
   });
 
-  const allAvailable = trailers.filter((t) => t.status === "available");
-  const other = trailers.filter((t) => t.status !== "available");
+  // The public API only returns available units; the filter is belt and braces.
+  const allAvailable = useMemo(() => trailers.filter((t) => t.status === "available"), [trailers]);
+
+  // Filter options come from what is actually listed, so a type with no units
+  // (or a single location) never shows up as a dead choice.
+  const types = useMemo(
+    () => Array.from(new Set(allAvailable.map((t) => t.type))).sort(),
+    [allAvailable],
+  );
 
   const locations = useMemo(() => {
-    const locs = allAvailable
-      .map((t) => (t as TrailerWithPhotos & { location?: string | null }).location)
-      .filter((l): l is string => !!l);
+    const locs = allAvailable.map((t) => t.location).filter((l): l is string => !!l);
     return Array.from(new Set(locs)).sort();
   }, [allAvailable]);
 
   const available = useMemo(() => {
     return allAvailable.filter((t) => {
-      const tWithLoc = t as TrailerWithPhotos & { location?: string | null };
       if (filterType !== "all" && t.type !== filterType) return false;
-      if (filterLocation !== "all" && tWithLoc.location !== filterLocation) return false;
+      if (filterLocation !== "all" && t.location !== filterLocation) return false;
       return true;
     });
   }, [allAvailable, filterType, filterLocation]);
@@ -147,7 +153,7 @@ export default function Home() {
           </h1>
 
           <p className="text-lg text-muted-foreground max-w-xl mb-10 leading-relaxed">
-            Reefers, dry vans, and more — available now at straightforward monthly rates.
+            Reefers and dry vans — available now at straightforward monthly rates.
             No mileage fees. No surprise charges. Just the trailer you need.
           </p>
 
@@ -193,25 +199,25 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {allAvailable.length > 0 && (
+              {(types.length > 1 || locations.length > 1) && (
                 <span className="text-xs text-muted-foreground mr-1">
                   <Filter className="w-3 h-3 inline mr-1" />
                   Filter:
                 </span>
               )}
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="h-8 w-36 text-xs">
-                  <SelectValue placeholder="All types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  <SelectItem value="reefer">Reefer</SelectItem>
-                  <SelectItem value="dry_van">Dry Van</SelectItem>
-                  <SelectItem value="flatbed">Flatbed</SelectItem>
-                  <SelectItem value="chassis">Chassis</SelectItem>
-                  <SelectItem value="specialized">Specialized</SelectItem>
-                </SelectContent>
-              </Select>
+              {types.length > 1 && (
+                <Select value={filterType} onValueChange={setFilterType}>
+                  <SelectTrigger className="h-8 w-36 text-xs">
+                    <SelectValue placeholder="All types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All types</SelectItem>
+                    {types.map((t) => (
+                      <SelectItem key={t} value={t}>{formatTypeLabel(t)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               {locations.length > 1 && (
                 <Select value={filterLocation} onValueChange={setFilterLocation}>
                   <SelectTrigger className="h-8 w-44 text-xs">
@@ -276,17 +282,6 @@ export default function Home() {
               ))}
             </div>
           )}
-
-          {!isLoading && other.length > 0 && (
-            <div className="mt-14">
-              <h3 className="text-lg font-bold text-muted-foreground mb-4">Other Units</h3>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 opacity-60">
-                {other.map((trailer) => (
-                  <TrailerCard key={trailer.id} trailer={trailer} />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </section>
 
@@ -321,6 +316,21 @@ export default function Home() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── FAQ (the server emits this same list as FAQPage JSON-LD) ── */}
+      <section id="faq" className="border-t border-border py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <h2 className="text-2xl font-black tracking-tight mb-10">Frequently asked questions</h2>
+          <dl className="grid md:grid-cols-2 gap-x-12 gap-y-8">
+            {FAQ.map(({ q, a }) => (
+              <div key={q}>
+                <dt className="font-bold text-foreground mb-1.5">{q}</dt>
+                <dd className="text-sm text-muted-foreground leading-relaxed">{a}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
       </section>
 
@@ -381,13 +391,12 @@ export default function Home() {
                     {COMPANY.email}
                   </a>
                 </div>
+                {/* Phone line goes here once the business number is confirmed (COMPANY.phone). */}
                 <div className="flex items-center gap-3 text-sm">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                    <Phone className="w-4 h-4 text-primary" />
+                    <Clock className="w-4 h-4 text-primary" />
                   </div>
-                  <a href="tel:+18005550100" className="hover:text-primary transition-colors">
-                    (800) 555-0100
-                  </a>
+                  <span className="text-muted-foreground">{COMPANY.hours}</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">

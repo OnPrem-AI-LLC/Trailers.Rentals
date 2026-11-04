@@ -8,6 +8,7 @@ import cron from "node-cron";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedAdminUser } from "./seed-admin";
+import { runDataFixes } from "./data-fixes";
 import { WebhookHandlers } from "./webhookHandlers";
 
 const PgSession = connectPgSimple(session);
@@ -214,6 +215,7 @@ async function runReturnReminders() {
 
 (async () => {
   await seedAdminUser();
+  await runDataFixes();
   await initStripe();
 
   // Run return reminders daily at 8:00 AM

@@ -49,6 +49,8 @@ import { COMPANY } from "@shared/constants";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
+import { getPublicTrailers, getPublicTrailer, invalidatePublicTrailers } from "./public-trailers";
+import { buildSitemap, buildLlmsTxt } from "./seo";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -58,6 +60,14 @@ function getBaseUrl(req: Request): string {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Any admin write, pickup or return can change what the public sees. Drop
+  // the public inventory cache once the response is done so the site, the
+  // sitemap and llms.txt reflect it immediately.
+  app.use(["/api/admin", "/api/pickup", "/api/return"], (req: Request, res: Response, next) => {
+    if (req.method !== "GET") res.on("finish", invalidatePublicTrailers);
+    next();
+  });
+
   // ── Auth ────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
@@ -206,12 +216,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ── Trailers (public) ───────────────────────────────────────────────
-  app.get("/api/trailers", async (req: Request, res: Response) => {
+  // Only available units, without the full VIN or the registration document.
+  // Rented and in-service units are hidden until an admin publishes them
+  // again from the inventory page. See server/public-trailers.ts.
+  app.get("/api/trailers", async (_req: Request, res: Response) => {
     try {
-      const status = req.query.status as string | undefined;
-      const filter = status ?? "public";
-      const trailerList = await storage.getTrailers(filter === "public" ? undefined : filter, filter === "public");
-      return res.json(trailerList);
+      res.set("Cache-Control", "public, max-age=60");
+      return res.json(await getPublicTrailers());
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
@@ -220,12 +231,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/trailers/:id", async (req: Request, res: Response) => {
     try {
-      const trailer = await storage.getTrailer(req.params.id);
-      if (!trailer || trailer.status === "inactive") return res.status(404).json({ message: "Trailer not found" });
+      const trailer = await getPublicTrailer(req.params.id);
+      if (!trailer) return res.status(404).json({ message: "This unit is not listed right now" });
       return res.json(trailer);
     } catch (err: unknown) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ── Crawler and agent entry points (built from the same public inventory) ──
+  app.get("/sitemap.xml", async (_req: Request, res: Response) => {
+    try {
+      const xml = buildSitemap(await getPublicTrailers());
+      return res.set({ "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "public, max-age=300" }).send(xml);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).type("text/plain").send("sitemap unavailable");
+    }
+  });
+
+  app.get("/llms.txt", async (_req: Request, res: Response) => {
+    try {
+      const txt = buildLlmsTxt(await getPublicTrailers());
+      return res.set({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300" }).send(txt);
+    } catch (err: unknown) {
+      console.error(err);
+      return res.status(500).type("text/plain").send("llms.txt unavailable");
     }
   });
 
@@ -563,6 +595,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // ageConfirmed is validated (must be true) and stored as a timestamp, not as the flag itself
       const { ageConfirmed: _ageConfirmed, ...data } = insertRentalApplicationSchema.parse(req.body);
+      // Only listed (available) units accept applications, so a renter or an
+      // agent arriving from a stale link gets a clear answer, not a dead file.
+      const requested = await storage.getTrailer(data.trailerId);
+      if (!requested || requested.status !== "available") {
+        return res.status(400).json({ message: "This unit is no longer available. Please choose another trailer." });
+      }
       const adminToken = randomBytes(32).toString("hex");
       const renterToken = randomBytes(32).toString("hex");
       const application = await storage.createRentalApplication({ ...data, adminToken, renterToken, status: "pending", ageConfirmedAt: new Date() });
@@ -3930,7 +3968,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const all = await storage.getAllSiteContent();
       const map: Record<string, string> = {};
-      for (const item of all) map[item.key] = item.value;
+      for (const item of all) {
+        if (item.key.startsWith("datafix:")) continue; // internal one-time migration markers
+        map[item.key] = item.value;
+      }
       return res.json(map);
     } catch (err: unknown) {
       console.error(err);

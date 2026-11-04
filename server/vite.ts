@@ -5,6 +5,7 @@ import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
+import { renderIndexHtml } from "./seo";
 
 const viteLogger = createLogger();
 
@@ -59,7 +60,8 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      const { html, status } = await renderIndexHtml(url.split("?")[0], page);
+      res.status(status).set({ "Content-Type": "text/html" }).end(html);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -76,10 +78,18 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  const template = fs.readFileSync(path.resolve(distPath, "index.html"), "utf-8");
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  // index:false so "/" reaches the renderer below instead of the raw index.html
+  app.use(express.static(distPath, { index: false }));
+
+  // Every app route is served from index.html; listing pages get their
+  // <head> and a pre-rendered body filled in from live inventory.
+  app.use("*", async (req, res) => {
+    const { html, status } = await renderIndexHtml(req.originalUrl.split("?")[0], template);
+    res
+      .status(status)
+      .set({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" })
+      .send(html);
   });
 }

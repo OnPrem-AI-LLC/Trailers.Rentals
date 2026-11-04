@@ -32,9 +32,12 @@ type EquipmentRow = {
 function mapStatus(use: string): string {
   const u = (use || "").toLowerCase().trim();
   if (u.includes("in use")) return "rented";
-  if (u.includes("sell or rent") || u.includes("sell or find driver")) return "available";
-  if (u.includes("find driver")) return "maintenance";
   if (u.includes("not usable") || u.includes("sell for parts")) return "inactive";
+  // "Sell or rent" and "sell or find driver" units are often the ones that
+  // need work. They land hidden (maintenance) and an admin publishes them
+  // from the inventory page once they have been checked over.
+  if (u.includes("sell or rent") || u.includes("sell or find driver")) return "maintenance";
+  if (u.includes("find driver")) return "maintenance";
   if (u.includes("sell")) return "inactive";
   return "available";
 }

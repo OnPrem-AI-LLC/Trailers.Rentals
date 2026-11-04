@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
-import { Truck, Thermometer, Layers, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Truck, Thermometer, ArrowRight, CheckCircle2 } from "lucide-react";
 
 const TRAILER_TYPES = [
   {
@@ -36,22 +36,6 @@ const TRAILER_TYPES = [
       "Air-ride suspension",
     ],
     useCases: ["General merchandise", "Palletized freight", "Box goods", "LTL and FTL loads"],
-  },
-  {
-    id: "flatbeds",
-    icon: Layers,
-    name: "Flatbed Trailers",
-    tagline: "For oversized loads that need open access.",
-    description:
-      "Flatbeds for wide or tall loads that won't fit in a van. Ideal for construction materials, machinery, steel, lumber, and other cargo that requires forklift or crane loading.",
-    specs: [
-      "48' and 53' lengths available",
-      "102\" deck width",
-      "Up to 48,000 lb payload",
-      "Coil racks and tarps available",
-      "Winches and chains included",
-    ],
-    useCases: ["Construction materials", "Steel & pipe", "Lumber", "Heavy machinery"],
   },
 ];
 
@@ -91,7 +75,7 @@ export default function ServicesPage() {
             <span className="text-primary">your load.</span>
           </h1>
           <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-8">
-            Reefers, dry vans, flatbeds — available monthly with a single flat rate.
+            Reefers and dry vans — available monthly with a single flat rate.
             No mileage fees. No BS.
           </p>
           <div className="flex flex-wrap gap-3">
@@ -103,11 +87,6 @@ export default function ServicesPage() {
             <a href="#dry-vans">
               <Button variant="outline" size="sm" className="gap-2">
                 <Truck className="w-3.5 h-3.5" /> Dry Vans
-              </Button>
-            </a>
-            <a href="#flatbeds">
-              <Button variant="outline" size="sm" className="gap-2">
-                <Layers className="w-3.5 h-3.5" /> Flatbeds
               </Button>
             </a>
           </div>

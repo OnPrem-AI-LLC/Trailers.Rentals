@@ -19,7 +19,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { ArrowLeft, Truck, Thermometer, CheckCircle, AlertCircle, Building2 } from "lucide-react";
-import type { TrailerWithPhotos } from "@shared/schema";
+import type { PublicTrailer } from "@shared/schema";
 import { formatTrailerName } from "@/lib/trailer-utils";
 import { useAuth } from "@/hooks/use-auth";
 import type { Company } from "@shared/schema";
@@ -98,12 +98,12 @@ export default function Apply() {
     }
   }, [user, existingCompany]);
 
-  const { data: trailer, isLoading, isError } = useQuery<TrailerWithPhotos>({
+  const { data: trailer, isLoading, isError } = useQuery<PublicTrailer>({
     queryKey: ["/api/trailers", trailerId],
     queryFn: async () => {
       const res = await fetch(`/api/trailers/${trailerId}`);
       if (!res.ok) throw new Error("Trailer not found");
-      return res.json() as Promise<TrailerWithPhotos>;
+      return res.json() as Promise<PublicTrailer>;
     },
     enabled: !!trailerId,
   });
@@ -164,9 +164,10 @@ export default function Apply() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-4">
             <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
-            <h2 className="text-xl font-bold">Trailer not found</h2>
-            <Link href="/">
-              <Button variant="outline">Back to inventory</Button>
+            <h2 className="text-xl font-bold">This unit isn't listed right now</h2>
+            <p className="text-muted-foreground text-sm">It may have been rented or taken in for service.</p>
+            <Link href="/#trailers">
+              <Button variant="outline">See available trailers</Button>
             </Link>
           </div>
         </div>

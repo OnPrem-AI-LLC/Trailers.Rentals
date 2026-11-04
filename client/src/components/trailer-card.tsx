@@ -1,12 +1,8 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Thermometer, Package, ArrowRight, Clock, MapPin } from "lucide-react";
-import type { TrailerWithPhotos } from "@shared/schema";
-import { formatTypeLabel, formatTrailerName } from "@/lib/trailer-utils";
-
-function formatPrice(cents: number): string {
-  return `$${(cents / 100).toLocaleString()}`;
-}
+import type { PublicTrailer } from "@shared/schema";
+import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
 
 function TrailerTypeBadge({ type }: { type: string }) {
   if (type === "reefer") {
@@ -32,6 +28,13 @@ function TrailerTypeBadge({ type }: { type: string }) {
   );
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  available: "Available",
+  rented: "Rented",
+  maintenance: "In Service",
+  inactive: "Retired",
+};
+
 function StatusBadge({ status }: { status: string }) {
   if (status === "available") {
     return (
@@ -52,18 +55,19 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className="badge-maintenance">
       <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }
 
 interface TrailerCardProps {
-  trailer: TrailerWithPhotos;
+  trailer: PublicTrailer;
 }
 
 export default function TrailerCard({ trailer }: TrailerCardProps) {
   const primaryPhoto = trailer.photos.find((p) => p.isPrimary) || trailer.photos[0];
   const isAvailable = trailer.status === "available";
+  const name = formatTrailerName(trailer);
 
   return (
     <div className="trailer-card bg-card border border-border rounded-xl overflow-hidden flex flex-col">
@@ -72,7 +76,7 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
         {primaryPhoto ? (
           <img
             src={primaryPhoto.url}
-            alt={`${trailer.type} trailer`}
+            alt={name}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -96,26 +100,20 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
       {/* Content */}
       <div className="p-5 flex flex-col flex-1 gap-4">
         <div>
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-bold text-foreground text-base leading-tight">
-                {formatTrailerName(trailer)}
-              </h3>
-              {trailer.vin && (
-                <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                  VIN: {trailer.vin}
-                </p>
-              )}
-            </div>
-          </div>
+          <h3 className="font-bold text-foreground text-base leading-tight">{name}</h3>
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+            {trailer.unitNumber ? `Unit ${trailer.unitNumber}` : null}
+            {trailer.unitNumber && trailer.vinLast6 ? " · " : null}
+            {trailer.vinLast6 ? `VIN ending ${trailer.vinLast6}` : null}
+          </p>
 
           {trailer.description && (
             <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{trailer.description}</p>
           )}
-          {(trailer as TrailerWithPhotos & { location?: string | null }).location && (
+          {trailer.location && (
             <div className="flex items-center gap-1 mt-1.5 text-xs text-muted-foreground">
               <MapPin className="w-3 h-3" />
-              {(trailer as TrailerWithPhotos & { location?: string | null }).location}
+              {trailer.location}
             </div>
           )}
         </div>
@@ -128,13 +126,17 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
             </span>
             <span className="text-muted-foreground text-sm">/month</span>
           </div>
-          {trailer.type === "reefer" && trailer.engineHourRate && (
+          {trailer.type === "reefer" && trailer.engineHourRate ? (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock className="w-3 h-3" />
               + {formatPrice(trailer.engineHourRate)}/engine hour
             </div>
-          )}
-          <p className="text-[11px] text-muted-foreground font-medium">No mileage fees. No hidden costs.</p>
+          ) : null}
+          <p className="text-[11px] text-muted-foreground font-medium">
+            {trailer.type === "reefer"
+              ? "No mileage fees. Reefer engine hours billed separately."
+              : "No mileage fees. No hidden costs."}
+          </p>
         </div>
 
         {/* CTA */}
@@ -147,12 +149,7 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
               </Button>
             </Link>
           ) : (
-            <Button
-              className="w-full"
-              variant="outline"
-              size="sm"
-              disabled
-            >
+            <Button className="w-full" variant="outline" size="sm" disabled>
               Currently Unavailable
             </Button>
           )}

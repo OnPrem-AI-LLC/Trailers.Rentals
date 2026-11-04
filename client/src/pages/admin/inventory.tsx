@@ -82,10 +82,14 @@ export default function AdminInventory() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       apiRequest("PATCH", `/api/admin/trailers/${id}`, { status }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/trailers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trailers"] });
-      toast({ title: "Status updated" });
+      toast(
+        vars.status === "available"
+          ? { title: "Published to site", description: "The unit is listed as available to rent." }
+          : { title: "Hidden from site", description: "The unit is in service and no longer listed." },
+      );
     },
     onError: () => toast({ title: "Error", description: "Could not update status.", variant: "destructive" }),
   });
@@ -150,6 +154,10 @@ export default function AdminInventory() {
             <h1 className="text-3xl font-black tracking-tight">Trailer Inventory</h1>
             <p className="text-muted-foreground text-sm mt-1">
               {counts.total} active units · {counts.available} available · {counts.rented} rented
+            </p>
+            <p className="text-muted-foreground text-xs mt-1">
+              Only units marked <span className="text-green-400 font-semibold">available</span> appear on the public site.
+              Rented and in-service units are hidden automatically; use Hide / Publish to switch a unit.
             </p>
           </div>
           <Link href="/admin/inventory/new">
@@ -251,6 +259,17 @@ export default function AdminInventory() {
                       <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-secondary text-secondary-foreground">
                         {formatTypeLabel(trailer.type)}
                       </span>
+                      {trailer.status !== "inactive" && (
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            trailer.status === "available"
+                              ? "bg-green-950/60 text-green-400"
+                              : "bg-zinc-800 text-zinc-400"
+                          }`}
+                        >
+                          {trailer.status === "available" ? "Listed on site" : "Hidden from site"}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
                       VIN: {trailer.vin}
@@ -289,7 +308,7 @@ export default function AdminInventory() {
                         disabled={statusMutation.isPending}
                         onClick={() => statusMutation.mutate({ id: trailer.id, status: "maintenance" })}
                       >
-                        Set Maintenance
+                        Hide from site
                       </Button>
                     )}
                     {trailer.status === "maintenance" && (
@@ -300,7 +319,7 @@ export default function AdminInventory() {
                         disabled={statusMutation.isPending}
                         onClick={() => statusMutation.mutate({ id: trailer.id, status: "available" })}
                       >
-                        Mark Available
+                        Publish to site
                       </Button>
                     )}
 

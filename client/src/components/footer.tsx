@@ -62,8 +62,7 @@ export default function Footer() {
             © {new Date().getFullYear()} Deluxe Logistics Inc. All rights reserved.
           </p>
           <div className="flex gap-4 text-xs text-muted-foreground">
-            <Link href="/privacy" className="hover:text-foreground">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-foreground">Terms of Service</Link>
+            {/* Privacy policy and terms pages don't exist yet; link them here once they do. */}
             <Link href="/legal" className="hover:text-foreground">Legal</Link>
           </div>
         </div>

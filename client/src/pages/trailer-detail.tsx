@@ -16,12 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import type { TrailerWithPhotos } from "@shared/schema";
-import { formatTypeLabel, formatTrailerName } from "@/lib/trailer-utils";
-
-function formatPrice(cents: number): string {
-  return `$${(cents / 100).toLocaleString()}`;
-}
+import type { PublicTrailer } from "@shared/schema";
+import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
 
 export default function TrailerDetail() {
   const { id } = useParams();
@@ -29,7 +25,7 @@ export default function TrailerDetail() {
   const { user, isLoading: authLoading } = useAuth();
   const [activeIdx, setActiveIdx] = useState(0);
 
-  const { data: trailer, isLoading, isError } = useQuery<TrailerWithPhotos>({
+  const { data: trailer, isLoading, isError } = useQuery<PublicTrailer>({
     queryKey: ["/api/trailers", id],
     queryFn: async () => {
       const res = await fetch(`/api/trailers/${id}`);
@@ -60,9 +56,10 @@ export default function TrailerDetail() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-4">
             <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
-            <h2 className="text-xl font-bold">Trailer not found</h2>
-            <Link href="/">
-              <Button variant="outline">Back to inventory</Button>
+            <h2 className="text-xl font-bold">This unit isn't listed right now</h2>
+            <p className="text-muted-foreground text-sm">It may have been rented or taken in for service.</p>
+            <Link href="/#trailers">
+              <Button variant="outline">See available trailers</Button>
             </Link>
           </div>
         </div>
@@ -79,11 +76,8 @@ export default function TrailerDetail() {
 
   const activePhoto = sortedPhotos[activeIdx] ?? null;
   const isAvailable = trailer.status === "available";
-  let features: string[] = [];
-  try {
-    const parsed = trailer.features ? JSON.parse(trailer.features) : [];
-    features = Array.isArray(parsed) ? parsed.filter((f): f is string => typeof f === "string") : [];
-  } catch { /* malformed JSON — ignore */ }
+  const features = trailer.features;
+  const name = formatTrailerName(trailer);
 
   const prev = () => setActiveIdx((i) => (i - 1 + sortedPhotos.length) % sortedPhotos.length);
   const next = () => setActiveIdx((i) => (i + 1) % sortedPhotos.length);
@@ -109,7 +103,7 @@ export default function TrailerDetail() {
               {activePhoto ? (
                 <img
                   src={activePhoto.url}
-                  alt="Trailer"
+                  alt={name}
                   className="w-full h-full object-cover transition-all duration-300"
                 />
               ) : (
@@ -189,12 +183,18 @@ export default function TrailerDetail() {
                 </span>
               </div>
 
-              <h1 className="text-3xl font-black tracking-tight">
-                {formatTrailerName(trailer)}
-              </h1>
+              <h1 className="text-3xl font-black tracking-tight">{name}</h1>
 
-              {trailer.vin && (
-                <p className="text-sm text-muted-foreground font-mono mt-1">VIN: {trailer.vin}</p>
+              {(trailer.unitNumber || trailer.vinLast6 || trailer.location) && (
+                <p className="text-sm text-muted-foreground font-mono mt-1">
+                  {[
+                    trailer.unitNumber ? `Unit ${trailer.unitNumber}` : null,
+                    trailer.vinLast6 ? `VIN ending ${trailer.vinLast6}` : null,
+                    trailer.location,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               )}
             </div>
 
@@ -204,14 +204,16 @@ export default function TrailerDetail() {
                 <span className="text-4xl font-black">{formatPrice(trailer.priceMonthly)}</span>
                 <span className="text-muted-foreground text-base">/month</span>
               </div>
-              {trailer.type === "reefer" && trailer.engineHourRate && (
+              {trailer.type === "reefer" && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Clock className="w-4 h-4" />
-                  + {formatPrice(trailer.engineHourRate)} per engine hour (billed separately)
+                  {trailer.engineHourRate
+                    ? `+ ${formatPrice(trailer.engineHourRate)} per reefer engine hour (billed separately)`
+                    : "Reefer engine hours billed separately"}
                 </div>
               )}
               <p className="text-xs text-muted-foreground border-t border-border pt-2 mt-2">
-                No mileage fees · No hidden costs · Security deposit = 2 months rent
+                No mileage fees · {trailer.type === "reefer" ? "Engine hours billed separately" : "No hidden costs"} · Security deposit = 2 months rent
               </p>
             </div>
 

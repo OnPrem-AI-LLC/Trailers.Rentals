@@ -15,6 +15,10 @@ export const COMPANY = {
   dmcaEmail: "info@trailers.rentals",
   fullAddress: "818 Corning Way, Martinsburg, WV 25401",
   hours: "Mon–Fri 8am–5pm",
+  // schema.org openingHours form of `hours`, for JSON-LD.
+  hoursSchema: "Mo-Fr 08:00-17:00",
+  // Canonical public origin, used for absolute URLs in sitemap, llms.txt and JSON-LD.
+  siteUrl: "https://trailers.rentals",
   // Every customer-facing date (billing end dates in emails, the dashboard,
   // invoice periods) is rendered in this zone so a renter never sees two
   // different days for the same instant.

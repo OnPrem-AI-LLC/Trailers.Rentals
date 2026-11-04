@@ -477,3 +477,11 @@ export type CheckinPhoto = typeof checkinPhotos.$inferSelect;
 
 // Trailer with photos joined
 export type TrailerWithPhotos = Trailer & { photos: TrailerPhoto[] };
+
+// What the public (unauthenticated) trailer endpoints serve: no full VIN, no
+// registration document, features already parsed. Only available units are
+// ever served in this shape. Built by server/public-trailers.ts.
+export type PublicTrailer = Omit<TrailerWithPhotos, "vin" | "registrationUrl" | "features"> & {
+  vinLast6: string | null;
+  features: string[];
+};

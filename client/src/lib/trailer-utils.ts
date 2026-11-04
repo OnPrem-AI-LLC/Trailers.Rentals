@@ -1,21 +1,3 @@
-const TYPE_LABELS: Record<string, string> = {
-  dry_van: "Dry Van",
-  reefer: "Refrigerated",
-  flatbed: "Flatbed",
-  chassis: "Chassis",
-  specialized: "Specialized",
-  tractor: "Tractor",
-  box_truck: "Box Truck",
-  trailer_jockey: "Trailer Jockey",
-};
-
-export function formatTypeLabel(type: string): string {
-  return TYPE_LABELS[type] || type.replace("_", " ");
-}
-
-export function formatTrailerName(trailer: { type: string; make?: string | null; model?: string | null; year?: string | number | null }): string {
-  if (trailer.make && trailer.model) {
-    return `${trailer.year || ""} ${trailer.make} ${trailer.model}`.trim();
-  }
-  return `${formatTypeLabel(trailer.type)} Trailer`;
-}
+// Display helpers live in shared/ so the server can name units the same way
+// when it pre-renders listing pages for crawlers and agents.
+export { TYPE_LABELS, formatTypeLabel, formatTrailerName, formatPrice } from "@shared/trailer-format";
