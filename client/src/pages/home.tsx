@@ -12,6 +12,7 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import TrailerCard from "@/components/trailer-card";
+import TrailerQuickView from "@/components/trailer-quick-view";
 import { ArrowDown, Zap, DollarSign, BadgeCheck, Truck, Star, Send, CheckCircle2, Clock, Mail, MapPin, Filter } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
@@ -66,6 +67,7 @@ export default function Home() {
   const [contactSent, setContactSent] = useState(false);
   const [filterType, setFilterType] = useState("all");
   const [filterLocation, setFilterLocation] = useState("all");
+  const [quickView, setQuickView] = useState<PublicTrailer | null>(null);
 
   const { data: trailers = [], isLoading } = useQuery<PublicTrailer[]>({
     queryKey: ["/api/trailers"],
@@ -278,7 +280,7 @@ export default function Home() {
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {available.map((trailer) => (
-                <TrailerCard key={trailer.id} trailer={trailer} />
+                <TrailerCard key={trailer.id} trailer={trailer} onQuickView={setQuickView} />
               ))}
             </div>
           )}
@@ -511,6 +513,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <TrailerQuickView trailer={quickView} onClose={() => setQuickView(null)} />
 
       <Footer />
     </div>

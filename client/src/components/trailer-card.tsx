@@ -1,6 +1,6 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Thermometer, Package, ArrowRight, Clock, MapPin } from "lucide-react";
+import { Thermometer, Package, ArrowRight, Clock, MapPin, Info } from "lucide-react";
 import type { PublicTrailer } from "@shared/schema";
 import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
 
@@ -62,51 +62,62 @@ function StatusBadge({ status }: { status: string }) {
 
 interface TrailerCardProps {
   trailer: PublicTrailer;
+  // Opens the expanded details dialog. Without it, the card opens the unit page.
+  onQuickView?: (trailer: PublicTrailer) => void;
 }
 
-export default function TrailerCard({ trailer }: TrailerCardProps) {
+export default function TrailerCard({ trailer, onQuickView }: TrailerCardProps) {
+  const [, navigate] = useLocation();
   const primaryPhoto = trailer.photos.find((p) => p.isPrimary) || trailer.photos[0];
   const isAvailable = trailer.status === "available";
   const name = formatTrailerName(trailer);
+  const openDetails = () => (onQuickView ? onQuickView(trailer) : navigate(`/trailers/${trailer.id}`));
 
   return (
     <div className="trailer-card bg-card border border-border rounded-xl overflow-hidden flex flex-col">
-      {/* Photo */}
-      <div className="relative h-48 bg-muted flex items-center justify-center overflow-hidden">
-        {primaryPhoto ? (
-          <img
-            src={primaryPhoto.url}
-            alt={name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center gap-2 text-muted-foreground">
-            {trailer.type === "reefer" ? (
-              <Thermometer className="w-10 h-10 opacity-30" />
-            ) : (
-              <Package className="w-10 h-10 opacity-30" />
-            )}
-            <span className="text-xs">No photo yet</span>
+      {/* Photo + headline open the expanded details */}
+      <button
+        type="button"
+        onClick={openDetails}
+        aria-label={`View details for ${name}`}
+        className="text-left w-full group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <div className="relative h-48 bg-muted flex items-center justify-center overflow-hidden">
+          {primaryPhoto ? (
+            <img
+              src={primaryPhoto.url}
+              alt={name}
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 text-muted-foreground">
+              {trailer.type === "reefer" ? (
+                <Thermometer className="w-10 h-10 opacity-30" />
+              ) : (
+                <Package className="w-10 h-10 opacity-30" />
+              )}
+              <span className="text-xs">Photos coming soon</span>
+            </div>
+          )}
+          <div className="absolute top-3 left-3">
+            <StatusBadge status={trailer.status} />
           </div>
-        )}
-        <div className="absolute top-3 left-3">
-          <StatusBadge status={trailer.status} />
+          <div className="absolute top-3 right-3">
+            <TrailerTypeBadge type={trailer.type} />
+          </div>
         </div>
-        <div className="absolute top-3 right-3">
-          <TrailerTypeBadge type={trailer.type} />
-        </div>
-      </div>
 
-      {/* Content */}
-      <div className="p-5 flex flex-col flex-1 gap-4">
-        <div>
-          <h3 className="font-bold text-foreground text-base leading-tight">{name}</h3>
-          <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-            {trailer.unitNumber ? `Unit ${trailer.unitNumber}` : null}
-            {trailer.unitNumber && trailer.vinLast6 ? " · " : null}
-            {trailer.vinLast6 ? `VIN ending ${trailer.vinLast6}` : null}
-          </p>
-
+        <div className="p-5 pb-0">
+          <h3 className="font-bold text-foreground text-base leading-tight group-hover:text-primary transition-colors">
+            {name}
+          </h3>
+          {(trailer.unitNumber || trailer.vinLast6) && (
+            <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+              {[trailer.unitNumber ? `Unit ${trailer.unitNumber}` : null, trailer.vinLast6 ? `VIN ending ${trailer.vinLast6}` : null]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
           {trailer.description && (
             <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{trailer.description}</p>
           )}
@@ -117,13 +128,13 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
             </div>
           )}
         </div>
+      </button>
 
+      <div className="p-5 pt-4 flex flex-col flex-1 gap-4">
         {/* Pricing */}
         <div className="space-y-1">
           <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-black text-foreground">
-              {formatPrice(trailer.priceMonthly)}
-            </span>
+            <span className="text-2xl font-black text-foreground">{formatPrice(trailer.priceMonthly)}</span>
             <span className="text-muted-foreground text-sm">/month</span>
           </div>
           {trailer.type === "reefer" && trailer.engineHourRate ? (
@@ -139,17 +150,21 @@ export default function TrailerCard({ trailer }: TrailerCardProps) {
           </p>
         </div>
 
-        {/* CTA */}
-        <div className="mt-auto">
+        {/* CTAs */}
+        <div className="mt-auto flex gap-2">
+          <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={openDetails}>
+            <Info className="w-3.5 h-3.5" />
+            Details
+          </Button>
           {isAvailable ? (
-            <Link href={`/trailers/${trailer.id}`}>
+            <Link href={`/apply/${trailer.id}`} className="flex-1">
               <Button className="w-full bg-primary hover:bg-primary/90 text-white font-semibold gap-2" size="sm">
                 Apply to Rent
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </Link>
           ) : (
-            <Button className="w-full" variant="outline" size="sm" disabled>
+            <Button className="flex-1" variant="outline" size="sm" disabled>
               Currently Unavailable
             </Button>
           )}

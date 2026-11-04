@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
@@ -6,16 +5,8 @@ import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  ArrowLeft,
-  Thermometer,
-  Package,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { ArrowLeft, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import TrailerGallery from "@/components/trailer-gallery";
 import type { PublicTrailer } from "@shared/schema";
 import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
 
@@ -23,7 +14,6 @@ export default function TrailerDetail() {
   const { id } = useParams();
   const [, navigate] = useLocation();
   const { user, isLoading: authLoading } = useAuth();
-  const [activeIdx, setActiveIdx] = useState(0);
 
   const { data: trailer, isLoading, isError } = useQuery<PublicTrailer>({
     queryKey: ["/api/trailers", id],
@@ -68,19 +58,10 @@ export default function TrailerDetail() {
     );
   }
 
-  const sortedPhotos = [...trailer.photos].sort((a, b) => {
-    if (a.isPrimary) return -1;
-    if (b.isPrimary) return 1;
-    return a.displayOrder - b.displayOrder;
-  });
-
-  const activePhoto = sortedPhotos[activeIdx] ?? null;
   const isAvailable = trailer.status === "available";
   const features = trailer.features;
   const name = formatTrailerName(trailer);
 
-  const prev = () => setActiveIdx((i) => (i - 1 + sortedPhotos.length) % sortedPhotos.length);
-  const next = () => setActiveIdx((i) => (i + 1) % sortedPhotos.length);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -97,75 +78,7 @@ export default function TrailerDetail() {
 
         <div className="grid lg:grid-cols-2 gap-10">
           {/* Photos */}
-          <div className="space-y-3">
-            {/* Main image */}
-            <div className="relative aspect-[4/3] bg-card border border-border rounded-xl overflow-hidden group">
-              {activePhoto ? (
-                <img
-                  src={activePhoto.url}
-                  alt={name}
-                  className="w-full h-full object-cover transition-all duration-300"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                  {trailer.type === "reefer" ? (
-                    <Thermometer className="w-16 h-16 opacity-20" />
-                  ) : (
-                    <Package className="w-16 h-16 opacity-20" />
-                  )}
-                </div>
-              )}
-              {/* Nav arrows (only if multiple photos) */}
-              {sortedPhotos.length > 1 && (
-                <>
-                  <button
-                    onClick={prev}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                    aria-label="Previous photo"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={next}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                    aria-label="Next photo"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                  {/* Dot indicators */}
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                    {sortedPhotos.map((_, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setActiveIdx(i)}
-                        className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                          i === activeIdx ? "bg-white" : "bg-white/40"
-                        }`}
-                        aria-label={`Photo ${i + 1}`}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Thumbnails */}
-            {sortedPhotos.length > 1 && (
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                {sortedPhotos.map((photo, i) => (
-                  <button
-                    key={photo.id}
-                    onClick={() => setActiveIdx(i)}
-                    className={`aspect-square rounded-lg overflow-hidden border-2 transition-colors ${
-                      i === activeIdx ? "border-primary" : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <img src={photo.url} alt={`View ${i + 1}`} className="w-full h-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <TrailerGallery photos={trailer.photos} name={name} type={trailer.type} />
 
           {/* Details */}
           <div className="space-y-6">

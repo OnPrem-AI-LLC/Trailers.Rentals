@@ -491,13 +491,21 @@ export default function TrailerForm() {
                 id="description"
                 value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Describe the trailer's condition, size, use case…"
+                placeholder="One or two factual lines: length, reefer unit, floor, doors, build date…"
                 rows={4}
               />
+              <p className="text-xs text-muted-foreground">
+                Shown under the headline on the public card. Keep it to specs a renter can verify; skip condition
+                adjectives ("clean", "good condition"), branding notes, plate numbers and anything the headline or
+                status already says.
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label>Features</Label>
+              <p className="text-xs text-muted-foreground">
+                One spec per entry, e.g. "53 ft", "Thermo King reefer unit", "Aluminum T-floor", "Roll-up rear door".
+              </p>
               <div className="flex gap-2">
                 <Input
                   value={newFeature}
