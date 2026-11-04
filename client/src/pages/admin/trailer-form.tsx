@@ -480,7 +480,7 @@ export default function TrailerForm() {
                 id="location"
                 value={form.location}
                 onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                placeholder="e.g. Martinsburg, WV"
+                placeholder="e.g. Inwood, WV"
               />
               <p className="text-xs text-muted-foreground">The yard or city where this trailer is based.</p>
             </div>

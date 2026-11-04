@@ -1,6 +1,6 @@
 # trailers.rentals
 
-Trailer rental platform for [Deluxe Logistics Inc.](https://trailers.rentals), Martinsburg, WV.
+Trailer rental platform for [Deluxe Logistics Inc.](https://trailers.rentals). Pickup yard in Inwood, WV, just off I-81 at exit 5 south of Martinsburg.
 Carriers and owner-operators browse available reefers and dry vans, apply online, get checked
 against FMCSA SAFER, e-sign the agreement, pay the deposit, and pick up with a QR code.
 

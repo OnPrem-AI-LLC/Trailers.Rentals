@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import logoPath from "@assets/Deluxe Logo_1758417985453.jpg";
-import { COMPANY } from "@shared/constants";
+import { COMPANY, YARD } from "@shared/constants";
 
 export default function Footer() {
   return (
@@ -47,8 +47,8 @@ export default function Footer() {
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact</div>
               <div className="space-y-1.5 text-sm text-muted-foreground">
-                <div>{COMPANY.address}</div>
-                <div>{COMPANY.city}, {COMPANY.state}</div>
+                <div>Yard: {YARD.fullAddress}</div>
+                <div>{YARD.landmark.charAt(0).toUpperCase() + YARD.landmark.slice(1)}</div>
                 <a href={`mailto:${COMPANY.email}`} className="block hover:text-foreground">
                   {COMPANY.email}
                 </a>

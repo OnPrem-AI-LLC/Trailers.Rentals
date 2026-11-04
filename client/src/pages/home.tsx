@@ -19,7 +19,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatTypeLabel } from "@/lib/trailer-utils";
 import type { PublicTrailer, Testimonial } from "@shared/schema";
-import { COMPANY } from "@shared/constants";
+import { COMPANY, YARD } from "@shared/constants";
 import { FAQ } from "@shared/faq";
 
 const VALUE_PROPS = [
@@ -404,7 +404,7 @@ export default function Home() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <MapPin className="w-4 h-4 text-primary" />
                   </div>
-                  <span className="text-muted-foreground">{COMPANY.fullAddress}</span>
+                  <span className="text-muted-foreground">{YARD.fullAddress}, {YARD.landmark}</span>
                 </div>
               </div>
             </div>

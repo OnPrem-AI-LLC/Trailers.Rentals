@@ -52,7 +52,7 @@ export const trailers = pgTable("trailers", {
   status: text("status").notNull().default("available"), // "available" | "rented" | "maintenance" | "inactive"
   description: text("description"),
   features: text("features"), // JSON array of feature strings
-  location: text("location"), // yard/city location e.g. "Martinsburg, WV"
+  location: text("location"), // yard/city location, e.g. "Inwood, WV" (YARD.listingLocation)
   registrationUrl: text("registration_url"), // admin-only document
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [

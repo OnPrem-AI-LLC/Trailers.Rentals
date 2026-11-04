@@ -61,7 +61,7 @@ function JobForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: "",
-      location: "Martinsburg, WV",
+      location: "Inwood, WV",
       description: "",
       type: "full-time",
       status: "active",
@@ -84,7 +84,7 @@ function JobForm({
           <FormField control={form.control} name="location" render={({ field }) => (
             <FormItem>
               <FormLabel>Location *</FormLabel>
-              <FormControl><Input placeholder="e.g. Martinsburg, WV" {...field} /></FormControl>
+              <FormControl><Input placeholder="e.g. Inwood, WV" {...field} /></FormControl>
               <FormMessage />
             </FormItem>
           )} />

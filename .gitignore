@@ -6,3 +6,5 @@ vite.config.ts.*
 *.tar.gz
 .env
 .env.local
+# Local marketing/outreach tooling and lead data (contains contact details; never publish)
+marketing/

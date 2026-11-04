@@ -4,11 +4,12 @@
 // and every change is logged with the unit numbers it touched so it can be
 // reversed by hand from the admin inventory page if needed.
 
-import { and, eq, inArray, isNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
 import { db } from "./db";
 import { trailers, trailerPhotos } from "@shared/schema";
 import { storage } from "./storage";
 import { REPRESENTATIVE_PHOTO_PATH } from "@shared/trailer-format";
+import { YARD } from "@shared/constants";
 
 interface DataFix {
   key: string;
@@ -140,10 +141,25 @@ async function representativePhotos() {
   return { updated };
 }
 
+// ── 2026-11-04: the yard is in Inwood, WV (I-81 exit 5) ────────────────────
+//
+// Every unit carried the Martinsburg default. The listing location follows
+// YARD.listingLocation so cards, filters and structured data all say Inwood.
+
+async function yardInwood() {
+  const moved = await db
+    .update(trailers)
+    .set({ location: YARD.listingLocation })
+    .where(or(isNull(trailers.location), eq(trailers.location, DEFAULT_LOCATION)))
+    .returning({ unitNumber: trailers.unitNumber });
+  return { location: YARD.listingLocation, moved: moved.map((r) => r.unitNumber) };
+}
+
 const FIXES: DataFix[] = [
   { key: "datafix:2026-11-04-reprice-and-unlist", run: repriceAndUnlist },
   { key: "datafix:2026-11-04-listing-copy", run: listingCopy },
   { key: "datafix:2026-11-04-representative-photos", run: representativePhotos },
+  { key: "datafix:2026-11-04-yard-inwood", run: yardInwood },
 ];
 
 export async function runDataFixes(): Promise<void> {

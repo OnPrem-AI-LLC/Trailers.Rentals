@@ -1,10 +1,20 @@
-// Company contact info — single source of truth
+// Company contact info — single source of truth.
+//
+// Two addresses, on purpose:
+//   COMPANY  the registered/mailing address (what FMCSA, the rental agreement,
+//            the DMCA block and email footers must carry).
+//   YARD     where renters actually pick up. The yard is in Inwood, WV, just off
+//            I-81 at exit 5. The street is still to be confirmed; until it is,
+//            public copy names the town and the exit, and YARD.address stays "".
+
+const YARD_STREET = "" as string;
+
 export const COMPANY = {
   name: "Deluxe Logistics Inc.",
   address: "818 Corning Way",
   city: "Martinsburg",
   state: "WV",
-  zip: "25401",
+  zip: "25405", // per the company's FMCSA registration (MCS-150 updated 2026-04)
   email: "info@trailers.rentals",
   // Telephone number for the DMCA designated-agent block on /legal.
   // 17 U.S.C. 512(c)(2) requires it; the page hides the line while this is
@@ -13,7 +23,7 @@ export const COMPANY = {
   // Mailbox for notices of claimed infringement. Must be one the business
   // controls: deluxelogistics.com is NOT the owner's domain.
   dmcaEmail: "info@trailers.rentals",
-  fullAddress: "818 Corning Way, Martinsburg, WV 25401",
+  fullAddress: "818 Corning Way, Martinsburg, WV 25405",
   hours: "Mon–Fri 8am–5pm",
   // schema.org openingHours form of `hours`, for JSON-LD.
   hoursSchema: "Mo-Fr 08:00-17:00",
@@ -23,4 +33,17 @@ export const COMPANY = {
   // invoice periods) is rendered in this zone so a renter never sees two
   // different days for the same instant.
   timeZone: "America/New_York",
+} as const;
+
+export const YARD = {
+  address: YARD_STREET,
+  city: "Inwood",
+  state: "WV",
+  zip: "25428",
+  cityState: "Inwood, WV",
+  landmark: "just off I-81 at exit 5",
+  // "Inwood, WV 25428" until the street is known.
+  fullAddress: YARD_STREET ? `${YARD_STREET}, Inwood, WV 25428` : "Inwood, WV 25428",
+  // The value stored on each trailer's `location` column and shown on listings.
+  listingLocation: "Inwood, WV",
 } as const;

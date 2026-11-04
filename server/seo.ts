@@ -8,7 +8,7 @@
 // PublicTrailer shape the JSON API serves, so the three never disagree.
 
 import type { PublicTrailer } from "@shared/schema";
-import { COMPANY } from "@shared/constants";
+import { COMPANY, YARD } from "@shared/constants";
 import { FAQ } from "@shared/faq";
 import {
   formatTrailerName,
@@ -23,7 +23,8 @@ const SITE = COMPANY.siteUrl;
 const BRAND = COMPANY.name;
 const DEPOSIT = "Security deposit equals two months' rent, billed with the first month.";
 const REVIEW = "Applications are typically reviewed within 24 hours.";
-const HOME_TITLE = "Deluxe Logistics | Trailer Rentals — Reefers, Dry Vans, No BS Fees | Martinsburg WV";
+const HOME_TITLE = "Deluxe Logistics | Trailer Rentals — Reefers, Dry Vans, No BS Fees | Inwood WV, off I-81";
+const WHERE = `${YARD.cityState}, ${YARD.landmark} south of Martinsburg`;
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -114,14 +115,13 @@ function businessLd(trailers: PublicTrailer[]) {
     name: BRAND,
     url: SITE,
     email: COMPANY.email,
-    description:
-      "Deluxe Logistics rents reefer trailers and dry vans to carriers and owner-operators at flat monthly rates with no mileage fees. Based in Martinsburg, WV.",
+    description: `Deluxe Logistics rents reefer trailers and dry vans to carriers and owner-operators at flat monthly rates with no mileage fees. Pickup in ${WHERE}.`,
     address: {
       "@type": "PostalAddress",
-      streetAddress: COMPANY.address,
-      addressLocality: COMPANY.city,
-      addressRegion: COMPANY.state,
-      postalCode: COMPANY.zip,
+      ...(YARD.address ? { streetAddress: YARD.address } : {}),
+      addressLocality: YARD.city,
+      addressRegion: YARD.state,
+      postalCode: YARD.zip,
       addressCountry: "US",
     },
     openingHours: COMPANY.hoursSchema,
@@ -216,8 +216,8 @@ export function homeHead(trailers: PublicTrailer[]): string {
   const n = trailers.length;
   const low = n ? formatPrice(Math.min(...trailers.map((t) => t.priceMonthly))) : null;
   const description = n
-    ? `Rent a reefer or dry van in Martinsburg, WV from ${low}/month. Flat monthly rate, no mileage fees. ${n} unit${n === 1 ? "" : "s"} available now. Apply online in minutes.`
-    : "Reefer and dry van rentals in Martinsburg, WV at flat monthly rates with no mileage fees. Apply online in minutes.";
+    ? `Rent a reefer or dry van in ${WHERE}, from ${low}/month. Flat monthly rate, no mileage fees. ${n} unit${n === 1 ? "" : "s"} available now. Apply online in minutes.`
+    : `Reefer and dry van rentals in ${WHERE}, at flat monthly rates with no mileage fees. Apply online in minutes.`;
   const image = trailers.map((t) => photoUrls(t)[0]).find(Boolean) ?? null;
   return [
     metaTags({ title: HOME_TITLE, description, canonical: `${SITE}/`, image }),
@@ -229,9 +229,9 @@ export function homeHead(trailers: PublicTrailer[]): string {
 
 export function trailerHead(t: PublicTrailer): string {
   const name = formatTrailerName(t);
-  const title = `${name} for Rent | ${formatPrice(t.priceMonthly)}/mo | Deluxe Logistics, Martinsburg WV`;
+  const title = `${name} for Rent | ${formatPrice(t.priceMonthly)}/mo | Deluxe Logistics, Inwood WV`;
   const description = truncate(
-    `${name} available now from ${BRAND} in ${COMPANY.city}, ${COMPANY.state}. ${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}`,
+    `${name} available now from ${BRAND} in ${WHERE}. ${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}`,
     300,
   );
   return [
@@ -256,7 +256,7 @@ function unitLine(t: PublicTrailer): string {
 }
 
 function contactLines(): string {
-  return `<p class="muted">${escapeHtml(BRAND)} · ${escapeHtml(COMPANY.fullAddress)} · ${escapeHtml(COMPANY.hours)} · <a href="mailto:${COMPANY.email}">${COMPANY.email}</a></p>
+  return `<p class="muted">${escapeHtml(BRAND)} · Yard: ${escapeHtml(YARD.fullAddress)}, ${escapeHtml(YARD.landmark)} · ${escapeHtml(COMPANY.hours)} · <a href="mailto:${COMPANY.email}">${COMPANY.email}</a> · Mail: ${escapeHtml(COMPANY.fullAddress)}</p>
 <p class="muted">For agents and developers: JSON inventory at <a href="/api/trailers">/api/trailers</a>, <a href="/sitemap.xml">sitemap.xml</a>, <a href="/llms.txt">llms.txt</a>.</p>`;
 }
 
@@ -267,7 +267,7 @@ export function homeBody(trailers: PublicTrailer[]): string {
     : `<p>No units are listed right now. Email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a> to ask about upcoming availability.</p>`;
   return `<div id="ssr">
 ${PRERENDER_CSS}
-<h1>Trailer rentals in Martinsburg, WV. No mileage fees.</h1>
+<h1>Trailer rentals in Inwood, WV, off I-81. No mileage fees.</h1>
 <p>${escapeHtml(BRAND)} rents reefers and dry vans to carriers and owner-operators at a flat monthly rate. No mileage fees. Reefer engine hours billed separately. ${escapeHtml(DEPOSIT)} ${escapeHtml(REVIEW)}</p>
 <h2>Available now: ${n} unit${n === 1 ? "" : "s"}</h2>
 ${units}
@@ -275,7 +275,7 @@ ${units}
 <ol>
 <li>Pick a unit above and open its page.</li>
 <li>Submit the online application: company and contact details, DOT number (MC if you have one), intended use. Applicants must be 18 or older.</li>
-<li>Sign the rental agreement online, pay the deposit and first month, and pick up at ${escapeHtml(COMPANY.fullAddress)}.</li>
+<li>Sign the rental agreement online, pay the deposit and first month, and pick up at our yard in ${escapeHtml(YARD.cityState)}, ${escapeHtml(YARD.landmark)}.</li>
 </ol>
 <h2>Frequently asked questions</h2>
 <dl>
@@ -357,7 +357,7 @@ export function buildLlmsTxt(trailers: PublicTrailer[]): string {
 
   return `# ${BRAND} — trailers.rentals
 
-> Reefer and dry van trailer rentals in ${COMPANY.city}, ${COMPANY.state} for freight carriers and owner-operators. Flat monthly rate, no mileage fees. Apply online; ${REVIEW.charAt(0).toLowerCase()}${REVIEW.slice(1)}
+> Reefer and dry van trailer rentals in ${WHERE}, for freight carriers and owner-operators. Flat monthly rate, no mileage fees. Apply online; ${REVIEW.charAt(0).toLowerCase()}${REVIEW.slice(1)}
 
 ## Pricing (as of ${fmtDate(null)})
 
@@ -379,7 +379,8 @@ ${unitBlock}
 
 ## Location and contact
 
-- ${BRAND}, ${COMPANY.fullAddress}
+- Pickup yard: ${YARD.fullAddress}, ${YARD.landmark}
+- Mailing address: ${BRAND}, ${COMPANY.fullAddress}
 - Hours: ${COMPANY.hours}
 - Email: ${COMPANY.email}
 - Web: ${SITE}

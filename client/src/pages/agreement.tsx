@@ -15,7 +15,7 @@ import {
   AlertCircle, Calendar
 } from "lucide-react";
 import type { Rental, Company } from "@shared/schema";
-import { COMPANY } from "@shared/constants";
+import { COMPANY, YARD } from "@shared/constants";
 
 interface TrailerInfo {
   id: string;
@@ -545,7 +545,7 @@ export default function AgreementPage() {
             <label className="text-sm font-bold mb-2 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-primary" /> Preferred Pickup Date &amp; Time
             </label>
-            <p className="text-xs text-muted-foreground mb-3">Pick up from: {COMPANY.fullAddress} · {COMPANY.hours}</p>
+            <p className="text-xs text-muted-foreground mb-3">Pick up from our yard: {YARD.fullAddress}, {YARD.landmark} · {COMPANY.hours}</p>
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1">
                 <label className="text-xs text-muted-foreground block mb-1.5">Date</label>

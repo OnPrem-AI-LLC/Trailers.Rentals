@@ -1,5 +1,7 @@
 // The FAQ shown on the home page. The server emits the same list as FAQPage
 // JSON-LD, so the structured data can never say something the page doesn't.
+import { YARD } from "./constants";
+
 export const FAQ: { q: string; a: string }[] = [
   {
     q: "Are there mileage fees?",
@@ -19,6 +21,6 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Where do I pick up the trailer?",
-    a: "At our yard at 818 Corning Way, Martinsburg, WV 25401, Monday through Friday, 8am to 5pm. Pickup is coordinated online once your rental agreement is signed.",
+    a: `At our yard in ${YARD.cityState}, ${YARD.landmark}, Monday through Friday, 8am to 5pm. Pickup is coordinated online once your rental agreement is signed.`,
   },
 ];

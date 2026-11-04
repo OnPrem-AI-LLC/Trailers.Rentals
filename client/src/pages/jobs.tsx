@@ -184,7 +184,7 @@ export default function Jobs() {
           <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-primary" />
-              Martinsburg, WV area
+              Inwood / Martinsburg, WV area
             </div>
             <div className="flex items-center gap-2">
               <Truck className="w-4 h-4 text-primary" />
