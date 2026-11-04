@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { formatTypeLabel } from "@/lib/trailer-utils";
+import { compareNewestFirst } from "@shared/trailer-format";
 import {
   Plus,
   Pencil,
@@ -122,7 +123,10 @@ export default function AdminInventory() {
     { label: "Inactive", value: "inactive" },
   ];
 
-  const filtered = filter === "all" ? trailers : trailers.filter((t) => t.status === filter);
+  // Same order as the public site: newest model year first, no-year units last.
+  const filtered = (filter === "all" ? trailers : trailers.filter((t) => t.status === filter))
+    .slice()
+    .sort(compareNewestFirst);
 
   const counts = {
     total: trailers.filter(t => t.status !== "inactive").length,

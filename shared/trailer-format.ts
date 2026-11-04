@@ -44,3 +44,16 @@ export function formatTrailerName(t: TrailerNameParts): string {
 export function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US")}`;
 }
+
+// Newest model year first; units with no year on file sort last; ties broken
+// by unit number so the order is stable. Used by the public listing, the
+// pre-rendered pages, llms.txt and the admin inventory.
+export function compareNewestFirst(
+  a: { year?: string | null; unitNumber?: string | null },
+  b: { year?: string | null; unitNumber?: string | null },
+): number {
+  const ya = parseInt(a.year ?? "", 10) || 0;
+  const yb = parseInt(b.year ?? "", 10) || 0;
+  if (yb !== ya) return yb - ya;
+  return (a.unitNumber ?? "").localeCompare(b.unitNumber ?? "", undefined, { numeric: true });
+}

@@ -235,13 +235,17 @@ export function trailerHead(t: PublicTrailer): string {
 
 // ── Pre-rendered body (visible until React mounts; the whole content for agents) ──
 
-const PRERENDER_CSS = `<style>#ssr{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0a0a0b;color:#e7e7ea;min-height:100vh;padding:32px 20px;line-height:1.55;max-width:960px;margin:0 auto}#ssr a{color:#ff7b7b}#ssr h1{font-size:30px;line-height:1.15;margin:0 0 10px}#ssr h2{font-size:19px;margin:28px 0 8px}#ssr ul,#ssr ol{padding-left:20px}#ssr li{margin:7px 0}#ssr dt{font-weight:700;margin-top:12px}#ssr dd{margin:2px 0 0}#ssr p{margin:6px 0}#ssr .muted{color:#a1a1aa;font-size:14px}</style>`;
+const PRERENDER_CSS = `<style>#ssr{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0a0a0b;color:#e7e7ea;min-height:100vh;padding:32px 20px;line-height:1.55;max-width:960px;margin:0 auto}#ssr a{color:#ff7b7b}#ssr h1{font-size:30px;line-height:1.15;margin:0 0 10px}#ssr h2{font-size:19px;margin:28px 0 8px}#ssr ul,#ssr ol{padding-left:20px}#ssr li{margin:7px 0}#ssr ul.units{list-style:none;padding:0}#ssr li.unit{display:flex;gap:14px;align-items:flex-start;margin:14px 0}#ssr li.unit img{width:150px;height:112px;object-fit:cover;border-radius:8px;flex:none;background:#18181b}#ssr img.hero{width:100%;max-width:640px;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:#18181b}#ssr dt{font-weight:700;margin-top:12px}#ssr dd{margin:2px 0 0}#ssr p{margin:6px 0}#ssr .muted{color:#a1a1aa;font-size:14px}</style>`;
 
 function unitLine(t: PublicTrailer): string {
   const name = escapeHtml(formatTrailerName(t));
   const unit = t.unitNumber ? ` (Unit ${escapeHtml(t.unitNumber)})` : "";
   const desc = t.description ? ` ${escapeHtml(t.description)}` : "";
-  return `<li><a href="${trailerPath(t)}">${name}</a>${unit} — ${escapeHtml(priceSentence(t))}.${desc} <a href="/apply/${t.id}">Apply</a></li>`;
+  const photo = photoUrls(t)[0];
+  const img = photo
+    ? `<a href="${trailerPath(t)}"><img src="${escapeHtml(photo)}" alt="${name}" width="150" height="112" loading="lazy" /></a>`
+    : "";
+  return `<li class="unit">${img}<div><a href="${trailerPath(t)}"><strong>${name}</strong></a>${unit} — ${escapeHtml(priceSentence(t))}.${desc} <a href="/apply/${t.id}">Apply</a></div></li>`;
 }
 
 function contactLines(): string {
@@ -252,7 +256,7 @@ function contactLines(): string {
 export function homeBody(trailers: PublicTrailer[]): string {
   const n = trailers.length;
   const units = n
-    ? `<ul>\n${trailers.map(unitLine).join("\n")}\n</ul>`
+    ? `<ul class="units">\n${trailers.map(unitLine).join("\n")}\n</ul>`
     : `<p>No units are listed right now. Email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a> to ask about upcoming availability.</p>`;
   return `<div id="ssr">
 ${PRERENDER_CSS}
@@ -279,11 +283,14 @@ export function trailerBody(t: PublicTrailer): string {
   const features = t.features.length
     ? `<h2>Features</h2><ul>${t.features.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
     : "";
-  const photos = t.photos.length ? `<p class="muted">${t.photos.length} photo${t.photos.length === 1 ? "" : "s"} on the listing.</p>` : "";
+  const urls = photoUrls(t);
+  const hero = urls[0] ? `<img class="hero" src="${escapeHtml(urls[0])}" alt="${name}" width="640" height="480" />` : "";
+  const photos = urls.length ? `<p class="muted">${urls.length} photo${urls.length === 1 ? "" : "s"} on the listing.</p>` : "";
   return `<div id="ssr">
 ${PRERENDER_CSS}
 <p class="muted"><a href="/">← All available trailers</a></p>
 <h1>${name}${t.unitNumber ? ` <span class="muted">(Unit ${escapeHtml(t.unitNumber)})</span>` : ""}</h1>
+${hero}
 <p><strong>${escapeHtml(formatPrice(t.priceMonthly))}/month</strong> — ${escapeHtml(priceSentence(t).replace(/^[^,]+,\s*/, ""))}. ${escapeHtml(DEPOSIT)}</p>
 ${t.location ? `<p class="muted">Location: ${escapeHtml(t.location)}</p>` : ""}
 ${t.vinLast6 ? `<p class="muted">VIN ending in ${escapeHtml(t.vinLast6)}</p>` : ""}

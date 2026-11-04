@@ -29,7 +29,22 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(helmet());
+// Helmet's default CSP only allows same-origin scripts, frames and images.
+// The deposit page mounts Stripe Elements, which needs Stripe.js and its
+// iframes, and photos uploaded through the admin form live on Cloudinary.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "script-src": ["'self'", "https://js.stripe.com"],
+        "frame-src": ["'self'", "https://js.stripe.com", "https://hooks.stripe.com"],
+        "connect-src": ["'self'", "https://api.stripe.com", "https://r.stripe.com"],
+        "img-src": ["'self'", "data:", "https://res.cloudinary.com", "https://*.stripe.com"],
+      },
+    },
+  }),
+);
 
 // ── Stripe webhook MUST be registered BEFORE express.json() ─────────────
 // Webhook needs raw Buffer, not parsed JSON

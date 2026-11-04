@@ -10,6 +10,7 @@
 
 import { storage } from "./storage";
 import type { TrailerWithPhotos, PublicTrailer } from "@shared/schema";
+import { compareNewestFirst } from "@shared/trailer-format";
 
 export function parseFeatures(raw: string | null | undefined): string[] {
   if (!raw) return [];
@@ -36,13 +37,8 @@ export function toPublicTrailer(t: TrailerWithPhotos): PublicTrailer {
   return { ...rest, vinLast6: vinLast6(vin), features: parseFeatures(features) };
 }
 
-// Newest units first; ties broken by unit number so the order is stable.
-export function sortForListing(a: PublicTrailer, b: PublicTrailer): number {
-  const ya = parseInt(a.year ?? "", 10) || 0;
-  const yb = parseInt(b.year ?? "", 10) || 0;
-  if (yb !== ya) return yb - ya;
-  return (a.unitNumber ?? "").localeCompare(b.unitNumber ?? "", undefined, { numeric: true });
-}
+// Newest model year first (see shared/trailer-format.ts).
+export const sortForListing = compareNewestFirst;
 
 const TTL_MS = 30_000;
 let cache: { at: number; list: PublicTrailer[] } | null = null;

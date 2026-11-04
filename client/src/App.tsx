@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -7,41 +8,50 @@ import { AuthProvider } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Login from "@/pages/login";
-import Dashboard from "@/pages/dashboard";
-import AdminPortal from "@/pages/admin/index";
-import AdminInventory from "@/pages/admin/inventory";
-import TrailerFormPage from "@/pages/admin/trailer-form";
-import AdminRequests from "@/pages/admin/requests";
-import AdminRequestDetail from "@/pages/admin/request-detail";
 import TrailerDetail from "@/pages/trailer-detail";
 import Jobs from "@/pages/jobs";
-import Signup from "@/pages/signup";
 import Apply from "@/pages/apply";
-import ApplicationRespond from "@/pages/application-respond";
-import Register from "@/pages/register";
-import AgreementPage from "@/pages/agreement";
-import AdminRentals from "@/pages/admin/rentals";
-import AdminRentalDetail from "@/pages/admin/rental-detail";
-import PaymentPage from "@/pages/payment";
-import EngineHoursPage from "@/pages/engine-hours";
-import PickupConfirmPage from "@/pages/pickup-confirm";
-import ReturnConfirmPage from "@/pages/return-confirm";
-import AdminFMCSAPage from "@/pages/admin/fmcsa";
-import AdminDriverApplications from "@/pages/admin/driver-applications";
-import AdminAuditPage from "@/pages/admin/audit";
-import AdminUsersPage from "@/pages/admin/users";
-import AdminContactsPage from "@/pages/admin/contacts";
-import AdminContentPage from "@/pages/admin/content";
 import ServicesPage from "@/pages/services";
-import RegisterAdmin from "@/pages/register-admin";
-import ForgotPasswordPage from "@/pages/forgot-password";
-import ResetPasswordPage from "@/pages/reset-password";
-import AdminEmailLogsPage from "@/pages/admin/email-logs";
-import AdminJobsPage from "@/pages/admin/jobs";
 import LegalPage from "@/pages/legal";
+
+// Loaded on demand: only renters, admins or people following a token link reach these,
+// so the public bundle stays small and nothing in them runs on public pages
+// (@stripe/stripe-js, for one, injects Stripe.js the moment it is imported).
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const AdminPortal = lazy(() => import("@/pages/admin/index"));
+const AdminInventory = lazy(() => import("@/pages/admin/inventory"));
+const TrailerFormPage = lazy(() => import("@/pages/admin/trailer-form"));
+const AdminRequests = lazy(() => import("@/pages/admin/requests"));
+const AdminRequestDetail = lazy(() => import("@/pages/admin/request-detail"));
+const Signup = lazy(() => import("@/pages/signup"));
+const ApplicationRespond = lazy(() => import("@/pages/application-respond"));
+const Register = lazy(() => import("@/pages/register"));
+const AgreementPage = lazy(() => import("@/pages/agreement"));
+const AdminRentals = lazy(() => import("@/pages/admin/rentals"));
+const AdminRentalDetail = lazy(() => import("@/pages/admin/rental-detail"));
+const PaymentPage = lazy(() => import("@/pages/payment"));
+const EngineHoursPage = lazy(() => import("@/pages/engine-hours"));
+const PickupConfirmPage = lazy(() => import("@/pages/pickup-confirm"));
+const ReturnConfirmPage = lazy(() => import("@/pages/return-confirm"));
+const AdminFMCSAPage = lazy(() => import("@/pages/admin/fmcsa"));
+const AdminDriverApplications = lazy(() => import("@/pages/admin/driver-applications"));
+const AdminAuditPage = lazy(() => import("@/pages/admin/audit"));
+const AdminUsersPage = lazy(() => import("@/pages/admin/users"));
+const AdminContactsPage = lazy(() => import("@/pages/admin/contacts"));
+const AdminContentPage = lazy(() => import("@/pages/admin/content"));
+const RegisterAdmin = lazy(() => import("@/pages/register-admin"));
+const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
+const AdminEmailLogsPage = lazy(() => import("@/pages/admin/email-logs"));
+const AdminJobsPage = lazy(() => import("@/pages/admin/jobs"));
+
+function RouteFallback() {
+  return <div className="min-h-screen bg-background" aria-busy="true" />;
+}
 
 function Router() {
   return (
+    <Suspense fallback={<RouteFallback />}>
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
@@ -81,6 +91,7 @@ function Router() {
       <Route path="/legal" component={LegalPage} />
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 
