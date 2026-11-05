@@ -3,7 +3,10 @@ import { Button } from "@/components/ui/button";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { Truck, Thermometer, ArrowRight, CheckCircle2 } from "lucide-react";
-import { REEFER_UNIT, REEFER_UNIT_NOTE, SERVICE_PLAN, formatCents } from "@shared/pricing";
+import { LIST_PRICE_CENTS, REEFER_UNIT, REEFER_UNIT_NOTE, SERVICE_PLAN, formatCents } from "@shared/pricing";
+
+const REEFER_RATE = formatCents(LIST_PRICE_CENTS.reefer);
+const DRY_VAN_RATE = formatCents(LIST_PRICE_CENTS.dry_van);
 
 const TRAILER_TYPES = [
   {
@@ -11,6 +14,8 @@ const TRAILER_TYPES = [
     icon: Thermometer,
     name: "Refrigerated (Reefer) Trailers",
     tagline: "Temperature-controlled freight, all year long.",
+    rate: REEFER_RATE,
+    rateNote: "/month, flat. Engine hours included.",
     description:
       `Produce, meat, dairy, frozen. Every reefer on the lot runs a ${REEFER_UNIT} unit, and the engine hours are included in the rate, so run it the way the load needs.`,
     specs: [
@@ -27,8 +32,10 @@ const TRAILER_TYPES = [
     icon: Truck,
     name: "Dry Van Trailers",
     tagline: "The workhorse of freight — ready when you are.",
+    rate: DRY_VAN_RATE,
+    rateNote: "/month, flat. Unlimited miles.",
     description:
-      "Standard 53' dry vans for general freight at the same flat rate as the reefers. No frills, no surprises: unlimited miles, month to month. Ideal for box goods, palletized freight, and general merchandise.",
+      `Standard 53' dry vans for general freight at ${DRY_VAN_RATE} a month, flat. No frills, no surprises: unlimited miles, month to month. Ideal for box goods, palletized freight, and general merchandise.`,
     specs: [
       "53' standard length",
       "Wabash bodies, DuraPlate composite sidewalls on select units",
@@ -40,7 +47,7 @@ const TRAILER_TYPES = [
 ];
 
 const WHY_LIST = [
-  "One flat monthly rate. Reefer engine hours and unlimited miles included",
+  `Flat monthly rates: reefers ${REEFER_RATE}, dry vans ${DRY_VAN_RATE}. Reefer engine hours and unlimited miles included`,
   "No mileage fees, no hour meter, no fuel surcharges, no admin fees",
   "Month to month with 30 days' notice. No multi-year lease, no fleet minimum",
   `Optional ${SERVICE_PLAN.name}, ${formatCents(SERVICE_PLAN.monthlyCents)}/month: ${SERVICE_PLAN.summary.toLowerCase()}`,
@@ -76,8 +83,8 @@ export default function ServicesPage() {
             <span className="text-primary">your load.</span>
           </h1>
           <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-8">
-            Reefers and dry vans at one flat monthly rate. Reefer hours included.
-            No mileage fees. No BS.
+            Reefers {REEFER_RATE} a month. Dry vans {DRY_VAN_RATE}. Flat.
+            Reefer hours included. No mileage fees. No BS.
           </p>
           <div className="flex flex-wrap gap-3">
             <a href="#reefers">
@@ -97,7 +104,7 @@ export default function ServicesPage() {
       {/* Trailer Types */}
       <section className="border-t border-border py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto space-y-20">
-          {TRAILER_TYPES.map(({ id, icon: Icon, name, tagline, description, specs, useCases }, idx) => (
+          {TRAILER_TYPES.map(({ id, icon: Icon, name, tagline, rate, rateNote, description, specs, useCases }, idx) => (
             <div
               key={id}
               id={id}
@@ -117,6 +124,10 @@ export default function ServicesPage() {
                   </span>
                 </div>
                 <h2 className="text-2xl font-black tracking-tight mb-3">{tagline}</h2>
+                <div className="flex items-baseline gap-1.5 mb-4">
+                  <span className="text-3xl font-black">{rate}</span>
+                  <span className="text-sm text-muted-foreground">{rateNote}</span>
+                </div>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-6">{description}</p>
 
                 <div className="grid sm:grid-cols-2 gap-6 mb-6">
@@ -164,7 +175,7 @@ export default function ServicesPage() {
               <div className="w-6 h-px bg-primary" />
               <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Why Deluxe</span>
             </div>
-            <h2 className="text-2xl font-black tracking-tight mb-6">One rate. One invoice. No surprises.</h2>
+            <h2 className="text-2xl font-black tracking-tight mb-6">One flat rate. One invoice. No surprises.</h2>
             <ul className="space-y-3 mb-8">
               {WHY_LIST.map((item) => (
                 <li key={item} className="flex items-center gap-3 text-sm">

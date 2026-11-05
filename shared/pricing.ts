@@ -3,11 +3,67 @@
 // number another page disagrees with.
 //
 // Prices are per unit in the database (trailers.price_monthly, cents) and are
-// edited in the admin inventory form; LIST_PRICE_CENTS is what repriced units
-// get and what copy quotes when every listed unit shares one price. The
-// Service Plan is priced here only.
+// edited in the admin inventory form. LIST_PRICE_CENTS is the list price per
+// trailer type: what the startup data fixes set units to, and what static copy
+// (FAQ, services page, outreach) quotes. Pages that have live inventory derive
+// the rates from it with listedRates() so they can never contradict the cards.
+// Keep the two in step: reprice via a data fix, not only in the admin form.
+// The Service Plan is priced here only.
 
-export const LIST_PRICE_CENTS = 179000; // $1,790/month, every reefer and dry van (Nov 2026)
+export const LIST_PRICE_CENTS = {
+  reefer: 179000, // $1,790/month, reefer engine hours included (Nov 2026)
+  dry_van: 139000, // $1,390/month (Nov 2026)
+} as const;
+
+export type RentableType = keyof typeof LIST_PRICE_CENTS;
+
+// How copy names each type when it quotes the rate, in display order.
+export const RATE_LABELS: { type: RentableType; plural: string; singular: string }[] = [
+  { type: "reefer", plural: "Reefers", singular: "Reefer" },
+  { type: "dry_van", plural: "Dry vans", singular: "Dry van" },
+];
+
+export interface ListedRate {
+  type: RentableType;
+  plural: string;
+  singular: string;
+  cents: number;
+}
+
+/**
+ * The rate each trailer type rents for, read from listed inventory: a type is
+ * included only when it has listed units and they all share one price, so a
+ * headline never quotes a number some card disagrees with. Empty when nothing
+ * is listed (or prices are mixed), and callers fall back to generic copy.
+ */
+export function listedRates(units: { type: string; priceMonthly: number }[]): ListedRate[] {
+  const out: ListedRate[] = [];
+  for (const label of RATE_LABELS) {
+    const ofType = units.filter((u) => u.type === label.type);
+    if (!ofType.length) continue;
+    const first = ofType[0].priceMonthly;
+    if (ofType.every((u) => u.priceMonthly === first)) out.push({ ...label, cents: first });
+  }
+  return out;
+}
+
+/**
+ * "Reefers $1,790 a month, dry vans $1,390" for prose, or null when no rate
+ * can be quoted. By default the unit follows the first price only and the
+ * second is read in the same unit; `each` puts it on every price ("reefers
+ * $1,790/month and dry vans $1,390/month" with unit "/month", joiner " and ").
+ * The phrase starts with a capital for a sentence start; `lower` for mid-sentence.
+ */
+export function ratesPhrase(
+  rates: ListedRate[],
+  opts: { unit?: string; each?: boolean; joiner?: string; lower?: boolean } = {},
+): string | null {
+  if (!rates.length) return null;
+  const { unit = " a month", each = false, joiner = ", ", lower = false } = opts;
+  return rates
+    .map((r, i) => `${i === 0 && !lower ? r.plural : r.plural.toLowerCase()} ${formatCents(r.cents)}${i === 0 || each ? unit : ""}`)
+    .join(joiner);
+}
 
 // Every refrigerated trailer in the fleet runs this reefer unit.
 export const REEFER_UNIT = "Thermo King Precedent";

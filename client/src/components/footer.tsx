@@ -19,7 +19,7 @@ export default function Footer() {
               </div>
             </Link>
             <p className="text-xs text-muted-foreground max-w-xs">
-              One flat rate. Reefer hours included. No mileage fees. No BS.
+              Flat rates. Reefer hours included. No mileage fees. No BS.
             </p>
           </div>
 

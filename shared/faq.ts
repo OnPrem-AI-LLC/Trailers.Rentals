@@ -1,14 +1,18 @@
 // The FAQ shown on the home page. The server emits the same list as FAQPage
 // JSON-LD, so the structured data can never say something the page doesn't.
 import { YARD } from "./constants";
-import { REEFER_UNIT, REEFER_UNIT_NOTE, RENTER_PAYS, SERVICE_PLAN, formatCents } from "./pricing";
+import { LIST_PRICE_CENTS, REEFER_UNIT, REEFER_UNIT_NOTE, RENTER_PAYS, SERVICE_PLAN, formatCents } from "./pricing";
 
 const PLAN_PRICE = formatCents(SERVICE_PLAN.monthlyCents);
 
 export const FAQ: { q: string; a: string }[] = [
   {
+    q: "What are the monthly rates?",
+    a: `Reefers are ${formatCents(LIST_PRICE_CENTS.reefer)} a month and dry vans are ${formatCents(LIST_PRICE_CENTS.dry_van)} a month, flat. Each listing shows its rate, and that number is the number on the invoice: no mileage fees, no reefer engine-hour charges, no setup or admin fees.`,
+  },
+  {
     q: "What does the monthly rate include?",
-    a: "The trailer, unlimited miles and, on a reefer, the engine hours. The rate is month to month with 30 days' notice to end, and there is no fleet minimum. The number on the listing is the number on the invoice.",
+    a: "The trailer, unlimited miles and, on a reefer, the engine hours. The rate is month to month with 30 days' notice to end, and there is no fleet minimum.",
   },
   {
     q: "Are there mileage fees?",

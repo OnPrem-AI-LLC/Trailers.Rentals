@@ -42,8 +42,12 @@ Public endpoints never include the full VIN or the registration document
 ## Pricing and inventory data
 
 Prices are per unit (`trailers.price_monthly`, in cents) and edited in the admin inventory form; the
-list price, the optional Service Plan ($250/month: tires, brakes, reefer oil changes) and the
-included-items copy live in `shared/pricing.ts`. The security deposit is two months' rent. Reefer
+list prices per type (reefers $1,790/month, dry vans $1,390/month), the optional Service Plan
+($250/month: tires, brakes, reefer oil changes) and the included-items copy live in
+`shared/pricing.ts`. The home page, the server-rendered head and `llms.txt` quote the rates read from
+listed inventory (`listedRates`), so a unit repriced in admin changes the headline with it; the FAQ,
+the services page and the outreach copy quote the list prices, so reprice with a data fix rather
+than only in the admin form. The security deposit is two months' rent. Reefer
 engine hours are included in the monthly rate; the per-hour billing path only applies to a unit that
 has `engine_hour_rate` set, and none does.
 

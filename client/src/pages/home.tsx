@@ -21,13 +21,23 @@ import { formatTypeLabel, formatPrice } from "@/lib/trailer-utils";
 import type { PublicTrailer, Testimonial } from "@shared/schema";
 import { COMPANY, YARD } from "@shared/constants";
 import { FAQ } from "@shared/faq";
-import { SERVICE_PLAN, REEFER_UNIT, REEFER_UNIT_NOTE, RATE_INCLUDES, NEVER_BILLED, RENTER_PAYS, formatCents } from "@shared/pricing";
+import { SERVICE_PLAN, REEFER_UNIT, REEFER_UNIT_NOTE, RATE_INCLUDES, NEVER_BILLED, RENTER_PAYS, formatCents, listedRates } from "@shared/pricing";
+import type { ListedRate } from "@shared/pricing";
 
-// The hero pills. The rate comes from live inventory, so the number can never go stale.
-function valueProps(flatRate: number | null) {
+// The hero pills. The rates come from live inventory, so the numbers can never go stale.
+const PRICE_PILL = {
+  reefer: { icon: DollarSign, detail: "Flat, engine hours included" },
+  dry_van: { icon: Truck, detail: "Flat, unlimited miles" },
+} as const;
+
+function valueProps(rates: ListedRate[]) {
+  const prices = rates.length
+    ? rates.map((r) => ({ icon: PRICE_PILL[r.type].icon, label: `${r.plural} ${formatPrice(r.cents)}/mo`, detail: PRICE_PILL[r.type].detail }))
+    : [{ icon: DollarSign, label: "One flat rate per trailer", detail: "Reefer engine hours included" }];
   return [
-    { icon: DollarSign, label: flatRate ? `${formatPrice(flatRate)}/mo, flat` : "One flat rate", detail: "Reefer engine hours included" },
-    { icon: Zap, label: "No mileage fees", detail: "Unlimited miles" },
+    ...prices,
+    // With both rates on show, unlimited miles is already said under the dry van.
+    ...(prices.length < 2 ? [{ icon: Zap, label: "No mileage fees", detail: "Unlimited miles" }] : []),
     { icon: CalendarDays, label: "Month to month", detail: "No long lease, no fleet minimum" },
     { icon: Snowflake, label: REEFER_UNIT, detail: "On every reefer" },
   ];
@@ -83,12 +93,9 @@ export default function Home() {
   // The public API only returns available units; the filter is belt and braces.
   const allAvailable = useMemo(() => trailers.filter((t) => t.status === "available"), [trailers]);
 
-  // The one price every listed unit shares; null while prices differ or nothing is listed.
-  const flatRate = useMemo(() => {
-    if (!allAvailable.length) return null;
-    const first = allAvailable[0].priceMonthly;
-    return allAvailable.every((t) => t.priceMonthly === first) ? first : null;
-  }, [allAvailable]);
+  // The rate per trailer type, when every listed unit of that type shares one;
+  // empty while nothing is listed, and the headline copy goes generic.
+  const rates = useMemo(() => listedRates(allAvailable), [allAvailable]);
 
   // Filter options come from what is actually listed, so a type with no units
   // (or a single location) never shows up as a dead choice.
@@ -155,12 +162,12 @@ export default function Home() {
           </h1>
 
           <p className="text-lg text-muted-foreground max-w-xl mb-10 leading-relaxed">
-            Reefers and dry vans at one flat monthly rate. Reefer engine hours included.
+            Reefers and dry vans at a flat monthly rate. Reefer engine hours included.
             Unlimited miles. The price on the listing is the price on the invoice.
           </p>
 
           <div className="flex flex-wrap gap-3 mb-10">
-            {valueProps(flatRate).map(({ icon: Icon, label, detail }) => (
+            {valueProps(rates).map(({ icon: Icon, label, detail }) => (
               <div key={label} className="value-pill gap-3">
                 <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
                   <Icon className="w-3.5 h-3.5 text-primary" />
@@ -296,7 +303,9 @@ export default function Home() {
               <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Pricing</span>
             </div>
             <h2 className="text-3xl font-black tracking-tight mb-3">
-              {flatRate ? `${formatPrice(flatRate)} a month. That's the whole bill.` : "One flat rate. That's the whole bill."}
+              {rates.length
+                ? `${rates.map((r, i) => `${r.plural} ${formatPrice(r.cents)}${i === 0 ? " a month" : ""}.`).join(" ")} That's the whole bill.`
+                : "One flat rate per trailer. That's the whole bill."}
             </h2>
             <p className="text-muted-foreground leading-relaxed">
               Trailer leases have a habit of billing the rent, then metering the rest: miles, reefer hours, fees.

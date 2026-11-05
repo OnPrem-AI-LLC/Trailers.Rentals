@@ -4,7 +4,7 @@
 // and every change is logged with the unit numbers it touched so it can be
 // reversed by hand from the admin inventory page if needed.
 
-import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, ne, or } from "drizzle-orm";
 import { db } from "./db";
 import { trailers, trailerPhotos } from "@shared/schema";
 import { storage } from "./storage";
@@ -182,7 +182,7 @@ const REEFER_COPY: Record<string, { description: string; features: string[] }> =
 async function repriceAndPrecedent() {
   const repriced = await db
     .update(trailers)
-    .set({ priceMonthly: LIST_PRICE_CENTS })
+    .set({ priceMonthly: LIST_PRICE_CENTS.reefer })
     .where(and(inArray(trailers.type, RENTABLE_TYPES), eq(trailers.priceMonthly, PREVIOUS_PRICE_CENTS)))
     .returning({ unitNumber: trailers.unitNumber });
 
@@ -196,7 +196,23 @@ async function repriceAndPrecedent() {
     if (rows.length) relabeled.push(unitNumber);
   }
 
-  return { repricedTo: LIST_PRICE_CENTS, repriced: repriced.map((r) => r.unitNumber), relabeled };
+  return { repricedTo: LIST_PRICE_CENTS.reefer, repriced: repriced.map((r) => r.unitNumber), relabeled };
+}
+
+// ── 2026-11-05 (later): dry vans at $1,390 ────────────────────────────────
+//
+// Sam's second pricing note of the day: reefers stay at $1,790, dry vans list
+// at $1,390. Every dry van is repriced, listed or not, so a hidden unit comes
+// back at the right number when it is published again. Existing rentals keep
+// their own monthly_rate; only the list price on the trailer changes.
+
+async function dryVanPrice() {
+  const repriced = await db
+    .update(trailers)
+    .set({ priceMonthly: LIST_PRICE_CENTS.dry_van })
+    .where(and(eq(trailers.type, "dry_van"), ne(trailers.priceMonthly, LIST_PRICE_CENTS.dry_van)))
+    .returning({ unitNumber: trailers.unitNumber });
+  return { repricedTo: LIST_PRICE_CENTS.dry_van, repriced: repriced.map((r) => r.unitNumber) };
 }
 
 const FIXES: DataFix[] = [
@@ -205,6 +221,7 @@ const FIXES: DataFix[] = [
   { key: "datafix:2026-11-04-representative-photos", run: representativePhotos },
   { key: "datafix:2026-11-04-yard-inwood", run: yardInwood },
   { key: "datafix:2026-11-05-reprice-1790-precedent", run: repriceAndPrecedent },
+  { key: "datafix:2026-11-05-dry-van-1390", run: dryVanPrice },
 ];
 
 export async function runDataFixes(): Promise<void> {
