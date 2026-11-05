@@ -23,9 +23,31 @@ import type { PublicTrailer } from "@shared/schema";
 import { formatTrailerName } from "@/lib/trailer-utils";
 import { useAuth } from "@/hooks/use-auth";
 import type { Company } from "@shared/schema";
+import { SERVICE_PLAN, formatCents } from "@shared/pricing";
 
 function formatPrice(cents: number): string {
   return `$${(cents / 100).toLocaleString()}`;
+}
+
+// The optional Service Plan, offered on both application paths. The choice is
+// stored on the application and becomes a line on the rental when approved.
+function ServicePlanOptIn({ id, checked, onChange }: { id: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-4">
+      <div className="flex items-start gap-2.5">
+        <Checkbox id={id} checked={checked} onCheckedChange={(v) => onChange(v === true)} className="mt-0.5" />
+        <div>
+          <Label htmlFor={id} className="text-sm font-semibold leading-snug cursor-pointer">
+            Add the {SERVICE_PLAN.name}: {formatCents(SERVICE_PLAN.monthlyCents)}/month
+          </Label>
+          <p className="text-sm text-muted-foreground mt-1">
+            {SERVICE_PLAN.summary} Billed with your rent; the first month is due with the deposit.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">{SERVICE_PLAN.scope}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // apiRequest throws "<status>: <body>"; pull the server's own message out of the JSON body.
@@ -74,6 +96,7 @@ export default function Apply() {
   const [form, setForm] = useState<ApplicationForm>(EMPTY_FORM);
   const [submitted, setSubmitted] = useState(false);
   const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [servicePlan, setServicePlan] = useState(false);
 
   // Fetch existing company for logged-in users who have one on file
   const { data: existingCompany, isLoading: companyLoading } = useQuery<Company>({
@@ -109,7 +132,7 @@ export default function Apply() {
   });
 
   const mutation = useMutation({
-    mutationFn: async (data: ApplicationForm & { trailerId: string; ageConfirmed: true }) => {
+    mutationFn: async (data: ApplicationForm & { trailerId: string; ageConfirmed: true; servicePlan: boolean }) => {
       const res = await apiRequest("POST", "/api/applications", data);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ message: "Submission failed" }));
@@ -141,7 +164,7 @@ export default function Apply() {
     }
     setIntendedUseError(null);
     if (!ageConfirmed) return;
-    mutation.mutate({ ...form, trailerId, ageConfirmed: true });
+    mutation.mutate({ ...form, trailerId, ageConfirmed: true, servicePlan });
   };
 
   if (isLoading || (user?.companyId && companyLoading)) {
@@ -230,6 +253,7 @@ export default function Apply() {
       mutation.mutate({
         trailerId: trailerId!,
         ageConfirmed: true,
+        servicePlan,
         companyName: existingCompany.name,
         ownerName: existingCompany.ownerName,
         authorizedUser: existingCompany.authorizedUser ?? "",
@@ -265,7 +289,7 @@ export default function Apply() {
             <div className="flex-1 min-w-0">
               <div className="font-bold text-foreground">{formatTrailerName(trailer)}</div>
               <div className="text-sm text-muted-foreground">
-                {formatPrice(trailer.priceMonthly)}/month · No mileage fees
+                {formatPrice(trailer.priceMonthly)}/month · {trailer.type === "reefer" ? "Reefer hours included · " : ""}No mileage fees
               </div>
             </div>
             <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-950 text-green-400 flex-shrink-0">
@@ -299,10 +323,12 @@ export default function Apply() {
             </div>
           </div>
 
-          <div className="bg-muted rounded-lg p-4 text-sm text-muted-foreground mb-6">
+          <ServicePlanOptIn id="servicePlanCompany" checked={servicePlan} onChange={setServicePlan} />
+
+          <div className="bg-muted rounded-lg p-4 text-sm text-muted-foreground my-6">
             <strong className="text-foreground">Deposit note:</strong> Upon approval, a security deposit
             equal to 2 months' rent ({formatPrice(trailer.priceMonthly * 2)}) is required — billed as
-            first month + deposit. No mileage fees, ever.
+            first month + deposit.{servicePlan ? ` The first month of the ${SERVICE_PLAN.name} (${formatCents(SERVICE_PLAN.monthlyCents)}) is due with it.` : ""} No mileage fees, ever.
           </div>
 
           {/* Age attestation */}
@@ -362,7 +388,7 @@ export default function Apply() {
               {formatTrailerName(trailer)}
             </div>
             <div className="text-sm text-muted-foreground">
-              {formatPrice(trailer.priceMonthly)}/month · No mileage fees
+              {formatPrice(trailer.priceMonthly)}/month · {trailer.type === "reefer" ? "Reefer hours included · " : ""}No mileage fees
             </div>
           </div>
           <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-950 text-green-400 flex-shrink-0">
@@ -538,11 +564,14 @@ export default function Apply() {
             </div>
           </div>
 
+          {/* Optional Service Plan */}
+          <ServicePlanOptIn id="servicePlan" checked={servicePlan} onChange={setServicePlan} />
+
           {/* Deposit info */}
           <div className="bg-muted rounded-lg p-4 text-sm text-muted-foreground">
             <strong className="text-foreground">Deposit note:</strong> Upon approval, a security deposit
             equal to 2 months' rent ({formatPrice(trailer.priceMonthly * 2)}) is required — billed as
-            first month + deposit. No mileage fees, ever.
+            first month + deposit.{servicePlan ? ` The first month of the ${SERVICE_PLAN.name} (${formatCents(SERVICE_PLAN.monthlyCents)}) is due with it.` : ""} No mileage fees, ever.
           </div>
 
           {/* Age attestation */}

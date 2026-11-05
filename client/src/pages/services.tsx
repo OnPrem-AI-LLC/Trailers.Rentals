@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
 import { Truck, Thermometer, ArrowRight, CheckCircle2 } from "lucide-react";
+import { REEFER_UNIT, REEFER_UNIT_NOTE, SERVICE_PLAN, formatCents } from "@shared/pricing";
 
 const TRAILER_TYPES = [
   {
@@ -11,13 +12,13 @@ const TRAILER_TYPES = [
     name: "Refrigerated (Reefer) Trailers",
     tagline: "Temperature-controlled freight, all year long.",
     description:
-      "Our reefer trailers maintain precise temperature ranges for perishable goods — produce, meat, dairy, pharmaceuticals, and more. Equipped with reliable refrigeration units and tested before every rental.",
+      `Produce, meat, dairy, frozen. Every reefer on the lot runs a ${REEFER_UNIT} unit, and the engine hours are included in the rate, so run it the way the load needs.`,
     specs: [
-      "53' standard length",
-      "Temperature range: -20°F to 70°F",
-      "Single and multi-temp options",
-      "Pre-trip inspection included",
-      "Carrier 600MT and Thermo King units",
+      `${REEFER_UNIT} reefer unit on every trailer`,
+      REEFER_UNIT_NOTE.replace(/\.$/, ""),
+      "Reefer engine hours included in the monthly rate",
+      "Utility 3000R, Hyundai and Wabash bodies",
+      "Roll-up or swing rear doors",
     ],
     useCases: ["Produce & fresh food", "Frozen goods", "Pharmaceutical/cold-chain", "Dairy & meat transport"],
   },
@@ -27,25 +28,25 @@ const TRAILER_TYPES = [
     name: "Dry Van Trailers",
     tagline: "The workhorse of freight — ready when you are.",
     description:
-      "Standard 53' dry vans for general freight. No frills, no surprises — just solid trailers at a flat monthly rate with no mileage fees. Ideal for box goods, palletized freight, and general merchandise.",
+      "Standard 53' dry vans for general freight at the same flat rate as the reefers. No frills, no surprises: unlimited miles, month to month. Ideal for box goods, palletized freight, and general merchandise.",
     specs: [
       "53' standard length",
-      "102\" interior width",
-      "Swing doors & roll-up door options",
-      "E-track and logistic posts",
-      "Air-ride suspension",
+      "Wabash bodies, DuraPlate composite sidewalls on select units",
+      "Swing rear doors",
+      "Unlimited miles, no mileage fees",
     ],
     useCases: ["General merchandise", "Palletized freight", "Box goods", "LTL and FTL loads"],
   },
 ];
 
 const WHY_LIST = [
-  "Flat monthly rates — no mileage fees, ever",
-  "Online application in minutes",
-  "No hidden fuel surcharges",
-  "Pre-inspected and DOT-ready",
-  "Pickup coordination done online",
-  "Simple one-page rental agreement",
+  "One flat monthly rate. Reefer engine hours and unlimited miles included",
+  "No mileage fees, no hour meter, no fuel surcharges, no admin fees",
+  "Month to month with 30 days' notice. No multi-year lease, no fleet minimum",
+  `Optional ${SERVICE_PLAN.name}, ${formatCents(SERVICE_PLAN.monthlyCents)}/month: ${SERVICE_PLAN.summary.toLowerCase()}`,
+  `${REEFER_UNIT} units on every reefer`,
+  "Apply online in about ten minutes; most applications answered within 24 hours",
+  "Pick up in Inwood, WV, right off I-81 at exit 5",
 ];
 
 export default function ServicesPage() {
@@ -75,7 +76,7 @@ export default function ServicesPage() {
             <span className="text-primary">your load.</span>
           </h1>
           <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-8">
-            Reefers and dry vans — available monthly with a single flat rate.
+            Reefers and dry vans at one flat monthly rate. Reefer hours included.
             No mileage fees. No BS.
           </p>
           <div className="flex flex-wrap gap-3">
@@ -163,7 +164,7 @@ export default function ServicesPage() {
               <div className="w-6 h-px bg-primary" />
               <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Why Deluxe</span>
             </div>
-            <h2 className="text-2xl font-black tracking-tight mb-6">Simple pricing. No surprises.</h2>
+            <h2 className="text-2xl font-black tracking-tight mb-6">One rate. One invoice. No surprises.</h2>
             <ul className="space-y-3 mb-8">
               {WHY_LIST.map((item) => (
                 <li key={item} className="flex items-center gap-3 text-sm">

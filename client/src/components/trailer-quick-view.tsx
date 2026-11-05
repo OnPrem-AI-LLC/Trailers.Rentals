@@ -5,6 +5,7 @@ import TrailerGallery from "@/components/trailer-gallery";
 import { ArrowRight, Clock, ExternalLink, CheckCircle } from "lucide-react";
 import type { PublicTrailer } from "@shared/schema";
 import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
+import { REEFER_UNIT, SERVICE_PLAN, formatCents } from "@shared/pricing";
 
 interface TrailerQuickViewProps {
   trailer: PublicTrailer | null;
@@ -41,12 +42,14 @@ function QuickViewBody({ trailer }: { trailer: PublicTrailer }) {
     ["VIN ending", trailer.vinLast6],
     ["Location", trailer.location],
     ["Monthly rate", `${formatPrice(trailer.priceMonthly)}/month`],
+    ["Reefer unit", isReefer ? REEFER_UNIT : null],
     [
       "Reefer engine hours",
-      isReefer ? (trailer.engineHourRate ? `${formatPrice(trailer.engineHourRate)}/hour` : "Billed separately") : null,
+      isReefer ? (trailer.engineHourRate ? `${formatPrice(trailer.engineHourRate)}/hour` : "Included in the rate") : null,
     ],
-    ["Security deposit", `${formatPrice(trailer.priceMonthly * 2)} (2 months)`],
     ["Mileage fees", "None"],
+    [SERVICE_PLAN.name, `Optional, ${formatCents(SERVICE_PLAN.monthlyCents)}/month`],
+    ["Security deposit", `${formatPrice(trailer.priceMonthly * 2)} (2 months)`],
   ];
 
   return (
@@ -88,11 +91,11 @@ function QuickViewBody({ trailer }: { trailer: PublicTrailer }) {
                 <Clock className="w-4 h-4" />
                 {trailer.engineHourRate
                   ? `+ ${formatPrice(trailer.engineHourRate)} per reefer engine hour (billed separately)`
-                  : "Reefer engine hours billed separately"}
+                  : "Reefer engine hours included"}
               </div>
             )}
             <p className="text-xs text-muted-foreground border-t border-border pt-2 mt-2">
-              No mileage fees · {isReefer ? "Engine hours billed separately" : "No hidden costs"} · Security deposit = 2 months rent
+              No mileage fees · {isReefer ? "Engine hours included" : "No hidden fees"} · Optional {formatCents(SERVICE_PLAN.monthlyCents)}/mo {SERVICE_PLAN.name.toLowerCase()} · Deposit = 2 months rent
             </p>
           </div>
 

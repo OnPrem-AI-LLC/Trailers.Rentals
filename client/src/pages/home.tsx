@@ -13,32 +13,25 @@ import Header from "@/components/header";
 import Footer from "@/components/footer";
 import TrailerCard from "@/components/trailer-card";
 import TrailerQuickView from "@/components/trailer-quick-view";
-import { ArrowDown, Zap, DollarSign, BadgeCheck, Truck, Star, Send, CheckCircle2, Clock, Mail, MapPin, Filter } from "lucide-react";
+import { ArrowDown, Zap, DollarSign, Truck, Star, Send, CheckCircle2, Clock, Mail, MapPin, Filter, Check, X, Wrench, Snowflake, CalendarDays } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { formatTypeLabel } from "@/lib/trailer-utils";
+import { formatTypeLabel, formatPrice } from "@/lib/trailer-utils";
 import type { PublicTrailer, Testimonial } from "@shared/schema";
 import { COMPANY, YARD } from "@shared/constants";
 import { FAQ } from "@shared/faq";
+import { SERVICE_PLAN, REEFER_UNIT, REEFER_UNIT_NOTE, RATE_INCLUDES, NEVER_BILLED, RENTER_PAYS, formatCents } from "@shared/pricing";
 
-const VALUE_PROPS = [
-  {
-    icon: DollarSign,
-    label: "No BS Fees",
-    detail: "What you see is what you pay",
-  },
-  {
-    icon: Zap,
-    label: "No Mileage Fees",
-    detail: "Drive as far as you need",
-  },
-  {
-    icon: BadgeCheck,
-    label: "Simple & Fast",
-    detail: "Apply in minutes, not days",
-  },
-];
+// The hero pills. The rate comes from live inventory, so the number can never go stale.
+function valueProps(flatRate: number | null) {
+  return [
+    { icon: DollarSign, label: flatRate ? `${formatPrice(flatRate)}/mo, flat` : "One flat rate", detail: "Reefer engine hours included" },
+    { icon: Zap, label: "No mileage fees", detail: "Unlimited miles" },
+    { icon: CalendarDays, label: "Month to month", detail: "No long lease, no fleet minimum" },
+    { icon: Snowflake, label: REEFER_UNIT, detail: "On every reefer" },
+  ];
+}
 
 const contactSchema = z.object({
   name: z.string().min(2, "Name required"),
@@ -89,6 +82,13 @@ export default function Home() {
 
   // The public API only returns available units; the filter is belt and braces.
   const allAvailable = useMemo(() => trailers.filter((t) => t.status === "available"), [trailers]);
+
+  // The one price every listed unit shares; null while prices differ or nothing is listed.
+  const flatRate = useMemo(() => {
+    if (!allAvailable.length) return null;
+    const first = allAvailable[0].priceMonthly;
+    return allAvailable.every((t) => t.priceMonthly === first) ? first : null;
+  }, [allAvailable]);
 
   // Filter options come from what is actually listed, so a type with no units
   // (or a single location) never shows up as a dead choice.
@@ -155,12 +155,12 @@ export default function Home() {
           </h1>
 
           <p className="text-lg text-muted-foreground max-w-xl mb-10 leading-relaxed">
-            Reefers and dry vans — available now at straightforward monthly rates.
-            No mileage fees. No surprise charges. Just the trailer you need.
+            Reefers and dry vans at one flat monthly rate. Reefer engine hours included.
+            Unlimited miles. The price on the listing is the price on the invoice.
           </p>
 
           <div className="flex flex-wrap gap-3 mb-10">
-            {VALUE_PROPS.map(({ icon: Icon, label, detail }) => (
+            {valueProps(flatRate).map(({ icon: Icon, label, detail }) => (
               <div key={label} className="value-pill gap-3">
                 <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
                   <Icon className="w-3.5 h-3.5 text-primary" />
@@ -284,6 +284,96 @@ export default function Home() {
               ))}
             </div>
           )}
+        </div>
+      </section>
+
+      {/* ── The whole bill ───────────────────────────────────────── */}
+      <section id="pricing" className="border-t border-border py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-10 max-w-2xl">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-px bg-primary" />
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Pricing</span>
+            </div>
+            <h2 className="text-3xl font-black tracking-tight mb-3">
+              {flatRate ? `${formatPrice(flatRate)} a month. That's the whole bill.` : "One flat rate. That's the whole bill."}
+            </h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Trailer leases have a habit of billing the rent, then metering the rest: miles, reefer hours, fees.
+              Ours doesn't. The price on the listing is the price on the invoice.
+            </p>
+          </div>
+
+          <div className="grid lg:grid-cols-3 gap-6">
+            <div className="bg-card border border-border rounded-xl p-6">
+              <h3 className="font-bold mb-4 flex items-center gap-2">
+                <Check className="w-4 h-4 text-primary" /> Included in the rate
+              </h3>
+              <ul className="space-y-2.5">
+                {RATE_INCLUDES.map((line) => (
+                  <li key={line} className="flex items-start gap-2.5 text-sm">
+                    <Check className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-6">
+              <h3 className="font-bold mb-4 flex items-center gap-2">
+                <X className="w-4 h-4 text-primary" /> Never on your invoice
+              </h3>
+              <ul className="space-y-2.5">
+                {NEVER_BILLED.map((line) => (
+                  <li key={line} className="flex items-start gap-2.5 text-sm">
+                    <X className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground mt-5 leading-relaxed border-t border-border pt-4">
+                <span className="font-semibold text-foreground">What you still pay:</span> {RENTER_PAYS}
+              </p>
+            </div>
+
+            <div className="bg-card border border-primary/50 rounded-xl p-6 relative">
+              <span className="absolute top-4 right-4 text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Optional</span>
+              <h3 className="font-bold mb-1 flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-primary" /> {SERVICE_PLAN.name}
+              </h3>
+              <div className="flex items-baseline gap-1 mb-3">
+                <span className="text-3xl font-black">{formatCents(SERVICE_PLAN.monthlyCents)}</span>
+                <span className="text-muted-foreground text-sm">/month</span>
+              </div>
+              <p className="text-sm text-foreground mb-3">{SERVICE_PLAN.summary}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                Tires and brakes are the two biggest surprise bills on a trailer. For {formatCents(SERVICE_PLAN.monthlyCents)} a month they stop being surprises.
+              </p>
+              <ul className="space-y-1.5 mb-4">
+                {SERVICE_PLAN.covers.map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-sm">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {SERVICE_PLAN.scope} Add it when you apply; it's billed with your rent.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 bg-card border border-border rounded-xl p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center flex-shrink-0">
+              <Snowflake className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-bold">{REEFER_UNIT} on every reefer</h3>
+              <p className="text-sm text-muted-foreground">
+                {REEFER_UNIT_NOTE} The hours are included, so run it the way the load needs.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

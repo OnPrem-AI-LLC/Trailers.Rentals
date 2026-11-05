@@ -20,6 +20,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatTypeLabel } from "@/lib/trailer-utils";
 import type { Rental, Document, AuditLog, Company, EngineHourEntry, CheckinPhoto, EmailLog } from "@shared/schema";
+import { SERVICE_PLAN, formatCents, monthlyTotalCents } from "@shared/pricing";
 
 interface TrailerInfo {
   id: string;
@@ -402,6 +403,12 @@ export default function AdminRentalDetail() {
                     <div className="text-xs text-muted-foreground mb-0.5">2-Month Deposit</div>
                     <div className="font-bold text-lg">${(rental.monthlyRate * 2 / 100).toLocaleString()}</div>
                   </div>
+                  {(rental.servicePlanMonthly ?? 0) > 0 && (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-0.5">{SERVICE_PLAN.name}</div>
+                      <div className="font-bold text-lg">{formatCents(rental.servicePlanMonthly)}<span className="text-sm font-normal text-muted-foreground">/mo · {formatCents(monthlyTotalCents(rental))} total</span></div>
+                    </div>
+                  )}
                   <div>
                     <div className="text-xs text-muted-foreground mb-0.5">Deposit Status</div>
                     {rental.depositPaid ? (

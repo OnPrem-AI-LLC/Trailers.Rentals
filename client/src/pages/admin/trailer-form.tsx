@@ -457,14 +457,14 @@ export default function TrailerForm() {
                       id="engineHourRate"
                       value={form.engineHourRate}
                       onChange={e => setForm(f => ({ ...f, engineHourRate: e.target.value }))}
-                      placeholder="0.85"
+                      placeholder="leave blank"
                       className="pl-6"
                       type="number"
                       min="0"
                       step="0.01"
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">Per engine hour for reefer unit operation</p>
+                  <p className="text-xs text-muted-foreground">Leave blank: reefer engine hours are included in the monthly rate. A value here puts this unit on per-hour billing and shows the rate on its listing.</p>
                 </div>
               )}
             </div>

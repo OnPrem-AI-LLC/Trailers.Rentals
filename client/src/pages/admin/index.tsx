@@ -199,7 +199,7 @@ export default function AdminPortal() {
           <QuickLinkCard
             icon={Gauge}
             title="Engine Hours"
-            description="Submit and review reefer engine hours. Bill surcharges directly via Stripe."
+            description="Log reefer engine-hour readings for maintenance scheduling. Hours are included in the rate; billing applies only to a unit with an hourly rate set."
             href="/admin/rentals"
             cta="Go to Rentals → Engine Hours"
           />

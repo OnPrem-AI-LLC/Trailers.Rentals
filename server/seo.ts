@@ -10,6 +10,7 @@
 import type { PublicTrailer } from "@shared/schema";
 import { COMPANY, YARD } from "@shared/constants";
 import { FAQ } from "@shared/faq";
+import { SERVICE_PLAN, REEFER_UNIT, REEFER_UNIT_NOTE, RATE_INCLUDES, RENTER_PAYS, formatCents } from "@shared/pricing";
 import {
   formatTrailerName,
   formatTypeLabel,
@@ -23,8 +24,22 @@ const SITE = COMPANY.siteUrl;
 const BRAND = COMPANY.name;
 const DEPOSIT = "Security deposit equals two months' rent, billed with the first month.";
 const REVIEW = "Applications are typically reviewed within 24 hours.";
-const HOME_TITLE = "Deluxe Logistics | Trailer Rentals — Reefers, Dry Vans, No BS Fees | Inwood WV, off I-81";
+const PLAN = `Optional ${SERVICE_PLAN.name}: ${formatCents(SERVICE_PLAN.monthlyCents)}/month covers tires, brakes and reefer engine oil changes.`;
 const WHERE = `${YARD.cityState}, ${YARD.landmark} south of Martinsburg`;
+
+// The one price every listed unit shares, or null when they differ or nothing is listed.
+function flatRate(trailers: PublicTrailer[]): number | null {
+  if (!trailers.length) return null;
+  const first = trailers[0].priceMonthly;
+  return trailers.every((t) => t.priceMonthly === first) ? first : null;
+}
+
+// "Reefer & Dry Van Rentals, $1,790/mo Flat, Reefer Hours Included | Deluxe Logistics, Inwood WV off I-81"
+function homeTitle(trailers: PublicTrailer[]): string {
+  const rate = flatRate(trailers);
+  const price = rate ? `${formatPrice(rate)}/mo Flat` : "One Flat Monthly Rate";
+  return `Reefer & Dry Van Rentals, ${price}, Reefer Hours Included | Deluxe Logistics, Inwood WV off I-81`;
+}
 
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -49,15 +64,15 @@ export function photoUrls(t: PublicTrailer): string[] {
   return sorted.map((p) => absUrl(p.url));
 }
 
-// "$1,699/month, no mileage fees, reefer engine hours billed separately"
+// "$1,790/month, no mileage fees, reefer engine hours included"
 export function priceSentence(t: PublicTrailer): string {
   const base = `${formatPrice(t.priceMonthly)}/month, no mileage fees`;
   if (t.type === "reefer") {
     return t.engineHourRate
       ? `${base}, plus ${formatPrice(t.engineHourRate)} per reefer engine hour`
-      : `${base}, reefer engine hours billed separately`;
+      : `${base}, reefer engine hours included`;
   }
-  return `${base}, no hidden costs`;
+  return `${base}, no hidden fees`;
 }
 
 function truncate(s: string, max: number): string {
@@ -115,7 +130,7 @@ function businessLd(trailers: PublicTrailer[]) {
     name: BRAND,
     url: SITE,
     email: COMPANY.email,
-    description: `Deluxe Logistics rents reefer trailers and dry vans to carriers and owner-operators at flat monthly rates with no mileage fees. Pickup in ${WHERE}.`,
+    description: `Deluxe Logistics rents reefer trailers and dry vans to carriers and owner-operators at one flat monthly rate: unlimited miles and reefer engine hours included, month to month. ${PLAN} Pickup in ${WHERE}.`,
     address: {
       "@type": "PostalAddress",
       ...(YARD.address ? { streetAddress: YARD.address } : {}),
@@ -127,18 +142,34 @@ function businessLd(trailers: PublicTrailer[]) {
     openingHours: COMPANY.hoursSchema,
     areaServed: "United States",
     priceRange: "$$",
-    ...(n > 0
-      ? {
-          makesOffer: {
-            "@type": "AggregateOffer",
-            priceCurrency: "USD",
-            offerCount: n,
-            lowPrice: (Math.min(...prices) / 100).toFixed(2),
-            highPrice: (Math.max(...prices) / 100).toFixed(2),
-            description: "Monthly trailer rentals at a flat rate with no mileage fees. Security deposit equals two months' rent.",
-          },
-        }
-      : {}),
+    makesOffer: [
+      ...(n > 0
+        ? [
+            {
+              "@type": "AggregateOffer",
+              priceCurrency: "USD",
+              offerCount: n,
+              lowPrice: (Math.min(...prices) / 100).toFixed(2),
+              highPrice: (Math.max(...prices) / 100).toFixed(2),
+              description: "Monthly trailer rentals at one flat rate: unlimited miles and reefer engine hours included. Security deposit equals two months' rent.",
+            },
+          ]
+        : []),
+      {
+        "@type": "Offer",
+        name: `${SERVICE_PLAN.name} (optional add-on to any rental)`,
+        description: `${SERVICE_PLAN.summary} ${SERVICE_PLAN.scope}`,
+        priceCurrency: "USD",
+        price: (SERVICE_PLAN.monthlyCents / 100).toFixed(2),
+        priceSpecification: {
+          "@type": "UnitPriceSpecification",
+          price: (SERVICE_PLAN.monthlyCents / 100).toFixed(2),
+          priceCurrency: "USD",
+          unitCode: "MON",
+          unitText: "month",
+        },
+      },
+    ],
   };
 }
 
@@ -176,16 +207,22 @@ function productLd(t: PublicTrailer) {
     { "@type": "PropertyValue", name: "Equipment type", value: formatTypeLabel(t.type) },
     ...(t.year ? [{ "@type": "PropertyValue", name: "Year", value: t.year }] : []),
     ...(t.location ? [{ "@type": "PropertyValue", name: "Location", value: t.location }] : []),
-    ...(t.type === "reefer" && t.engineHourRate
-      ? [{ "@type": "PropertyValue", name: "Reefer engine hour rate (USD)", value: (t.engineHourRate / 100).toFixed(2) }]
+    ...(t.type === "reefer"
+      ? [
+          { "@type": "PropertyValue", name: "Reefer unit", value: REEFER_UNIT },
+          t.engineHourRate
+            ? { "@type": "PropertyValue", name: "Reefer engine hour rate (USD)", value: (t.engineHourRate / 100).toFixed(2) }
+            : { "@type": "PropertyValue", name: "Reefer engine hours", value: "Included in the monthly rate" },
+        ]
       : []),
+    { "@type": "PropertyValue", name: `Optional ${SERVICE_PLAN.name} (USD per month)`, value: (SERVICE_PLAN.monthlyCents / 100).toFixed(2) },
   ];
   const photoNote = isRepresentativePhoto(photoUrls(t)[0]) ? ` ${REPRESENTATIVE_PHOTO_NOTE}` : "";
   return {
     "@context": "https://schema.org",
     "@type": "Product",
     name: formatTrailerName(t),
-    description: `${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}${photoNote}`,
+    description: `${priceSentence(t)}. ${DEPOSIT} ${PLAN}${t.description ? ` ${t.description}` : ""}${photoNote}`,
     image: photoUrls(t),
     sku: t.unitNumber ?? undefined,
     brand: t.make ? { "@type": "Brand", name: t.make } : undefined,
@@ -215,12 +252,13 @@ function productLd(t: PublicTrailer) {
 export function homeHead(trailers: PublicTrailer[]): string {
   const n = trailers.length;
   const low = n ? formatPrice(Math.min(...trailers.map((t) => t.priceMonthly))) : null;
+  const rate = flatRate(trailers);
   const description = n
-    ? `Rent a reefer or dry van in ${WHERE}, from ${low}/month. Flat monthly rate, no mileage fees. ${n} unit${n === 1 ? "" : "s"} available now. Apply online in minutes.`
-    : `Reefer and dry van rentals in ${WHERE}, at flat monthly rates with no mileage fees. Apply online in minutes.`;
+    ? `Rent a reefer or dry van in ${WHERE}: ${rate ? `${formatPrice(rate)}/month flat` : `from ${low}/month`}, unlimited miles, reefer engine hours included, month to month. ${PLAN} ${n} unit${n === 1 ? "" : "s"} available now. Apply online in minutes.`
+    : `Reefer and dry van rentals in ${WHERE}, at one flat monthly rate with unlimited miles and reefer engine hours included. ${PLAN} Apply online in minutes.`;
   const image = trailers.map((t) => photoUrls(t)[0]).find(Boolean) ?? null;
   return [
-    metaTags({ title: HOME_TITLE, description, canonical: `${SITE}/`, image }),
+    metaTags({ title: homeTitle(trailers), description, canonical: `${SITE}/`, image }),
     jsonLd(businessLd(trailers)),
     jsonLd(faqLd()),
     ...(n ? [jsonLd(itemListLd(trailers))] : []),
@@ -231,7 +269,7 @@ export function trailerHead(t: PublicTrailer): string {
   const name = formatTrailerName(t);
   const title = `${name} for Rent | ${formatPrice(t.priceMonthly)}/mo | Deluxe Logistics, Inwood WV`;
   const description = truncate(
-    `${name} available now from ${BRAND} in ${WHERE}. ${priceSentence(t)}. ${DEPOSIT}${t.description ? ` ${t.description}` : ""}`,
+    `${name} available now from ${BRAND} in ${WHERE}. ${priceSentence(t)}. ${DEPOSIT} ${PLAN}${t.description ? ` ${t.description}` : ""}`,
     300,
   );
   return [
@@ -262,15 +300,25 @@ function contactLines(): string {
 
 export function homeBody(trailers: PublicTrailer[]): string {
   const n = trailers.length;
+  const rate = flatRate(trailers);
   const units = n
     ? `<ul class="units">\n${trailers.map(unitLine).join("\n")}\n</ul>`
     : `<p>No units are listed right now. Email <a href="mailto:${COMPANY.email}">${COMPANY.email}</a> to ask about upcoming availability.</p>`;
   return `<div id="ssr">
 ${PRERENDER_CSS}
-<h1>Trailer rentals in Inwood, WV, off I-81. No mileage fees.</h1>
-<p>${escapeHtml(BRAND)} rents reefers and dry vans to carriers and owner-operators at a flat monthly rate. No mileage fees. Reefer engine hours billed separately. ${escapeHtml(DEPOSIT)} ${escapeHtml(REVIEW)}</p>
+<h1>Trailer rentals in Inwood, WV, off I-81. ${escapeHtml(rate ? `${formatPrice(rate)} a month, reefer hours included.` : "One flat monthly rate, reefer hours included.")}</h1>
+<p>${escapeHtml(BRAND)} rents reefers and dry vans to carriers and owner-operators at one flat monthly rate. No mileage fees. Reefer engine hours included. ${escapeHtml(DEPOSIT)} ${escapeHtml(REVIEW)}</p>
 <h2>Available now: ${n} unit${n === 1 ? "" : "s"}</h2>
 ${units}
+<h2>What the rate includes</h2>
+<ul>
+${RATE_INCLUDES.map((line) => `<li>${escapeHtml(line)}</li>`).join("\n")}
+</ul>
+<p>What you still pay: ${escapeHtml(RENTER_PAYS)}</p>
+<h2>Optional ${escapeHtml(SERVICE_PLAN.name)}: ${escapeHtml(formatCents(SERVICE_PLAN.monthlyCents))}/month</h2>
+<p>${escapeHtml(SERVICE_PLAN.summary)} ${escapeHtml(SERVICE_PLAN.scope)} Add it on the application; it is billed with the rent.</p>
+<h2>Reefer units</h2>
+<p>Every refrigerated trailer runs a ${escapeHtml(REEFER_UNIT)} unit. ${escapeHtml(REEFER_UNIT_NOTE)} Engine hours are included in the rate.</p>
 <h2>How it works</h2>
 <ol>
 <li>Pick a unit above and open its page.</li>
@@ -304,6 +352,8 @@ ${hero}
 ${t.location ? `<p class="muted">Location: ${escapeHtml(t.location)}</p>` : ""}
 ${t.vinLast6 ? `<p class="muted">VIN ending in ${escapeHtml(t.vinLast6)}</p>` : ""}
 ${t.description ? `<p>${escapeHtml(t.description)}</p>` : ""}
+${t.type === "reefer" ? `<p>Reefer unit: ${escapeHtml(REEFER_UNIT)}. ${escapeHtml(REEFER_UNIT_NOTE)} Engine hours are included in the rate.</p>` : ""}
+<p>${escapeHtml(PLAN)}</p>
 ${features}
 ${photos}
 <p><a href="/apply/${t.id}">Apply to rent this unit</a> — ${escapeHtml(REVIEW)}</p>
@@ -357,15 +407,19 @@ export function buildLlmsTxt(trailers: PublicTrailer[]): string {
 
   return `# ${BRAND} — trailers.rentals
 
-> Reefer and dry van trailer rentals in ${WHERE}, for freight carriers and owner-operators. Flat monthly rate, no mileage fees. Apply online; ${REVIEW.charAt(0).toLowerCase()}${REVIEW.slice(1)}
+> Reefer and dry van trailer rentals in ${WHERE}, for freight carriers and owner-operators. One flat monthly rate: unlimited miles and reefer engine hours included, month to month. Apply online; ${REVIEW.charAt(0).toLowerCase()}${REVIEW.slice(1)}
 
 ## Pricing (as of ${fmtDate(null)})
 
-- Monthly rate: ${range}, listed per unit below
+- Monthly rate: ${range}, listed per unit below. The rate includes unlimited miles and, on refrigerated units, reefer engine hours
 - Mileage fees: none
+- Reefer engine hours: included in the monthly rate (an hourly rate would be shown on the unit if one were ever set)
 - Security deposit: two months' rent, billed with the first month when you are approved
-- Reefer engine hours: billed separately on refrigerated units (hourly rate shown on the unit when set)
+- Optional ${SERVICE_PLAN.name}: ${formatCents(SERVICE_PLAN.monthlyCents)}/month, chosen on the application and billed with the rent. ${SERVICE_PLAN.summary} ${SERVICE_PLAN.scope}
+- What the renter still pays: ${RENTER_PAYS}
+- Term: month to month, 30 days' notice to end. No fleet minimum
 - Application fee: none
+- Reefer units: every refrigerated trailer runs a ${REEFER_UNIT} unit (${REEFER_UNIT_NOTE.replace(/\.$/, "")})
 
 ## Available units (${n})
 
@@ -390,7 +444,7 @@ ${unitBlock}
 - Available units as JSON: ${SITE}/api/trailers
 - One unit: ${SITE}/api/trailers/{id}
 - Sitemap: ${SITE}/sitemap.xml
-- Fields: id, unitNumber, type (reefer | dry_van), make, model, year, priceMonthly (USD cents), engineHourRate (USD cents per hour, null when not set), features[], location, vinLast6, photos[].url (relative to ${SITE})
+- Fields: id, unitNumber, type (reefer | dry_van), make, model, year, priceMonthly (USD cents), engineHourRate (USD cents per hour; null means engine hours are included in the monthly rate), features[], location, vinLast6, photos[].url (relative to ${SITE})
 `;
 }
 

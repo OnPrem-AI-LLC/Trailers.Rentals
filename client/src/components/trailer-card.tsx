@@ -152,8 +152,10 @@ export default function TrailerCard({ trailer, onQuickView }: TrailerCardProps) 
           ) : null}
           <p className="text-[11px] text-muted-foreground font-medium">
             {trailer.type === "reefer"
-              ? "No mileage fees. Reefer engine hours billed separately."
-              : "No mileage fees. No hidden costs."}
+              ? trailer.engineHourRate
+                ? "No mileage fees. Reefer engine hours billed at the rate above."
+                : "Reefer engine hours included. No mileage fees."
+              : "No mileage fees. No hidden fees."}
           </p>
         </div>
 

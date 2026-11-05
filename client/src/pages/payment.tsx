@@ -19,6 +19,7 @@ import {
 } from "@stripe/react-stripe-js";
 import type { Rental } from "@shared/schema";
 import { RENEWAL_TERMS_VERSION, renewalTerms } from "@shared/renewal";
+import { SERVICE_PLAN } from "@shared/pricing";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ interface IntentData {
   amount: number;
   trailerLabel: string;
   monthlyRate: number;
+  servicePlanMonthly?: number;
 }
 
 // ── Shared pieces of the checkout layout ────────────────────────────────────
@@ -37,10 +39,12 @@ interface IntentData {
 // at normal size and colour, and the button stays disabled until ticked.
 function RenewalConsentBox({
   monthlyRate,
+  servicePlanMonthly = 0,
   agreed,
   onAgreedChange,
 }: {
   monthlyRate: number;
+  servicePlanMonthly?: number;
   agreed: boolean;
   onAgreedChange: (agreed: boolean) => void;
 }) {
@@ -48,7 +52,7 @@ function RenewalConsentBox({
   return (
     <div className="border border-border rounded-xl p-4 space-y-3 text-sm text-foreground">
       <p className="leading-relaxed">
-        <span className="font-bold">Automatic monthly billing.</span> {renewalTerms(monthlyRate)}
+        <span className="font-bold">Automatic monthly billing.</span> {renewalTerms(monthlyRate, servicePlanMonthly)}
       </p>
       <div className="flex items-start gap-2.5">
         <Checkbox
@@ -65,13 +69,19 @@ function RenewalConsentBox({
   );
 }
 
-function DepositSummary({ monthly, depositTotal }: { monthly: number; depositTotal: number }) {
+function DepositSummary({ monthly, servicePlan = 0, depositTotal }: { monthly: number; servicePlan?: number; depositTotal: number }) {
   return (
     <div className="bg-secondary/40 border border-border rounded-xl p-4 space-y-2 text-sm">
       <div className="flex justify-between">
         <span className="text-muted-foreground">First month's rent</span>
         <span>${(monthly / 100).toLocaleString()}</span>
       </div>
+      {servicePlan > 0 && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">{SERVICE_PLAN.name}, first month</span>
+          <span>${(servicePlan / 100).toLocaleString()}</span>
+        </div>
+      )}
       <div className="flex justify-between">
         <span className="text-muted-foreground">Security deposit (1 month)</span>
         <span>${(monthly / 100).toLocaleString()}</span>
@@ -81,7 +91,7 @@ function DepositSummary({ monthly, depositTotal }: { monthly: number; depositTot
         <span className="text-primary">${(depositTotal / 100).toLocaleString()}</span>
       </div>
       <p className="text-xs text-muted-foreground">
-        Security deposit is fully refundable at lease end. No mileage fees. No hidden charges.
+        Security deposit is fully refundable at lease end. No mileage fees. Reefer hours included. No hidden charges.
       </p>
     </div>
   );
@@ -121,19 +131,21 @@ function TrustLine() {
 // Pay button disabled. The server computes the deposit as two months' rent.
 function PreConsentForm({
   monthlyRate,
+  servicePlanMonthly,
   agreed,
   onAgreedChange,
   preparing,
 }: {
   monthlyRate: number;
+  servicePlanMonthly: number;
   agreed: boolean;
   onAgreedChange: (agreed: boolean) => void;
   preparing: boolean;
 }) {
-  const depositTotal = monthlyRate * 2;
+  const depositTotal = monthlyRate * 2 + servicePlanMonthly;
   return (
     <form onSubmit={e => e.preventDefault()} className="space-y-6">
-      <DepositSummary monthly={monthlyRate} depositTotal={depositTotal} />
+      <DepositSummary monthly={monthlyRate} servicePlan={servicePlanMonthly} depositTotal={depositTotal} />
 
       <div className="bg-background border border-border rounded-xl p-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Card Details</p>
@@ -146,7 +158,7 @@ function PreConsentForm({
         )}
       </div>
 
-      <RenewalConsentBox monthlyRate={monthlyRate} agreed={agreed} onAgreedChange={onAgreedChange} />
+      <RenewalConsentBox monthlyRate={monthlyRate} servicePlanMonthly={servicePlanMonthly} agreed={agreed} onAgreedChange={onAgreedChange} />
 
       <PayButton depositTotal={depositTotal} disabled />
       <TrustLine />
@@ -222,10 +234,11 @@ function CheckoutForm({
 
   const depositTotal = intentData.amount;
   const monthly = intentData.monthlyRate;
+  const plan = intentData.servicePlanMonthly ?? 0;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <DepositSummary monthly={monthly} depositTotal={depositTotal} />
+      <DepositSummary monthly={monthly} servicePlan={plan} depositTotal={depositTotal} />
 
       {/* Stripe card element */}
       <div className="bg-background border border-border rounded-xl p-4">
@@ -244,7 +257,7 @@ function CheckoutForm({
         </div>
       )}
 
-      <RenewalConsentBox monthlyRate={monthly} agreed={agreed} onAgreedChange={onAgreedChange} />
+      <RenewalConsentBox monthlyRate={monthly} servicePlanMonthly={plan} agreed={agreed} onAgreedChange={onAgreedChange} />
 
       <PayButton
         depositTotal={depositTotal}
@@ -375,6 +388,7 @@ export default function PaymentPage() {
   }
 
   const monthlyRate = rental?.monthlyRate ?? 0;
+  const servicePlanMonthly = rental?.servicePlanMonthly ?? 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -455,6 +469,7 @@ export default function PaymentPage() {
             ) : !intentData ? (
               <PreConsentForm
                 monthlyRate={monthlyRate}
+                servicePlanMonthly={servicePlanMonthly}
                 agreed={agreed}
                 onAgreedChange={setAgreed}
                 preparing={agreed}

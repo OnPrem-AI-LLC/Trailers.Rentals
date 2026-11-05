@@ -123,6 +123,14 @@ export default function EngineHoursPage() {
         </div>
 
         {/* Rate info */}
+        {!rentalLoading && rate == null && (
+          <div className="bg-card border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-foreground font-semibold mb-1">
+              <Clock className="w-4 h-4 text-primary" /> Engine hours are included in your rate
+            </div>
+            Nothing here is billed. Readings help us schedule reefer oil changes and service.
+          </div>
+        )}
         {rate != null && (
           <div className="bg-amber-950/40 border border-amber-800/60 rounded-xl p-4 mb-6 text-sm">
             <div className="flex items-center gap-2 text-amber-300 font-semibold mb-1">

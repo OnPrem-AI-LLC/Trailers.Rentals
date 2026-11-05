@@ -4,6 +4,7 @@ import { db } from "./db";
 import { emailLogs, users, marketingSuppressions } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
 import { CANCELLATION_POLICY, RENEWAL_TERMS_VERSION, formatMonthly, renewalTerms } from "@shared/renewal";
+import { SERVICE_PLAN } from "@shared/pricing";
 import { makeUnsubscribeToken } from "./unsubscribe";
 
 const FROM = "noreply@getonprem.com";
@@ -182,6 +183,7 @@ interface ApplicationData {
   mcNumber?: string | null;
   intendedUse: string;
   intendedUseDetails?: string | null;
+  servicePlan?: boolean;
   authorizedUser?: string | null;
   trailerVin?: string;
   trailerType?: string;
@@ -206,17 +208,27 @@ function esc(str: string | null | undefined): string {
 // Renewal terms + cancellation policy, repeated in every billing email so an
 // enrolled renter always has a retainable copy (ROSCA / state auto-renewal
 // laws). The wording comes from shared/renewal.ts; only the layout lives here.
-function renewalTermsHtml(monthlyRateCents: number, dashboardUrl: string): string {
+// A Service Plan row under the Monthly Rate row, in the same table style.
+function planRowHtml(cents: number | null | undefined, pad = "6px"): string {
+  if (!cents) return "";
+  return `<tr><td style="padding: ${pad} 0; color: #64748b;">${SERVICE_PLAN.name}</td><td style="padding: ${pad} 0;">${formatMonthly(cents)}/month — ${esc(SERVICE_PLAN.summary)}</td></tr>`;
+}
+
+function planText(cents: number | null | undefined): string {
+  return cents ? `\n${SERVICE_PLAN.name}: ${formatMonthly(cents)}/month` : "";
+}
+
+function renewalTermsHtml(monthlyRateCents: number, servicePlanCents: number, dashboardUrl: string): string {
   return `
     <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 20px 0; font-size: 14px; color: #1e293b; line-height: 1.6;">
       <p style="margin: 0 0 8px;"><strong>Automatic monthly billing</strong></p>
-      <p style="margin: 0 0 8px;">${esc(renewalTerms(monthlyRateCents))}</p>
+      <p style="margin: 0 0 8px;">${esc(renewalTerms(monthlyRateCents, servicePlanCents))}</p>
       <p style="margin: 0;">Manage or cancel monthly billing in your <a href="${dashboardUrl}" style="color: #e63946;">dashboard</a>. Terms version ${RENEWAL_TERMS_VERSION}.</p>
     </div>`;
 }
 
-function renewalTermsText(monthlyRateCents: number, dashboardUrl: string): string {
-  return `Automatic monthly billing: ${renewalTerms(monthlyRateCents)}\nManage or cancel monthly billing: ${dashboardUrl}\nTerms version ${RENEWAL_TERMS_VERSION}`;
+function renewalTermsText(monthlyRateCents: number, servicePlanCents: number, dashboardUrl: string): string {
+  return `Automatic monthly billing: ${renewalTerms(monthlyRateCents, servicePlanCents)}\nManage or cancel monthly billing: ${dashboardUrl}\nTerms version ${RENEWAL_TERMS_VERSION}`;
 }
 
 function escApp(app: ApplicationData): ApplicationData {
@@ -256,6 +268,7 @@ export async function sendAdminApplicationAlert(rawApp: ApplicationData): Promis
       <tr><td style="padding: 8px 0; color: #64748b;">MC Number</td><td style="padding: 8px 0;">${app.mcNumber || "Not provided"}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Trailer</td><td style="padding: 8px 0;">${app.trailerName || app.trailerType || "N/A"}${app.trailerVin ? ` — VIN: ${app.trailerVin}` : ""}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Monthly Rate</td><td style="padding: 8px 0;">${price}</td></tr>
+      <tr><td style="padding: 8px 0; color: #64748b;">${SERVICE_PLAN.name}</td><td style="padding: 8px 0;">${app.servicePlan ? `<strong>Requested</strong> — ${formatMonthly(SERVICE_PLAN.monthlyCents)}/month (${esc(SERVICE_PLAN.summary)})` : "Not requested"}</td></tr>
       <tr><td style="padding: 8px 0; color: #64748b;">Intended Use</td><td style="padding: 8px 0;">${app.intendedUse}</td></tr>
       ${app.intendedUseDetails ? `<tr><td style="padding: 8px 0; color: #64748b;">Details</td><td style="padding: 8px 0;">${app.intendedUseDetails}</td></tr>` : ""}
       ${app.authorizedUser ? `<tr><td style="padding: 8px 0; color: #64748b;">Authorized User</td><td style="padding: 8px 0;">${app.authorizedUser}</td></tr>` : ""}
@@ -282,6 +295,7 @@ export async function sendRenterAcknowledgment(rawApp: ApplicationData): Promise
   const html = emailTemplate("Application Received", `
     <p>Hi ${app.ownerName},</p>
     <p>We've received your rental application for <strong>${app.trailerName || "your requested trailer"}</strong>.</p>
+    ${app.servicePlan ? `<p>You asked for the ${SERVICE_PLAN.name} (${formatMonthly(SERVICE_PLAN.monthlyCents)}/month): ${esc(SERVICE_PLAN.summary)} It is billed with your rent once the rental starts.</p>` : ""}
     <p><strong>What happens next:</strong></p>
     <ul>
       <li>Our team will review your application and DOT/MC information</li>
@@ -422,6 +436,7 @@ export interface AgreementData {
   trailerVin: string;
   trailerType: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   signedAt: Date;
   signedByName: string;
   pickupDate?: Date;
@@ -435,6 +450,7 @@ export interface AgreementRequestData {
   trailerVin: string;
   trailerType: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
 }
 
 export async function sendAgreementSignedEmails(data: AgreementData): Promise<void> {
@@ -457,7 +473,7 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
         <tr><td style="padding: 6px 0; color: #64748b;">Signed By</td><td style="padding: 6px 0;">${safeSignedBy}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Date Signed</td><td style="padding: 6px 0;">${esc(signedDate)}</td></tr>
         ${data.pickupDate ? `<tr><td style="padding: 6px 0; color: #64748b;">Requested Pickup</td><td style="padding: 6px 0; font-weight: bold;">${esc(data.pickupDate.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }))}</td></tr>` : ""}
@@ -478,7 +494,7 @@ export async function sendAgreementSignedEmails(data: AgreementData): Promise<vo
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Renter Email</td><td style="padding: 6px 0;"><a href="mailto:${safeEmail}">${safeEmail}</a></td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
         <tr><td style="padding: 6px 0; color: #64748b;">Signed By</td><td style="padding: 6px 0;">${safeSignedBy}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Date</td><td style="padding: 6px 0;">${esc(signedDate)}</td></tr>
         ${data.pickupDate ? `<tr><td style="padding: 6px 0; color: #64748b;">Requested Pickup</td><td style="padding: 6px 0; font-weight: bold; color: #e63946;">${esc(data.pickupDate.toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</td></tr>` : ""}
@@ -524,7 +540,7 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Equipment</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
         <tr><td style="padding: 6px 0; color: #64748b;">No Mileage Fees</td><td style="padding: 6px 0; color: #22c55e; font-weight: bold;">Unlimited Miles</td></tr>
       </table>
     </div>
@@ -545,7 +561,7 @@ export async function sendAgreementRequestEmail(data: AgreementRequestData): Pro
     from: FROM,
     subject: `Action Required: Sign your rental agreement — ${data.trailerType} (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour rental agreement for ${data.trailerType} VIN: ${data.trailerVin} is ready to sign.\n\nMonthly Rate: ${monthlyStr} — No Mileage Fees\n\nSign here: ${signUrl}\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${data.renterName},\n\nYour rental agreement for ${data.trailerType} VIN: ${data.trailerVin} is ready to sign.\n\nMonthly Rate: ${monthlyStr}${planText(data.servicePlanMonthly)} — No Mileage Fees\n\nSign here: ${signUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "agreement_request", entityType: "rental", entityId: data.rentalId });
 }
 
@@ -556,6 +572,7 @@ export async function sendDepositReceivedAdminEmail(data: {
   trailerVin: string;
   trailerType: string;
   monthlyRate: number;
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   paymentIntentId?: string;
 }): Promise<void> {
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
@@ -567,7 +584,7 @@ export async function sendDepositReceivedAdminEmail(data: {
     <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
       <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
       <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${esc(data.trailerType)} — VIN: ${esc(data.trailerVin)}</td></tr>
-      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0; color: #16a34a; font-weight: bold;">${monthlyStr}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0; color: #16a34a; font-weight: bold;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "5px")}
       <tr><td style="padding: 5px 0; color: #64748b;">Deposit Paid</td><td style="padding: 5px 0; color: #16a34a;">$${((data.monthlyRate * 2) / 100).toLocaleString()} ✓</td></tr>
       ${data.paymentIntentId ? `<tr><td style="padding: 5px 0; color: #64748b;">Stripe PI</td><td style="padding: 5px 0; font-family: monospace; font-size: 12px;">${esc(data.paymentIntentId)}</td></tr>` : ""}
     </table>
@@ -581,7 +598,7 @@ export async function sendDepositReceivedAdminEmail(data: {
     from: FROM,
     subject: `[Deposit Paid] ${data.companyName} — ${data.trailerType} rental now active`,
     html,
-    text: `Security deposit received.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}\nDeposit: $${((data.monthlyRate * 2) / 100).toLocaleString()}\n\nView: ${adminUrl}`,
+    text: `Security deposit received.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}${planText(data.servicePlanMonthly)}\nDeposit: $${((data.monthlyRate * 2) / 100).toLocaleString()}\n\nView: ${adminUrl}`,
   }, { template: "admin_deposit_notification", entityType: "rental", entityId: data.rentalId });
 }
 
@@ -594,6 +611,7 @@ export interface DepositConfirmedData {
   trailerVin: string;
   trailerType: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   // false when the deposit was taken without recorded renewal consent, so the
   // renter still has to start monthly billing from the dashboard
   subscriptionStarted?: boolean;
@@ -605,6 +623,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
   const safeVin = esc(data.trailerVin);
   const safeType = esc(data.trailerType);
   const monthlyStr = `$${(data.monthlyRate / 100).toLocaleString()}/month`;
+  const totalStr = formatMonthly(data.monthlyRate + (data.servicePlanMonthly ?? 0));
   const dashboardUrl = `${domain()}/dashboard`;
   const subscriptionStarted = data.subscriptionStarted !== false;
 
@@ -615,7 +634,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold; color: #16a34a;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold; color: #16a34a;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
         <tr><td style="padding: 6px 0; color: #64748b;">Status</td><td style="padding: 6px 0; font-weight: bold; color: #16a34a;">Active ✓</td></tr>
       </table>
     </div>
@@ -623,11 +642,11 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
     <ul style="color: #374151; font-size: 14px; padding-left: 20px; line-height: 2;">
       <li>Coordinate pickup timing with our team</li>
       ${subscriptionStarted
-        ? `<li>Your first monthly charge of ${monthlyStr.replace("/month", "")} is due 30 days from today, then on the same day each month</li>`
+        ? `<li>Your first monthly charge of ${totalStr} is due 30 days from today, then on the same day each month</li>`
         : `<li>Monthly billing is not set up yet: start it from your dashboard before pickup</li>`}
       <li>Track your rental status and documents in your dashboard</li>
     </ul>
-    ${renewalTermsHtml(data.monthlyRate, dashboardUrl)}
+    ${renewalTermsHtml(data.monthlyRate, data.servicePlanMonthly ?? 0, dashboardUrl)}
     <a href="${dashboardUrl}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Your Dashboard →
     </a>
@@ -638,7 +657,7 @@ export async function sendDepositConfirmedEmail(data: DepositConfirmedData): Pro
     from: FROM,
     subject: `Your Deluxe Logistics rental is now active — ${data.trailerType} (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\n${subscriptionStarted ? "Your first monthly charge is due 30 days from today, then on the same day each month." : "Monthly billing is not set up yet: start it from your dashboard before pickup."}\n\n${renewalTermsText(data.monthlyRate, dashboardUrl)}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
+    text: `Hi ${data.renterName},\n\nYour security deposit has been confirmed and your rental is now active!\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}${planText(data.servicePlanMonthly)}\n\n${subscriptionStarted ? "Your first monthly charge is due 30 days from today, then on the same day each month." : "Monthly billing is not set up yet: start it from your dashboard before pickup."}\n\n${renewalTermsText(data.monthlyRate, data.servicePlanMonthly ?? 0, dashboardUrl)}\n\nLog in to your dashboard: ${dashboardUrl}\n\nDeluxe Logistics Inc.`,
   }, { template: "deposit_confirmed", entityType: "rental", entityId: data.rentalId });
 }
 
@@ -651,6 +670,7 @@ export interface SubscriptionCancelRequestedData {
   trailerType: string;
   trailerVin: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   endsAt: Date;        // later of the Stripe period end and 30 days from the request
 }
 
@@ -672,7 +692,7 @@ export async function sendSubscriptionCancelRequestedEmails(data: SubscriptionCa
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
         <tr><td style="padding: 6px 0; color: #64748b;">Billing Ends</td><td style="padding: 6px 0; font-weight: bold; color: #ea580c;">${endStr}</td></tr>
       </table>
     </div>
@@ -680,7 +700,7 @@ export async function sendSubscriptionCancelRequestedEmails(data: SubscriptionCa
     <ul style="color: #374151; font-size: 14px; padding-left: 20px; line-height: 2;">
       <li>Monthly rent stops after ${endStr}. A monthly renewal that falls before that date is billed in full; nothing is charged after it.</li>
       <li>The trailer must be returned by ${endStr} under your rental agreement.</li>
-      <li>Amounts owed under the agreement, such as late fees, engine-hour charges or damage, may still apply.</li>
+      <li>Amounts owed under the agreement, such as late fees or damage, may still apply.</li>
       <li>Your security deposit is handled as described in your rental agreement.</li>
     </ul>
     <p style="color: #374151; font-size: 14px;">${esc(CANCELLATION_POLICY)}</p>
@@ -696,7 +716,7 @@ export async function sendSubscriptionCancelRequestedEmails(data: SubscriptionCa
       <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${safeCompany}</td></tr>
       <tr><td style="padding: 5px 0; color: #64748b;">Renter</td><td style="padding: 5px 0;">${safeName} (${esc(data.renterEmail)})</td></tr>
       <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "5px")}
       <tr><td style="padding: 5px 0; color: #64748b;">Billing Ends</td><td style="padding: 5px 0; font-weight: bold; color: #ea580c;">${endStr}</td></tr>
     </table>
     <p style="color: #374151; font-size: 14px;">Arrange the return for ${endStr} and process the deposit refund after inspection.</p>
@@ -711,7 +731,7 @@ export async function sendSubscriptionCancelRequestedEmails(data: SubscriptionCa
       from: FROM,
       subject: `Cancellation received — billing ends ${endStr} (${data.trailerType} ${data.trailerVin})`,
       html: renterHtml,
-      text: `Hi ${data.renterName},\n\nWe received your request to stop monthly billing. Your request is binding and your subscription ends on ${endStr}, the later of the end of the current billing month and 30 days from your request.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\nMonthly rent stops after ${endStr}. The trailer must be returned by ${endStr} under your rental agreement. Amounts owed under the agreement, such as late fees, engine-hour charges or damage, may still apply. Your security deposit is handled as described in your rental agreement.\n\n${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
+      text: `Hi ${data.renterName},\n\nWe received your request to stop monthly billing. Your request is binding and your subscription ends on ${endStr}, the later of the end of the current billing month and 30 days from your request.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}${planText(data.servicePlanMonthly)}\n\nMonthly rent stops after ${endStr}. The trailer must be returned by ${endStr} under your rental agreement. Amounts owed under the agreement, such as late fees, engine-hour charges or damage, may still apply. Your security deposit is handled as described in your rental agreement.\n\n${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
     }, { template: "subscription_cancel_requested", entityType: "rental", entityId: data.rentalId }),
     sendTracked({
       to: ADMIN_EMAIL,
@@ -735,6 +755,7 @@ export interface SubscriptionStartedData {
   trailerType: string;
   trailerVin: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   renewalTermsVersion: string | null;
 }
 
@@ -754,10 +775,10 @@ export async function sendSubscriptionStartedEmail(data: SubscriptionStartedData
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
         <tr><td style="padding: 6px 0; color: #64748b;">Company</td><td style="padding: 6px 0; font-weight: bold;">${safeCompany}</td></tr>
         <tr><td style="padding: 6px 0; color: #64748b;">Trailer</td><td style="padding: 6px 0;">${safeType} — VIN: ${safeVin}</td></tr>
-        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>
+        <tr><td style="padding: 6px 0; color: #64748b;">Monthly Rate</td><td style="padding: 6px 0; font-weight: bold;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "6px")}
       </table>
     </div>
-    ${renewalTermsHtml(data.monthlyRate, dashboardUrl)}
+    ${renewalTermsHtml(data.monthlyRate, data.servicePlanMonthly ?? 0, dashboardUrl)}
     <p><strong>Cancellation policy:</strong> ${esc(CANCELLATION_POLICY)}</p>
     <a href="${dashboardUrl}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">
       View Your Dashboard →
@@ -769,7 +790,7 @@ export async function sendSubscriptionStartedEmail(data: SubscriptionStartedData
     from: FROM,
     subject: `Monthly billing started — ${data.trailerType} (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nMonthly billing for your trailer rental is now set up. This email is your copy of the terms you agreed to.${data.renewalTermsVersion ? ` Terms version ${data.renewalTermsVersion}.` : ""}\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}\n\n${renewalTermsText(data.monthlyRate, dashboardUrl)}\n\nCancellation policy: ${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
+    text: `Hi ${data.renterName},\n\nMonthly billing for your trailer rental is now set up. This email is your copy of the terms you agreed to.${data.renewalTermsVersion ? ` Terms version ${data.renewalTermsVersion}.` : ""}\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly Rate: ${monthlyStr}${planText(data.servicePlanMonthly)}\n\n${renewalTermsText(data.monthlyRate, data.servicePlanMonthly ?? 0, dashboardUrl)}\n\nCancellation policy: ${CANCELLATION_POLICY}\n\nDashboard: ${dashboardUrl}\n\n${COMPANY.name}`,
   }, { template: "subscription_started", entityType: "rental", entityId: data.rentalId });
 }
 
@@ -780,6 +801,7 @@ export async function sendSubscriptionBlockedNoConsentAdminEmail(data: {
   trailerType: string;
   trailerVin: string;
   monthlyRate: number; // cents
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
 }): Promise<void> {
   const adminUrl = `${domain()}/admin/rentals/${data.rentalId}`;
   const monthlyStr = `${formatMonthly(data.monthlyRate)}/month`;
@@ -790,7 +812,7 @@ export async function sendSubscriptionBlockedNoConsentAdminEmail(data: {
     <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 16px 0;">
       <tr><td style="padding: 5px 0; color: #64748b;">Company</td><td style="padding: 5px 0; font-weight: bold;">${esc(data.companyName)}</td></tr>
       <tr><td style="padding: 5px 0; color: #64748b;">Trailer</td><td style="padding: 5px 0;">${esc(data.trailerType)} — VIN: ${esc(data.trailerVin)}</td></tr>
-      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>
+      <tr><td style="padding: 5px 0; color: #64748b;">Monthly Rate</td><td style="padding: 5px 0;">${monthlyStr}</td></tr>${planRowHtml(data.servicePlanMonthly, "5px")}
     </table>
     <a href="${adminUrl}" style="display: inline-block; background: #e63946; color: white; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
       View Rental →
@@ -802,7 +824,7 @@ export async function sendSubscriptionBlockedNoConsentAdminEmail(data: {
     from: FROM,
     subject: `[Action] ${data.companyName} — deposit paid, no renewal consent, subscription not started`,
     html,
-    text: `Deposit confirmed but no renewal consent is recorded, so no subscription was created.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}\n\nThe renter can start monthly billing from their dashboard.\n\nView: ${adminUrl}`,
+    text: `Deposit confirmed but no renewal consent is recorded, so no subscription was created.\n\nCompany: ${data.companyName}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\nMonthly: ${monthlyStr}${planText(data.servicePlanMonthly)}\n\nThe renter can start monthly billing from their dashboard.\n\nView: ${adminUrl}`,
   }, { template: "admin_subscription_blocked_no_consent", entityType: "rental", entityId: data.rentalId });
 }
 
@@ -846,6 +868,7 @@ export interface MonthlyInvoiceEmailData {
   trailerVin: string;
   amount: number;         // cents
   monthlyRate: number;    // cents; the recurring rate the renewal terms quote
+  servicePlanMonthly?: number | null; // cents per month for the optional Service Plan; 0 or null when not taken
   invoiceUrl: string | null;
   pdfUrl: string | null;
   billingPeriod?: string; // e.g. "May 2026"
@@ -876,7 +899,7 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     </div>
     ${data.invoiceUrl ? `<a href="${esc(data.invoiceUrl)}" style="display: inline-block; background: #e63946; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 15px; margin-bottom: 16px;">View &amp; Pay Invoice →</a>` : ""}
     <p style="color: #64748b; font-size: 13px;">You can also view your payment history in your <a href="${dashUrl}" style="color: #e63946;">dashboard</a>.</p>
-    ${renewalTermsHtml(data.monthlyRate, dashUrl)}
+    ${renewalTermsHtml(data.monthlyRate, data.servicePlanMonthly ?? 0, dashUrl)}
   `, "#f59e0b");
 
   const rawPeriod = data.billingPeriod ?? "this month";
@@ -885,7 +908,7 @@ export async function sendMonthlyInvoiceEmail(data: MonthlyInvoiceEmailData): Pr
     from: FROM,
     subject: `Invoice for ${rawPeriod} — ${data.trailerType} rental (${data.trailerVin})`,
     html,
-    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${rawPeriod} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}${renewalTermsText(data.monthlyRate, dashUrl)}\n\nQuestions? ${COMPANY.email}\n\n${COMPANY.name}`,
+    text: `Hi ${data.renterName},\n\nYour monthly rental invoice for ${rawPeriod} is ready.\n\nAmount: ${amountStr}\nTrailer: ${data.trailerType} VIN: ${data.trailerVin}\n\n${data.invoiceUrl ? `Pay here: ${data.invoiceUrl}\n\n` : ''}${renewalTermsText(data.monthlyRate, data.servicePlanMonthly ?? 0, dashUrl)}\n\nQuestions? ${COMPANY.email}\n\n${COMPANY.name}`,
   }, { template: "monthly_invoice", entityType: data.rentalId ? "rental" : undefined, entityId: data.rentalId });
 }
 

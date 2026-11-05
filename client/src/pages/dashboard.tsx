@@ -23,6 +23,7 @@ import {
 import type { Rental, Document, Company, AdminNote } from "@shared/schema";
 import { COMPANY } from "@shared/constants";
 import { CANCELLATION_POLICY, RENEWAL_TERMS_VERSION, renewalTerms } from "@shared/renewal";
+import { SERVICE_PLAN, formatCents, servicePlanCents } from "@shared/pricing";
 import { apiRequest, serverMessage } from "@/lib/queryClient";
 
 interface ApplicationTrailer {
@@ -461,7 +462,7 @@ function MonthlyBillingSetup({ rental }: { rental: DashboardRental }) {
       {/* Terms at normal size and colour so the consent is conspicuous, not fine print */}
       <div className="border border-border rounded-lg p-3 space-y-3 text-sm text-foreground">
         <p className="leading-relaxed">
-          <span className="font-bold">Automatic monthly billing.</span> {renewalTerms(rental.monthlyRate)}
+          <span className="font-bold">Automatic monthly billing.</span> {renewalTerms(rental.monthlyRate, servicePlanCents(rental))}
         </p>
         <div className="flex items-start gap-2.5">
           <Checkbox id={checkboxId} checked={agreed} onCheckedChange={v => setAgreed(v === true)} className="mt-0.5" />
@@ -826,6 +827,7 @@ export default function Dashboard() {
                               <div className="font-semibold">Rental #{rental.id.slice(-8).toUpperCase()}</div>
                               <div className="text-sm text-muted-foreground">
                                 ${(rental.monthlyRate / 100).toLocaleString()}/month
+                                {servicePlanCents(rental) > 0 ? ` + ${formatCents(servicePlanCents(rental))} ${SERVICE_PLAN.name.toLowerCase()}` : ""}
                               </div>
                             </div>
                           </div>
@@ -855,7 +857,7 @@ export default function Dashboard() {
                               className="gap-2"
                               onClick={() => navigate(`/dashboard/engine-hours/${rental.id}`)}
                             >
-                              <Clock className="w-4 h-4" /> Submit Engine Hours
+                              <Clock className="w-4 h-4" /> Log Engine Hours
                             </Button>
                           )}
                         </div>

@@ -23,6 +23,7 @@ import { rentals, trailers } from '@shared/schema';
 import { and, eq } from 'drizzle-orm';
 import { getUncachableStripeClient } from './stripeClient';
 import { randomBytes } from 'crypto';
+import { monthlyPriceItems } from './billing';
 
 export interface FinalizeDepositOptions {
   rentalId: string;
@@ -167,6 +168,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
           trailerType: trailer?.type ?? 'Trailer',
           trailerVin: trailer?.vin ?? '',
           monthlyRate: rental.monthlyRate,
+          servicePlanMonthly: rental.servicePlanMonthly,
         });
       } catch (emailErr) {
         console.error('[deposit] Could not send no-consent admin email:', emailErr);
@@ -176,20 +178,11 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
     try {
       const stripe = await getUncachableStripeClient();
 
-      // Idempotency key ensures both webhook + client-callback paths produce the same
-      // Stripe Price so duplicate concurrent calls don't create multiple prices.
-      const price = await stripe.prices.create(
-        {
-          unit_amount: rental.monthlyRate,
-          currency: 'usd',
-          recurring: { interval: 'month' },
-          product_data: {
-            name: `Trailer Rental — monthly (rental ${rentalId.slice(-8).toUpperCase()})`,
-          },
-          metadata: { rentalId },
-        },
-        { idempotencyKey: `price_rental_${rentalId}` },
-      );
+      // Idempotency keys ensure both webhook + client-callback paths produce the
+      // same Stripe Price(s) so duplicate concurrent calls don't create extras.
+      // Rent and, when the rental carries one, the Service Plan are separate
+      // lines on the invoice.
+      const items = await monthlyPriceItems(stripe, rental, { idempotent: true });
 
       // trial_end = 30 days after activation: the deposit covers the first
       // month. Anchored on the stored start date, not the clock, so the
@@ -206,7 +199,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
       const subscription = await stripe.subscriptions.create(
         {
           customer: effectiveCustomerId,
-          items: [{ price: price.id }],
+          items,
           metadata: {
             rentalId,
             type: 'monthly_rental',
@@ -296,6 +289,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
               trailerVin: trailer.vin ?? '',
               trailerType: trailer.type,
               monthlyRate: rental.monthlyRate,
+          servicePlanMonthly: rental.servicePlanMonthly,
               paymentIntentId,
             })
           );
@@ -312,6 +306,7 @@ export async function finalizeDepositPayment(opts: FinalizeDepositOptions): Prom
               trailerVin: trailer.vin ?? '',
               trailerType: trailer.type,
               monthlyRate: rental.monthlyRate,
+          servicePlanMonthly: rental.servicePlanMonthly,
               subscriptionStarted: !!latest?.stripeSubscriptionId,
             })
           );

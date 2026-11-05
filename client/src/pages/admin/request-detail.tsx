@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { SERVICE_PLAN, formatCents } from "@shared/pricing";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -257,7 +259,7 @@ export default function AdminRequestDetail() {
   const [noteBody, setNoteBody] = useState("");
   const [editCompanyOpen, setEditCompanyOpen] = useState(false);
   const [createRentalOpen, setCreateRentalOpen] = useState(false);
-  const [rentalForm, setRentalForm] = useState({ trailerId: "", monthlyRate: "" });
+  const [rentalForm, setRentalForm] = useState({ trailerId: "", monthlyRate: "", servicePlan: false });
   const [companyForm, setCompanyForm] = useState<{
     name: string; ownerName: string; authorizedUser: string; email: string;
     phone: string; address: string; mcNumber: string; dotNumber: string; driverLicenseNumber: string;
@@ -450,12 +452,13 @@ export default function AdminRequestDetail() {
         trailerId: rentalForm.trailerId,
         companyId: app?.companyId,
         monthlyRate: rate,
+        servicePlanMonthly: rentalForm.servicePlan ? SERVICE_PLAN.monthlyCents : 0,
       });
     },
     onSuccess: () => {
       toast({ title: "Rental created", description: "You can now send the rental agreement." });
       setCreateRentalOpen(false);
-      setRentalForm({ trailerId: "", monthlyRate: "" });
+      setRentalForm({ trailerId: "", monthlyRate: "", servicePlan: false });
       refetchRentals();
     },
     onError: (err: Error) => toast({ title: "Failed to create rental", description: err.message, variant: "destructive" }),
@@ -648,6 +651,12 @@ export default function AdminRequestDetail() {
             {app.intendedUseDetails && (
               <p className="text-sm text-muted-foreground mt-2">{app.intendedUseDetails}</p>
             )}
+            <p className="text-sm mt-3 pt-3 border-t border-border">
+              <span className="text-muted-foreground">{SERVICE_PLAN.name}: </span>
+              <span className={app.servicePlan ? "font-semibold text-green-400" : "font-medium"}>
+                {app.servicePlan ? `Requested, ${formatCents(SERVICE_PLAN.monthlyCents)}/month` : "Not requested"}
+              </span>
+            </p>
           </div>
 
           {/* Renter response link (shown when needs_info and renterToken available) */}
@@ -869,7 +878,7 @@ export default function AdminRequestDetail() {
               <div className="flex items-center gap-2 mb-4">
                 <ClipboardSignature className="w-4 h-4 text-primary" />
                 <h3 className="font-bold text-sm uppercase tracking-wider">Linked Rentals</h3>
-                <Button size="sm" variant="outline" className="ml-auto gap-1.5 text-xs" onClick={() => setCreateRentalOpen(true)}>
+                <Button size="sm" variant="outline" className="ml-auto gap-1.5 text-xs" onClick={() => { setRentalForm((f) => ({ ...f, servicePlan: !!app.servicePlan })); setCreateRentalOpen(true); }}>
                   <Truck className="w-3.5 h-3.5" /> Create Rental
                 </Button>
               </div>
@@ -1189,11 +1198,22 @@ export default function AdminRequestDetail() {
                 type="number"
                 step="0.01"
                 min="0"
-                placeholder="e.g. 1500.00"
+                placeholder="e.g. 1790.00"
                 className="mt-1.5"
                 value={rentalForm.monthlyRate}
                 onChange={(e) => setRentalForm((f) => ({ ...f, monthlyRate: e.target.value }))}
               />
+            </div>
+            <div className="flex items-start gap-2.5">
+              <Checkbox
+                id="rental-service-plan"
+                checked={rentalForm.servicePlan}
+                onCheckedChange={(v) => setRentalForm((f) => ({ ...f, servicePlan: v === true }))}
+                className="mt-0.5"
+              />
+              <Label htmlFor="rental-service-plan" className="text-sm font-normal leading-snug cursor-pointer">
+                Include the {SERVICE_PLAN.name} ({formatCents(SERVICE_PLAN.monthlyCents)}/month, billed with rent; the application {app?.servicePlan ? "requested it" : "did not request it"})
+              </Label>
             </div>
           </div>
           <DialogFooter>

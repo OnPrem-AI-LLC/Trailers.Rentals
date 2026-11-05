@@ -46,6 +46,8 @@ import {
 import { lookupByDot, lookupByMc } from "./safer";
 import { logAuditEvent } from "./audit-service";
 import { COMPANY } from "@shared/constants";
+import { SERVICE_PLAN, formatCents, monthlyTotalCents, firstPaymentCents, servicePlanCents } from "@shared/pricing";
+import { monthlyPriceItems } from "./billing";
 import bcrypt from "bcrypt";
 import { randomBytes } from "crypto";
 import { z } from "zod";
@@ -639,6 +641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         mcNumber: application.mcNumber,
         intendedUse: application.intendedUse,
         intendedUseDetails: application.intendedUseDetails,
+        servicePlan: application.servicePlan,
         authorizedUser: application.authorizedUser,
         trailerVin,
         trailerType,
@@ -1294,7 +1297,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pendingApps = await storage.listRentalApplications("pending");
       const allRentals = await storage.listRentals();
       const activeRentals = allRentals.filter(r => r.status === "active" || r.status === "active_in_use");
-      const mrr = activeRentals.reduce((sum, r) => sum + r.monthlyRate, 0);
+      const mrr = activeRentals.reduce((sum, r) => sum + monthlyTotalCents(r), 0);
       const pendingPickups = activeRentals.filter(r => !r.pickupConfirmedAt).length;
       return res.json({
         totalTrailers: allTrailers.filter(t => t.status !== "inactive").length,
@@ -1800,6 +1803,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const signedAtStr = signedAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
       const monthlyRateStr = `$${(rental.monthlyRate / 100).toLocaleString()}`;
       const depositStr = `$${((rental.monthlyRate * 2) / 100).toLocaleString()}`;
+      const planCents = servicePlanCents(rental);
+      const planStr = formatCents(planCents);
+      const totalStr = formatCents(monthlyTotalCents(rental));
+      const hoursIncluded = trailer?.type === "reefer" && !trailer.engineHourRate;
 
       // HTML escape helper — prevents injection when interpolating user-controlled values into agreement document
       const he = (s: string | null | undefined) =>
@@ -1838,8 +1845,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <tr><td>VIN</td><td>${he(trailer?.vin ?? "N/A")}</td></tr>
   ${trailer?.make ? `<tr><td>Make / Model / Year</td><td>${he(trailer.make)}${trailer.model ? " " + he(trailer.model) : ""}${trailer.year ? " (" + he(trailer.year) + ")" : ""}</td></tr>` : ""}
   <tr><td>Monthly Rental Rate</td><td>${he(monthlyRateStr)}/month</td></tr>
-  <tr><td>Security Deposit</td><td>${he(depositStr)} (2 months — fully refundable)</td></tr>
+  ${planCents > 0 ? `<tr><td>${he(SERVICE_PLAN.name)} (optional, selected)</td><td>${he(planStr)}/month — ${he(SERVICE_PLAN.summary)}</td></tr>
+  <tr><td>Total Monthly</td><td>${he(totalStr)}/month</td></tr>` : ""}
+  <tr><td>Security Deposit</td><td>${he(depositStr)} (2 months — fully refundable)${planCents > 0 ? `, plus the first month of the ${he(SERVICE_PLAN.name)} (${he(planStr)}) due with it` : ""}</td></tr>
   <tr><td>Mileage</td><td>UNLIMITED — No mileage fees</td></tr>
+  ${trailer?.type === "reefer" ? `<tr><td>Reefer Engine Hours</td><td>${trailer.engineHourRate ? `$${(trailer.engineHourRate / 100).toFixed(2)} per hour, billed monthly` : "INCLUDED — no hour allowance, no hour charges"}</td></tr>` : ""}
   <tr><td>Requested Pickup Date &amp; Time</td><td>${he(new Date(pickupDate).toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</td></tr>
 </table>
 
@@ -1856,14 +1866,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
 <h2>Terms &amp; Conditions Summary</h2>
 <ol style="font-size:13px;line-height:1.7;">
-  <li><strong>Payment Terms:</strong> Monthly rental fee of ${monthlyRateStr} due on the same calendar day each month. A 2-month refundable security deposit of ${depositStr} is required before pickup.</li>
+  <li><strong>Payment Terms:</strong> Monthly rental fee of ${monthlyRateStr}${planCents > 0 ? ` plus the ${he(SERVICE_PLAN.name)} fee of ${planStr} (${totalStr} in total)` : ""} due on the same calendar day each month. A 2-month refundable security deposit of ${depositStr}${planCents > 0 ? ` and the first month of the ${he(SERVICE_PLAN.name)} (${planStr}) are` : " is"} required before pickup.</li>
   <li><strong>No Mileage Restrictions:</strong> This agreement includes unlimited mileage — no per-mile charges whatsoever.</li>
-  <li><strong>No Hidden Fees:</strong> Only the monthly rate and refundable deposit. No setup, origination, or administrative fees.</li>
+  <li><strong>No Hidden Fees:</strong> Only the monthly rate${planCents > 0 ? `, the ${he(SERVICE_PLAN.name)} fee` : ""} and the refundable deposit. No setup, origination, administrative or mileage fees${hoursIncluded ? ", and no reefer engine-hour charges" : ""}.</li>
   <li><strong>Term:</strong> Month-to-month with 30 days written notice required to terminate.</li>
   <li><strong>Condition &amp; Return:</strong> Equipment must be returned in the same condition as received, accounting for normal wear and tear.</li>
   <li><strong>Insurance:</strong> Renter must maintain commercial auto insurance (minimum $1,000,000 liability) naming Deluxe Logistics Inc. as additional insured at all times.</li>
   <li><strong>Permitted Use:</strong> Equipment may only be used for lawful commercial transportation in compliance with all applicable Federal Motor Carrier Safety Administration (FMCSA) regulations.</li>
-  <li><strong>Maintenance:</strong> Renter is responsible for routine maintenance (tires, lights, brakes). Major structural repairs will be addressed by Deluxe Logistics upon timely notice.</li>
+  ${planCents > 0
+    ? `<li><strong>Maintenance (${he(SERVICE_PLAN.name)}):</strong> For the ${he(SERVICE_PLAN.name)} fee, Deluxe Logistics provides regular maintenance for normal wear: tires, brakes and reefer engine oil changes. Renter performs daily pre-trip inspections, reports defects within 24 hours, and remains responsible for damage from accidents, road hazards or misuse. Major structural repairs will be addressed by Deluxe Logistics upon timely notice.</li>`
+    : `<li><strong>Maintenance:</strong> Renter is responsible for routine maintenance (tires, lights, brakes). Major structural repairs will be addressed by Deluxe Logistics upon timely notice.</li>`}
   <li><strong>Breach &amp; Default:</strong> Failure to make timely payment or breach of any material term gives Deluxe Logistics the right to repossess the equipment with 3 days notice.</li>
   <li><strong>Indemnification:</strong> Renter agrees to indemnify and hold harmless Deluxe Logistics Inc. from any claims, damages, or liabilities arising from renter's use of the equipment.</li>
   <li><strong>Governing Law:</strong> This agreement shall be governed by the laws of the State of West Virginia. Disputes will be resolved in Berkeley County, WV.</li>
@@ -1926,6 +1938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trailerVin: trailer?.vin ?? "N/A",
         trailerType: trailer?.type ?? "Trailer",
         monthlyRate: rental.monthlyRate,
+        servicePlanMonthly: rental.servicePlanMonthly,
         signedAt,
         signedByName,
         pickupDate: new Date(pickupDate),
@@ -1960,6 +1973,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trailerVin: trailer?.vin ?? "N/A",
         trailerType: trailer?.type ?? "Trailer",
         monthlyRate: rental.monthlyRate,
+        servicePlanMonthly: rental.servicePlanMonthly,
       });
 
       await logAuditEvent({
@@ -2031,11 +2045,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     trailerId: z.string(),
     companyId: z.string(),
     monthlyRate: z.number().positive(),
+    // Cents per month for the Service Plan. Omitted: follows the application's request.
+    servicePlanMonthly: z.number().int().min(0).max(1000000).optional(),
   });
 
   app.post("/api/admin/rentals", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { applicationId, trailerId, companyId, monthlyRate } = createRentalSchema.parse(req.body);
+      const { applicationId, trailerId, companyId, monthlyRate, servicePlanMonthly } = createRentalSchema.parse(req.body);
 
       // Validate trailer exists
       const trailer = await storage.getTrailer(trailerId);
@@ -2045,11 +2061,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const company = await storage.getCompany(companyId);
       if (!company) return res.status(404).json({ message: "Company not found" });
 
+      let planCents = servicePlanMonthly;
+      if (planCents === undefined) {
+        const application = applicationId ? await storage.getRentalApplication(applicationId) : undefined;
+        planCents = application?.servicePlan ? SERVICE_PLAN.monthlyCents : 0;
+      }
+
       const rental = await storage.createRental({
         applicationId: applicationId ?? null,
         trailerId,
         companyId,
         monthlyRate,
+        servicePlanMonthly: planCents,
         status: "pending_agreement",
         depositPaid: false,
       });
@@ -2060,7 +2083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         actionType: "create_rental",
         entityType: "rental",
         entityId: rental.id,
-        description: `Created rental for ${company.name} — trailer ${trailer.vin} (${trailer.type}) at $${(monthlyRate / 100).toFixed(2)}/mo`,
+        description: `Created rental for ${company.name} — trailer ${trailer.vin} (${trailer.type}) at $${(monthlyRate / 100).toFixed(2)}/mo${planCents > 0 ? ` plus ${SERVICE_PLAN.name} $${(planCents / 100).toFixed(2)}/mo` : ""}`,
         isAdminEntry: true,
       });
 
@@ -2084,6 +2107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endDate: z.string().nullable().optional(),
         pickupDate: z.string().nullable().optional(),
         monthlyRate: z.number().positive().optional(),
+        servicePlanMonthly: z.number().int().min(0).max(1000000).optional(),
         depositPaid: z.boolean().optional(),
         agreementSignedAt: z.string().nullable().optional(),
         stripeSubscriptionId: z.string().nullable().optional(),
@@ -2110,6 +2134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload: UpdateRental = {
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.monthlyRate !== undefined ? { monthlyRate: body.monthlyRate } : {}),
+        ...(body.servicePlanMonthly !== undefined ? { servicePlanMonthly: body.servicePlanMonthly } : {}),
         ...(body.depositPaid !== undefined ? { depositPaid: body.depositPaid } : {}),
         // A new or removed subscription id invalidates any stored cancel schedule
         ...(body.stripeSubscriptionId !== undefined
@@ -2254,19 +2279,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const stripe = await getUncachableStripeClient();
-      // Idempotency keys prevent duplicate price/subscription on concurrent admin retries
-      const price = await stripe.prices.create(
-        {
-          unit_amount: rental.monthlyRate,
-          currency: "usd",
-          recurring: { interval: "month" },
-          product_data: {
-            name: `Trailer Rental — monthly (rental ${rental.id.slice(-8).toUpperCase()})`,
-          },
-          metadata: { rentalId: rental.id },
-        },
-        { idempotencyKey: `price_rental_${rental.id}` },
-      );
+      // Idempotency keys prevent duplicate prices/subscription on concurrent admin
+      // retries; the Service Plan, when taken, is its own line.
+      const items = await monthlyPriceItems(stripe, rental, { idempotent: true });
 
       // Calculate trial_end based on rental start date: first month is already covered by deposit.
       // If rental started more than 30 days ago, begin billing immediately (no trial).
@@ -2280,7 +2295,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const subscription = await stripe.subscriptions.create(
         {
           customer: rental.stripeCustomerId,
-          items: [{ price: price.id }],
+          items,
           metadata: { rentalId: rental.id, type: "monthly_rental", renewalTermsVersion: rental.renewalTermsVersion ?? "" },
           payment_settings: {
             payment_method_types: ["card"],
@@ -2539,7 +2554,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateRental(rentalId, { stripeCustomerId: customerId });
       }
 
-      const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
+      // Two months' rent, plus the first month of the Service Plan when the rental carries one.
+      const planCents = servicePlanCents(rental);
+      const depositAmount = firstPaymentCents(rental);
       const trailer = await storage.getTrailer(rental.trailerId);
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
 
@@ -2562,7 +2579,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             amount: depositAmount,
             currency: "usd",
             customer: customerId,
-            description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
+            description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)${planCents > 0 ? ` + ${SERVICE_PLAN.name} first month ($${(planCents / 100).toFixed(2)})` : ""}`,
             metadata: { rentalId, type: "deposit", companyId: rental.companyId },
             setup_future_usage: "off_session",
             automatic_payment_methods: { enabled: true },
@@ -2574,7 +2591,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amount: depositAmount,
           currency: "usd",
           customer: customerId,
-          description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)`,
+          description: `2-month security deposit — ${trailerLabel} ($${(rental.monthlyRate / 100).toFixed(2)}/mo × 2)${planCents > 0 ? ` + ${SERVICE_PLAN.name} first month ($${(planCents / 100).toFixed(2)})` : ""}`,
           metadata: { rentalId, type: "deposit", companyId: rental.companyId },
           // Save payment method for off-session recurring billing (monthly subscription)
           setup_future_usage: "off_session",
@@ -2588,6 +2605,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: depositAmount,
         trailerLabel,
         monthlyRate: rental.monthlyRate,
+        servicePlanMonthly: planCents,
       });
     } catch (err: unknown) {
       // Surface the consent message itself so the payment page can show it
@@ -2683,6 +2701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const depositAmount = rental.monthlyRate * 2; // 2-month deposit in cents
+      const planCents = servicePlanCents(rental); // first month of the Service Plan, when taken
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
       const baseUrl = getBaseUrl(req);
 
@@ -2702,6 +2721,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
             quantity: 1,
           },
+          ...(planCents > 0
+            ? [{
+                price_data: {
+                  currency: "usd",
+                  unit_amount: planCents,
+                  product_data: { name: `${SERVICE_PLAN.name} — first month`, description: SERVICE_PLAN.summary },
+                },
+                quantity: 1,
+              }]
+            : []),
         ],
         metadata: { rentalId, type: "deposit" },
         payment_intent_data: {
@@ -2817,22 +2846,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const trailerLabel = trailer ? `${trailer.year ?? ""} ${trailer.make ?? ""} ${trailer.type}`.trim() : "Trailer";
       const baseUrl = getBaseUrl(req);
 
-      // Create a recurring price on-the-fly
-      const price = await stripe.prices.create({
-        currency: "usd",
-        unit_amount: rental.monthlyRate,
-        recurring: { interval: "month" },
-        product_data: {
-          name: `Monthly Rental — ${trailerLabel}`,
-          metadata: { rentalId },
-        },
-      });
+      // Recurring price(s) on the fly: rent, plus the Service Plan when the rental carries one
+      const lineItems = await monthlyPriceItems(stripe, rental, { idempotent: false, rentName: `Monthly Rental — ${trailerLabel}` });
 
       const session = await stripe.checkout.sessions.create({
         customer: customerId,
         payment_method_types: ["card"],
         mode: "subscription",
-        line_items: [{ price: price.id, quantity: 1 }],
+        line_items: lineItems,
         metadata: {
           rentalId,
           type: "subscription",
@@ -2851,7 +2872,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
         },
         // Repeat the renewal terms next to Stripe's own pay button
-        custom_text: { submit: { message: renewalSummary(rental.monthlyRate) } },
+        custom_text: { submit: { message: renewalSummary(rental.monthlyRate, servicePlanCents(rental)) } },
         // session_id lets the dashboard attach the subscription on return,
         // before the webhook lands, so the setup box does not reappear.
         success_url: `${baseUrl}/dashboard?subscription=success&rentalId=${rentalId}&session_id={CHECKOUT_SESSION_ID}`,

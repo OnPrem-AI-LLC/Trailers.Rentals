@@ -41,9 +41,17 @@ Public endpoints never include the full VIN or the registration document
 
 ## Pricing and inventory data
 
-Prices are per unit (`trailers.price_monthly`, in cents) and edited in the admin inventory form.
-The security deposit is two months' rent. Reefer engine hours are billed separately when a unit has
-`engine_hour_rate` set.
+Prices are per unit (`trailers.price_monthly`, in cents) and edited in the admin inventory form; the
+list price, the optional Service Plan ($250/month: tires, brakes, reefer oil changes) and the
+included-items copy live in `shared/pricing.ts`. The security deposit is two months' rent. Reefer
+engine hours are included in the monthly rate; the per-hour billing path only applies to a unit that
+has `engine_hour_rate` set, and none does.
+
+A renter picks the Service Plan on the application (`rental_applications.service_plan`); the admin's
+Create Rental dialog carries it onto the rental (`rentals.service_plan_monthly`, cents), where it
+appears on the agreement, is collected for the first month with the deposit, and bills as its own
+line on the monthly Stripe subscription. New columns ship in `server/schema-sync.ts`, which adds
+them idempotently at startup (there is no migration runner in this deploy).
 
 One-time production data fixes ship as code in `server/data-fixes.ts`. Each runs once per database
 (keyed in `site_content`) and logs the unit numbers it touched.

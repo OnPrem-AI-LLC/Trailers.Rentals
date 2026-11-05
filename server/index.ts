@@ -9,6 +9,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { seedAdminUser } from "./seed-admin";
 import { runDataFixes } from "./data-fixes";
+import { ensureSchema } from "./schema-sync";
 import { WebhookHandlers } from "./webhookHandlers";
 
 const PgSession = connectPgSimple(session);
@@ -229,6 +230,7 @@ async function runReturnReminders() {
 }
 
 (async () => {
+  await ensureSchema();
   await seedAdminUser();
   await runDataFixes();
   await initStripe();

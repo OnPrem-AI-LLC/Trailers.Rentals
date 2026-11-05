@@ -48,7 +48,7 @@ export const trailers = pgTable("trailers", {
   model: text("model"),
   year: text("year"),
   priceMonthly: integer("price_monthly").notNull().default(150000), // in cents ($1,500)
-  engineHourRate: integer("engine_hour_rate"), // cents per hour, reefers only
+  engineHourRate: integer("engine_hour_rate"), // cents per hour, reefers only; null = hours included in the monthly rate (the policy since Nov 2026)
   status: text("status").notNull().default("available"), // "available" | "rented" | "maintenance" | "inactive"
   description: text("description"),
   features: text("features"), // JSON array of feature strings
@@ -83,6 +83,7 @@ export const rentalApplications = pgTable("rental_applications", {
   phone: text("phone").notNull(),
   intendedUse: text("intended_use").notNull(),
   intendedUseDetails: text("intended_use_details"),
+  servicePlan: boolean("service_plan").notNull().default(false), // asked for the optional Service Plan (shared/pricing.ts)
   status: text("status").notNull().default("pending"), // "pending" | "approved" | "rejected" | "needs_info"
   adminNotes: text("admin_notes"),
   saferData: text("safer_data"), // JSON string from FMCSA
@@ -114,7 +115,8 @@ export const rentals = pgTable("rentals", {
   pickupConfirmedAt: timestamp("pickup_confirmed_at"),
   returnToken: varchar("return_token").unique(),
   returnConfirmedAt: timestamp("return_confirmed_at"),
-  monthlyRate: integer("monthly_rate").notNull(), // in cents
+  monthlyRate: integer("monthly_rate").notNull(), // in cents, the trailer rent alone
+  servicePlanMonthly: integer("service_plan_monthly").notNull().default(0), // cents per month for the optional Service Plan; 0 when not taken
   depositPaid: boolean("deposit_paid").notNull().default(false),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
@@ -296,6 +298,7 @@ export const insertRentalApplicationSchema = createInsertSchema(rentalApplicatio
   ageConfirmedAt: true,
 }).extend({
   ageConfirmed: ageConfirmedSchema,
+  servicePlan: z.boolean().optional().default(false),
   companyName: z.string().min(1, "Company name is required"),
   ownerName: z.string().min(1, "Owner name is required"),
   email: z.string().email("Valid email required"),

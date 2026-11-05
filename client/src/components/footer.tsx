@@ -19,7 +19,7 @@ export default function Footer() {
               </div>
             </Link>
             <p className="text-xs text-muted-foreground max-w-xs">
-              Simple, transparent trailer rentals. No mileage fees. No BS.
+              One flat rate. Reefer hours included. No mileage fees. No BS.
             </p>
           </div>
 

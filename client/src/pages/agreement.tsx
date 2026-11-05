@@ -12,10 +12,11 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   CheckCircle, FileText, Loader2, Truck, DollarSign, CalendarDays,
   AlertTriangle, Shield, Hash, Building2, PenLine, Type, Trash2,
-  AlertCircle, Calendar
+  AlertCircle, Calendar, Wrench
 } from "lucide-react";
 import type { Rental, Company } from "@shared/schema";
 import { COMPANY, YARD } from "@shared/constants";
+import { SERVICE_PLAN, formatCents, monthlyTotalCents, servicePlanCents } from "@shared/pricing";
 
 interface TrailerInfo {
   id: string;
@@ -25,6 +26,7 @@ interface TrailerInfo {
   model: string | null;
   year: string | null;
   priceMonthly: number;
+  engineHourRate?: number | null;
   description: string | null;
 }
 
@@ -269,6 +271,9 @@ export default function AgreementPage() {
   const { rental, trailer, company } = data;
   const isAlreadySigned = rental.status !== "pending_agreement";
   const depositAmount = rental.monthlyRate * 2;
+  const planCents = servicePlanCents(rental);
+  const totalMonthly = monthlyTotalCents(rental);
+  const hoursIncluded = trailer?.type === "reefer" && !trailer.engineHourRate;
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   // Success / already signed state
@@ -340,7 +345,9 @@ export default function AgreementPage() {
             </div>
             <div>
               <p className="text-[11px] text-muted-foreground uppercase tracking-wider">Monthly Rate</p>
-              <p className="font-semibold text-sm">${(rental.monthlyRate / 100).toLocaleString()}/mo</p>
+              <p className="font-semibold text-sm">
+                ${(rental.monthlyRate / 100).toLocaleString()}/mo{planCents > 0 ? ` + ${formatCents(planCents)} ${SERVICE_PLAN.name.toLowerCase()}` : ""}
+              </p>
             </div>
           </div>
         </div>
@@ -417,6 +424,12 @@ export default function AgreementPage() {
                 <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Shield className="w-3 h-3" />Security Deposit</p>
                 <p className="font-semibold">${(depositAmount / 100).toLocaleString()} (2 months)</p>
               </div>
+              {planCents > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Wrench className="w-3 h-3" />{SERVICE_PLAN.name}</p>
+                  <p className="font-semibold">{formatCents(planCents)}/month · {formatCents(totalMonthly)} total</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -429,11 +442,25 @@ export default function AgreementPage() {
             </div>
             <div>
               <p className="font-semibold mb-1">2. RENTAL RATE &amp; PAYMENT</p>
-              <p>Lessee agrees to pay <strong>${(rental.monthlyRate / 100).toLocaleString()}/month</strong>. A <strong>two-month security deposit of ${(depositAmount / 100).toLocaleString()}</strong> is required prior to pickup, fully refundable upon return in satisfactory condition. Payments 10+ days late are subject to a 5% late fee.</p>
+              <p>
+                Lessee agrees to pay <strong>${(rental.monthlyRate / 100).toLocaleString()}/month</strong>
+                {planCents > 0 && <> plus <strong>{formatCents(planCents)}/month</strong> for the optional {SERVICE_PLAN.name} (<strong>{formatCents(totalMonthly)}/month</strong> in total), billed together</>}.
+                A <strong>two-month security deposit of ${(depositAmount / 100).toLocaleString()}</strong>
+                {planCents > 0 && <> and the first month of the {SERVICE_PLAN.name} ({formatCents(planCents)})</>}
+                {planCents > 0 ? " are" : " is"} required prior to pickup; the deposit is fully refundable upon return in satisfactory condition. Payments 10+ days late are subject to a 5% late fee.
+              </p>
             </div>
             <div>
-              <p className="font-semibold mb-1">3. NO MILEAGE FEES</p>
-              <p>There are <strong>NO mileage fees</strong>, NO per-mile charges, and NO hidden fees. The monthly rate stated above is the complete total rental charge, subject only to engine hour charges if applicable (reefer units only).</p>
+              <p className="font-semibold mb-1">3. NO MILEAGE FEES, NO HIDDEN FEES</p>
+              <p>
+                There are <strong>NO mileage fees</strong>, NO per-mile charges, and NO hidden fees.{" "}
+                {hoursIncluded
+                  ? <>Reefer engine hours are <strong>included</strong>: no hour allowance and no hour charges.{" "}</>
+                  : trailer?.engineHourRate
+                    ? <>Reefer engine hours are billed at ${(trailer.engineHourRate / 100).toFixed(2)} per hour, as listed on the unit.{" "}</>
+                    : null}
+                The monthly rate stated above{planCents > 0 ? ` together with the ${SERVICE_PLAN.name} fee` : ""} is the complete recurring charge.
+              </p>
             </div>
             <div>
               <p className="font-semibold mb-1">4. INSURANCE</p>
@@ -441,7 +468,11 @@ export default function AgreementPage() {
             </div>
             <div>
               <p className="font-semibold mb-1">5. CARE &amp; MAINTENANCE</p>
-              <p>Lessee shall maintain the equipment in good working order and shall not make alterations without written consent. Lessee is responsible for routine maintenance and shall promptly notify Lessor of any damage or mechanical issues within 24 hours.</p>
+              {planCents > 0 ? (
+                <p>Under the {SERVICE_PLAN.name}, for the monthly fee stated above, Lessor provides regular maintenance for normal wear: tires, brakes and reefer engine oil changes. Lessee shall keep the equipment in good working order, perform daily pre-trip inspections, make no alterations without written consent, and notify Lessor of any damage or mechanical issue within 24 hours. Damage from accidents, road hazards or misuse is repaired at Lessee's cost.</p>
+              ) : (
+                <p>Lessee shall maintain the equipment in good working order and shall not make alterations without written consent. Lessee is responsible for routine maintenance and shall promptly notify Lessor of any damage or mechanical issues within 24 hours.</p>
+              )}
             </div>
             <div>
               <p className="font-semibold mb-1">6. AUTHORIZED USE</p>

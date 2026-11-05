@@ -10,6 +10,7 @@ import { trailers, trailerPhotos } from "@shared/schema";
 import { storage } from "./storage";
 import { REPRESENTATIVE_PHOTO_PATH } from "@shared/trailer-format";
 import { YARD } from "@shared/constants";
+import { LIST_PRICE_CENTS, REEFER_UNIT } from "@shared/pricing";
 
 interface DataFix {
   key: string;
@@ -155,11 +156,55 @@ async function yardInwood() {
   return { location: YARD.listingLocation, moved: moved.map((r) => r.unitNumber) };
 }
 
+// ── 2026-11-05: $1,790 with reefer hours included; Thermo King Precedent ──
+//
+// Sam's pricing from 2026-11-05: every rentable trailer lists at $1,790/month
+// with reefer engine hours included (no rate is set on any unit, so nothing
+// bills hours). Every reefer in the fleet runs a Thermo King Precedent unit;
+// two listings had the unit filed as "Carrier Precedent" (Precedent is a
+// Thermo King line) and several did not name it at all.
+
+const PREVIOUS_PRICE_CENTS = 169900;
+const PRECEDENT = `${REEFER_UNIT} reefer unit`;
+
+const REEFER_COPY: Record<string, { description: string; features: string[] }> = {
+  "5216": { description: `Refrigerated trailer with a ${PRECEDENT}. Built 06/2019.`, features: [PRECEDENT] },
+  "5213": { description: `53-foot refrigerated trailer with a ${PRECEDENT}. Built 06/2017.`, features: ["53 ft", PRECEDENT] },
+  "5121": { description: `Refrigerated trailer with a ${PRECEDENT}.`, features: [PRECEDENT] },
+  "11": { description: `Refrigerated trailer with a ${PRECEDENT} and a roll-up rear door.`, features: [PRECEDENT, "Roll-up rear door"] },
+  "5225": { description: `Refrigerated trailer with a ${PRECEDENT}.`, features: [PRECEDENT] },
+  "5061": { description: `Refrigerated trailer with a ${PRECEDENT}.`, features: [PRECEDENT] },
+  "5221": { description: `Refrigerated trailer with a ${PRECEDENT}.`, features: [PRECEDENT] },
+  "5202": { description: `Refrigerated trailer with a ${PRECEDENT} and aluminum T-floor.`, features: [PRECEDENT, "Aluminum T-floor"] },
+  "5062": { description: `Refrigerated trailer with a ${REEFER_UNIT} S-700 reefer unit. CARB 2026 compliant. Built 08/2006.`, features: [`${REEFER_UNIT} S-700 reefer unit`, "CARB 2026 compliant"] },
+};
+
+async function repriceAndPrecedent() {
+  const repriced = await db
+    .update(trailers)
+    .set({ priceMonthly: LIST_PRICE_CENTS })
+    .where(and(inArray(trailers.type, RENTABLE_TYPES), eq(trailers.priceMonthly, PREVIOUS_PRICE_CENTS)))
+    .returning({ unitNumber: trailers.unitNumber });
+
+  const relabeled: string[] = [];
+  for (const [unitNumber, copy] of Object.entries(REEFER_COPY)) {
+    const rows = await db
+      .update(trailers)
+      .set({ description: copy.description, features: JSON.stringify(copy.features) })
+      .where(and(eq(trailers.unitNumber, unitNumber), eq(trailers.type, "reefer")))
+      .returning({ unitNumber: trailers.unitNumber });
+    if (rows.length) relabeled.push(unitNumber);
+  }
+
+  return { repricedTo: LIST_PRICE_CENTS, repriced: repriced.map((r) => r.unitNumber), relabeled };
+}
+
 const FIXES: DataFix[] = [
   { key: "datafix:2026-11-04-reprice-and-unlist", run: repriceAndUnlist },
   { key: "datafix:2026-11-04-listing-copy", run: listingCopy },
   { key: "datafix:2026-11-04-representative-photos", run: representativePhotos },
   { key: "datafix:2026-11-04-yard-inwood", run: yardInwood },
+  { key: "datafix:2026-11-05-reprice-1790-precedent", run: repriceAndPrecedent },
 ];
 
 export async function runDataFixes(): Promise<void> {

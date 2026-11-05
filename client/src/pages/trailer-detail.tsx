@@ -9,6 +9,7 @@ import { ArrowLeft, Clock, CheckCircle, AlertCircle } from "lucide-react";
 import TrailerGallery from "@/components/trailer-gallery";
 import type { PublicTrailer } from "@shared/schema";
 import { formatTypeLabel, formatTrailerName, formatPrice } from "@/lib/trailer-utils";
+import { SERVICE_PLAN, formatCents } from "@shared/pricing";
 
 export default function TrailerDetail() {
   const { id } = useParams();
@@ -122,11 +123,11 @@ export default function TrailerDetail() {
                   <Clock className="w-4 h-4" />
                   {trailer.engineHourRate
                     ? `+ ${formatPrice(trailer.engineHourRate)} per reefer engine hour (billed separately)`
-                    : "Reefer engine hours billed separately"}
+                    : "Reefer engine hours included"}
                 </div>
               )}
               <p className="text-xs text-muted-foreground border-t border-border pt-2 mt-2">
-                No mileage fees · {trailer.type === "reefer" ? "Engine hours billed separately" : "No hidden costs"} · Security deposit = 2 months rent
+                No mileage fees · {trailer.type === "reefer" ? "Engine hours included" : "No hidden fees"} · Optional {formatCents(SERVICE_PLAN.monthlyCents)}/mo {SERVICE_PLAN.name.toLowerCase()} · Deposit = 2 months rent
               </p>
             </div>
 
