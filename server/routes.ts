@@ -2471,6 +2471,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           trailerType: trailer?.type ?? "Trailer",
           trailerVin: trailer?.vin ?? "",
           monthlyRate: rental.monthlyRate,
+          servicePlanMonthly: rental.servicePlanMonthly,
           endsAt,
         });
       } catch (emailErr) {
@@ -2981,6 +2982,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stripeCustomerId: rental.stripeCustomerId,
         stripeSubscriptionId: rental.stripeSubscriptionId,
         monthlyRate: rental.monthlyRate,
+        servicePlanMonthly: rental.servicePlanMonthly,
       });
     } catch (err: unknown) {
       console.error(err);

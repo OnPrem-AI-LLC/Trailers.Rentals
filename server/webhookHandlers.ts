@@ -171,6 +171,7 @@ export class WebhookHandlers {
                   trailerVin: trailer.vin ?? '',
                   amount: inv.amount_due,
                   monthlyRate: rental.monthlyRate,
+                  servicePlanMonthly: rental.servicePlanMonthly,
                   invoiceUrl: inv.hosted_invoice_url ?? null,
                   pdfUrl: inv.invoice_pdf ?? null,
                   billingPeriod,

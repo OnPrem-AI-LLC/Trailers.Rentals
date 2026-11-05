@@ -256,6 +256,7 @@ export async function attachSubscriptionToRental(input: AttachInput): Promise<At
         trailerType: trailer?.type ?? 'Trailer',
         trailerVin: trailer?.vin ?? '',
         monthlyRate: rental.monthlyRate,
+        servicePlanMonthly: rental.servicePlanMonthly,
         renewalTermsVersion: termsVersion,
       });
     } else {
